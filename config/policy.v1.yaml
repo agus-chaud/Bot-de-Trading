@@ -1,0 +1,81 @@
+# Contrato de configuración — schema_version 1 (paper-first, perfil moderado)
+# Comentarios en español; valores numéricos en fracción decimal salvo que se indique.
+
+schema_version: 1
+profile: moderate
+
+# Reparto objetivo corto/largo (debe sumar 1.0)
+weights:
+  short: 0.30
+  long: 0.70
+
+# Reparto geográfico AR/US sobre el total (debe sumar 1.0)
+geo:
+  AR: 0.20
+  US: 0.80
+
+# Drawdown mensual del bucket corto que dispara kill switch (valor negativo, p.ej. -8%)
+short_kill_switch_monthly_dd: -0.08
+
+# Cadencia de decisión por motor
+cadence:
+  short: daily
+  long: monthly
+
+# semi_auto: órdenes pasan a cola pending hasta confirmación; auto: pipeline sin gate humano
+execution_mode: semi_auto
+
+# Símbolos permitidos: rutas a listas separadas (ver config/symbols/) o vacío + inline en pruebas
+symbols:
+  whitelist_us_file: config/symbols/whitelist_us.yaml
+  whitelist_ar_file: config/symbols/whitelist_ar.yaml
+  inline_us: []
+  inline_ar: []
+
+# Espejo operativo de POLICY.md (umbrales; el documento humano manda en ambigüedad)
+risk:
+  max_notional_per_ticker_pct: 0.08
+  max_sector_pct: 0.25
+  max_daily_loss_short_pct: -0.02
+  max_daily_loss_long_pct: -0.015
+  max_daily_loss_total_pct: -0.03
+  max_monthly_loss_short_pct: -0.08
+  max_monthly_loss_long_pct: -0.06
+  max_monthly_loss_total_pct: -0.10
+  no_trade_first_minutes: 15
+  no_trade_last_minutes: 15
+  news_window_enabled: false
+  halt_on_data_quality: true
+  adv_min_shares_day: 500000
+  short_kill_switch_until: manual_reset  # alternativa documentada: month_end
+
+# Costos simulados por mercado (Fase 2 aplicará en broker paper)
+markets:
+  US:
+    commission_bps_per_side: 1.0
+    slippage_bps: 2.0
+  AR:
+    commission_bps_per_side: 15.0
+    slippage_bps: 5.0
+
+logging:
+  level: INFO
+  structured: true
+
+# Placeholders sin secretos; credenciales fuera del repo (.env)
+data_providers:
+  us_ohlcv: placeholder_provider_us
+  ar_ohlcv: placeholder_provider_ar
+
+# Fuente única de verdad para sesiones y días hábiles por mercado.
+calendar:
+  source_of_truth: config/calendars/trading_days.v1.yaml
+  us_market_code: XNYS
+  ar_market_code: BYMA
+
+# Corporate actions mínimas en v1 (US): splits y dividendos.
+corporate_actions:
+  us_file: config/corporate_actions/us_actions.v1.yaml
+  supported_types:
+    - split
+    - dividend

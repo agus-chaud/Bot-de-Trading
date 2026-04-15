@@ -1,0 +1,14 @@
+schema_version: 1
+market: US
+supported_types:
+  - split
+  - dividend
+actions:
+  - date: 2026-04-15
+    symbol: SPY
+    action_type: dividend
+    cash_amount: 1.75
+  - date: 2026-04-16
+    symbol: IWM
+    action_type: split
+    split_ratio: 2.0

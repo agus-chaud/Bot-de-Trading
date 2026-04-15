@@ -1,0 +1,18 @@
+schema_version: 1
+description: Fuente unica de verdad para sesiones US y dias habiles AR.
+
+us:
+  market_code: XNYS
+  sessions:
+    - 2026-04-14
+    - 2026-04-15
+    - 2026-04-16
+    - 2026-04-17
+
+ar:
+  market_code: BYMA
+  business_days:
+    - 2026-04-14
+    - 2026-04-15
+    - 2026-04-16
+    - 2026-04-17

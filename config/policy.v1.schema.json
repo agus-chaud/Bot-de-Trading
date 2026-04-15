@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/bot-trading/config/policy.v1.schema.json",
+  "title": "Bot de Trading policy config v1",
+  "description": "Esquema para config/policy.v1.yaml (paper-first, perfil moderado).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "weights",
+    "geo",
+    "short_kill_switch_monthly_dd",
+    "cadence",
+    "execution_mode",
+    "symbols",
+    "risk",
+    "markets",
+    "logging",
+    "data_providers",
+    "calendar",
+    "corporate_actions"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "profile": {
+      "type": "string",
+      "enum": ["moderate"]
+    },
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["short", "long"],
+      "properties": {
+        "short": { "type": "number", "minimum": 0, "maximum": 1 },
+        "long": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "geo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["AR", "US"],
+      "properties": {
+        "AR": { "type": "number", "minimum": 0, "maximum": 1 },
+        "US": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "short_kill_switch_monthly_dd": {
+      "type": "number",
+      "maximum": 0,
+      "description": "Drawdown mensual del bucket corto que dispara kill switch (típicamente negativo, ej. -0.08)."
+    },
+    "cadence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["short", "long"],
+      "properties": {
+        "short": { "type": "string", "enum": ["daily"] },
+        "long": { "type": "string", "enum": ["monthly"] }
+      }
+    },
+    "execution_mode": {
+      "type": "string",
+      "enum": ["semi_auto", "auto"]
+    },
+    "symbols": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "whitelist_us_file",
+        "whitelist_ar_file",
+        "inline_us",
+        "inline_ar"
+      ],
+      "properties": {
+        "whitelist_us_file": { "type": "string", "minLength": 1 },
+        "whitelist_ar_file": { "type": "string", "minLength": 1 },
+        "inline_us": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "inline_ar": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_notional_per_ticker_pct",
+        "max_sector_pct",
+        "max_daily_loss_short_pct",
+        "max_daily_loss_long_pct",
+        "max_daily_loss_total_pct",
+        "max_monthly_loss_short_pct",
+        "max_monthly_loss_long_pct",
+        "max_monthly_loss_total_pct",
+        "no_trade_first_minutes",
+        "no_trade_last_minutes",
+        "news_window_enabled",
+        "halt_on_data_quality",
+        "adv_min_shares_day",
+        "short_kill_switch_until"
+      ],
+      "properties": {
+        "max_notional_per_ticker_pct": { "type": "number", "minimum": 0, "maximum": 1 },
+        "max_sector_pct": { "type": "number", "minimum": 0, "maximum": 1 },
+        "max_daily_loss_short_pct": { "type": "number", "maximum": 0 },
+        "max_daily_loss_long_pct": { "type": "number", "maximum": 0 },
+        "max_daily_loss_total_pct": { "type": "number", "maximum": 0 },
+        "max_monthly_loss_short_pct": { "type": "number", "maximum": 0 },
+        "max_monthly_loss_long_pct": { "type": "number", "maximum": 0 },
+        "max_monthly_loss_total_pct": { "type": "number", "maximum": 0 },
+        "no_trade_first_minutes": { "type": "integer", "minimum": 0 },
+        "no_trade_last_minutes": { "type": "integer", "minimum": 0 },
+        "news_window_enabled": { "type": "boolean" },
+        "halt_on_data_quality": { "type": "boolean" },
+        "adv_min_shares_day": { "type": "number", "minimum": 0 },
+        "short_kill_switch_until": {
+          "type": "string",
+          "enum": ["manual_reset", "month_end"]
+        }
+      }
+    },
+    "markets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["US", "AR"],
+      "properties": {
+        "US": { "$ref": "#/$defs/marketCosts" },
+        "AR": { "$ref": "#/$defs/marketCosts" }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "structured"],
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        },
+        "structured": { "type": "boolean" }
+      }
+    },
+    "data_providers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["us_ohlcv", "ar_ohlcv"],
+      "properties": {
+        "us_ohlcv": { "type": "string", "minLength": 1 },
+        "ar_ohlcv": { "type": "string", "minLength": 1 }
+      }
+    },
+    "calendar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_of_truth", "us_market_code", "ar_market_code"],
+      "properties": {
+        "source_of_truth": { "type": "string", "minLength": 1 },
+        "us_market_code": { "type": "string", "minLength": 1 },
+        "ar_market_code": { "type": "string", "minLength": 1 }
+      }
+    },
+    "corporate_actions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["us_file", "supported_types"],
+      "properties": {
+        "us_file": { "type": "string", "minLength": 1 },
+        "supported_types": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["split", "dividend"]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "marketCosts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commission_bps_per_side", "slippage_bps"],
+      "properties": {
+        "commission_bps_per_side": { "type": "number", "minimum": 0 },
+        "slippage_bps": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

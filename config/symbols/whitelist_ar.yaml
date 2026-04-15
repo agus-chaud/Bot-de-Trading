@@ -1,0 +1,12 @@
+# Ejemplos BYMA-style — configurable; verificar contra proveedor de datos
+stocks:
+  - GGAL
+  - YPF
+  - PAMP
+  - BMA
+  - CEPU
+  - TGS
+  - TXAR
+  - ALUA
+  - SUPV
+  - MELI

@@ -1,0 +1,14 @@
+# ETFs obligatorios del plan + ejemplos de acciones US (sustituir por lista definitiva)
+etfs:
+  - SPY
+  - QQQ
+  - IWM
+stocks:
+  - AAPL
+  - MSFT
+  - JPM
+  - XOM
+  - KO
+  - WMT
+  - JNJ
+  - PG
