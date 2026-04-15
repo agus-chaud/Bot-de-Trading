@@ -90,8 +90,20 @@ flowchart LR
 ## Fase 3 — Estrategias por bloque
 
 1. **`short_term_engine` (30% del capital objetivo)**  
-   - Señal diaria simple y auditable en v1: por ejemplo momentum de N días + filtro de volatilidad/liquidez (percentil de volumen), con **tamaño** derivado del riesgo por trade (ej. fracción de vol objetivo).  
-   - Universo: acciones AR/US permitidas + ETFs de índice US; **sin apalancamiento** en v1 salvo que lo documentes aparte.
+   - **Propuesta v1 (auditable y determinística):** score por activo = momentum `N` días (retorno acumulado) filtrado por liquidez (percentil de volumen `>= p_min`) y volatilidad (`vol_20d <= vol_max`). Solo entra al ranking lo que pasa filtros.  
+   - **Regla de selección:** tomar top `K` del ranking por mercado respetando whitelist y límites de concentración; sin señal discrecional ni prompts.  
+   - **Sizing por riesgo:** notional por trade = `risk_budget_trade / vol_20d`, capado por `max_position_pct`, `max_sector_pct` y cash disponible del bucket corto; redondeo a lotes mínimos por mercado.  
+   - **Universo v1:** acciones AR/US permitidas + ETFs índice US; **sin apalancamiento** ni derivados en v1 salvo documento explícito de excepción.
+   - **Contrato I/O:** entrada = snapshot diario normalizado (`symbol`, `close`, `volume`, `currency`, calendario válido) + estado de portfolio; salida = `orders_intent[]` con `symbol`, `side`, `qty`, `reason_code`, `signal_score`, `risk_snapshot`.
+   - **Fallbacks obligatorios:** si falta dato crítico (precio/volumen/calendario) o no pasa liquidez, no se opera ese símbolo y se registra `skip_reason` en log estructurado.
+   - **Validación mínima pre-gate:** backtest walk-forward del bloque corto con costos, turnover y DD mensual; rechazo automático si no cumple umbrales definidos en política.
+   - **Agent-teams-lite + SDD flow (este bloque):**
+     - `Spec/policy`: definir parámetros (`N`, `p_min`, `vol_max`, `K`, límites por ticker/sector) en `POLICY.md` + `config/policy.v1.yaml`.
+     - `Data`: garantizar columnas requeridas, manejo de faltantes y calendario AR/US consistente.
+     - `Engines`: implementar cálculo de score, ranking y generación de `orders_intent`.
+     - `Risk`: integrar caps de sizing, kill switch del bucket corto y matriz de violaciones.
+     - `Core sim`: validar que `orders_intent` sean consumibles por `paper_broker_sim` sin lógica duplicada.
+     - `QA/CI`: tests unitarios (score/sizing/filtros) + integración (evento diario completo) + test de no-operación ante datos incompletos.
 
 2. **`long_term_engine` (70%)**  
    - **Core pasivo**: pesos objetivo en 2–3 ETFs US (broad market).  
@@ -135,3 +147,64 @@ flowchart LR
 ## Nota legal/operativa
 
 Este plan es **educativo y de ingeniería**; cumplimiento fiscal, regulación local y términos de cada broker/API quedan fuera del código y deben revisarse con asesor calificado antes de operar en vivo.
+
+## SDD — change `engine-short-v1`
+
+### Proposal (Checkpoint #1 aprobado)
+
+- **Problema**: el bloque de `short_term_engine` estaba definido a alto nivel y dejaba ambigüedad de implementación (señal, sizing, fallbacks, criterios de aceptación).
+- **Enfoque**: fijar una versión v1 mínima, totalmente auditable y determinística, que produzca `orders_intent` desacopladas de ejecución y compatible con `risk_guardrails` + `paper_broker_sim`.
+- **Módulos impactados**: `POLICY.md`, `config/policy.v1.yaml`, `core_sim/paper_broker_sim.py`, nuevo módulo de engine corto, tests de engine/riesgo/eventos.
+- **Riesgos**: sobreajuste por tuning de parámetros, falsos positivos por datos incompletos, drift de buckets si falta liquidez.
+
+### Spec (requisitos ejecutables)
+
+1. El engine debe operar solo con símbolos de whitelist AR/US y ETFs US permitidos.
+2. Debe calcular `signal_score` diario por símbolo usando momentum `N` y filtros de liquidez/volatilidad.
+3. Debe excluir símbolos con datos faltantes o calendario inválido y registrar `skip_reason`.
+4. Debe seleccionar máximo `K` símbolos por corrida diaria siguiendo ranking descendente de score.
+5. Debe generar solo `orders_intent` (sin ejecución directa), con trazabilidad de señal y snapshot de riesgo.
+6. Debe aplicar sizing por riesgo con caps por ticker/sector y efectivo disponible del bucket corto.
+7. Debe respetar kill switch del bucket corto antes de emitir nuevas órdenes.
+8. Debe exponer métricas mínimas del ciclo: símbolos evaluados, filtrados, ordenados y motivo de descarte.
+
+### Design (contrato y decisiones técnicas)
+
+- **Input data contract**: `symbol`, `ts`, `close`, `volume`, `currency`, `venue`, bandera de sesión válida.
+- **Output contract** (`orders_intent[]`):
+  - `symbol`, `side`, `qty`, `intent_notional`
+  - `reason_code` (`signal_entry`, `rebalance_reduce`, `risk_trim`)
+  - `signal_score`, `risk_snapshot`, `created_at`
+- **Pipeline diaria**:
+  1. Validar universo + calendario.
+  2. Calcular features (`ret_N`, `vol_20d`, percentil de volumen).
+  3. Filtrar por umbrales (`p_min`, `vol_max`).
+  4. Rankear y seleccionar top `K`.
+  5. Dimensionar posición por riesgo.
+  6. Pasar por guardrails/kill switch.
+  7. Emitir `orders_intent` + logs estructurados.
+- **Principio de seguridad**: ante duda de datos o conflicto de límites, el engine no opera.
+
+### Tasks (Checkpoint #2)
+
+#### Fase A — Spec/Policy (complejidad: baja-media)
+
+- [ ] Parametrizar `N`, `p_min`, `vol_max`, `K`, `risk_budget_trade` y caps en `config/policy.v1.yaml`.
+- [ ] Sincronizar `POLICY.md` con el YAML (mismos umbrales y matriz de violaciones).
+
+#### Fase B — Engine/Data (complejidad: media)
+
+- [ ] Implementar funciones puras de cálculo de score y filtros (sin side effects).
+- [ ] Implementar generador de `orders_intent` con contrato estable.
+- [ ] Añadir manejo explícito de datos faltantes y `skip_reason`.
+
+#### Fase C — Riesgo/Core sim (complejidad: media)
+
+- [ ] Integrar caps de sizing y validación de kill switch previo a órdenes.
+- [ ] Verificar compatibilidad `orders_intent` -> `paper_broker_sim` sin lógica duplicada.
+
+#### Fase D — QA/CI (complejidad: media)
+
+- [ ] Tests unitarios de score, ranking, filtros, sizing y redondeo por lotes.
+- [ ] Test de integración del evento diario completo (`SignalGenerated` -> `OrdersProposed` -> `RiskChecked`).
+- [ ] Test negativo: no generar órdenes con datos críticos faltantes.

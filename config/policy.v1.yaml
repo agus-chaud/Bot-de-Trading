@@ -49,6 +49,15 @@ risk:
   adv_min_shares_day: 500000
   short_kill_switch_until: manual_reset  # alternativa documentada: month_end
 
+# Parámetros explícitos del short_term_engine v1 (Fase 3, señal diaria auditable)
+short_term_engine:
+  momentum_lookback_days: 20         # N días para retorno acumulado
+  liquidity_percentile_min: 0.60     # p_min: percentil mínimo de volumen
+  volatility_20d_max: 0.04           # vol_20d máxima (desvío estándar diario)
+  top_k_per_market: 5                # K máximo por mercado en ranking diario
+  risk_budget_trade_pct: 0.005       # presupuesto de riesgo por trade (0.5% del bucket corto)
+  allow_leverage: false              # v1: sin apalancamiento
+
 # Costos simulados por mercado (Fase 2 aplicará en broker paper)
 markets:
   US:

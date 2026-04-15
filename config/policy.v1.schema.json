@@ -15,6 +15,7 @@
     "execution_mode",
     "symbols",
     "risk",
+    "short_term_engine",
     "markets",
     "logging",
     "data_providers",
@@ -125,6 +126,26 @@
           "type": "string",
           "enum": ["manual_reset", "month_end"]
         }
+      }
+    },
+    "short_term_engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "momentum_lookback_days",
+        "liquidity_percentile_min",
+        "volatility_20d_max",
+        "top_k_per_market",
+        "risk_budget_trade_pct",
+        "allow_leverage"
+      ],
+      "properties": {
+        "momentum_lookback_days": { "type": "integer", "minimum": 1 },
+        "liquidity_percentile_min": { "type": "number", "minimum": 0, "maximum": 1 },
+        "volatility_20d_max": { "type": "number", "minimum": 0 },
+        "top_k_per_market": { "type": "integer", "minimum": 1 },
+        "risk_budget_trade_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "allow_leverage": { "type": "boolean" }
       }
     },
     "markets": {

@@ -165,4 +165,21 @@ En ambos modos, el **largo plazo** y el **allocator** no deben **incrementar** i
 
 ---
 
+## 9. Parámetros de referencia `short_term_engine` v1 (obligatorio sincronizar con YAML)
+
+Estos parámetros definen el comportamiento mínimo del motor corto en Fase 3 y deben mantenerse idénticos en `config/policy.v1.yaml`.
+
+| Parámetro | Valor por defecto | Uso |
+|-----------|-------------------|-----|
+| `momentum_lookback_days` | **20** | Ventana `N` para retorno acumulado del score de momentum. |
+| `liquidity_percentile_min` | **0,60** | Umbral `p_min` del percentil de volumen; por debajo, no entra al ranking. |
+| `volatility_20d_max` | **0,04** | Techo de volatilidad diaria de 20 ruedas para filtrar activos inestables en v1. |
+| `top_k_per_market` | **5** | Cantidad máxima de símbolos seleccionados por mercado en cada corrida diaria. |
+| `risk_budget_trade_pct` | **0,005** | Presupuesto de riesgo por trade (0,5 % del bucket corto) usado por sizing. |
+| `allow_leverage` | **false** | En v1 no se permite apalancamiento ni bypass de este flag. |
+
+**Regla de gobernanza:** si cambia cualquier valor de esta tabla, el mismo cambio debe actualizar **en el mismo commit** `POLICY.md` y `config/policy.v1.yaml`.
+
+---
+
 *Fin del documento — Fase 1 (especificación paper).*

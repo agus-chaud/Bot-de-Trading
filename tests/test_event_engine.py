@@ -5,7 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from core_sim import CorporateActionsStore, DailyEventBacktester, PortfolioLedger, TradingCalendarStore
+from core_sim import (
+    CorporateActionsStore,
+    CostModel,
+    DailyEventBacktester,
+    MarketCostConfig,
+    PaperBrokerSim,
+    PortfolioLedger,
+    TradingCalendarStore,
+)
 
 
 def test_daily_event_pipeline_runs_in_expected_order():
@@ -177,6 +185,18 @@ def test_daily_event_pipeline_supports_ledger_snapshot_payload():
     trading_day = date(2026, 4, 15)
     daily_bars = {"SPY": {"open": 510.0, "high": 515.0, "low": 508.0, "close": 514.0, "volume": 100_000_000}}
     ledger = PortfolioLedger(starting_cash=100_000)
+    broker = PaperBrokerSim(
+        ledger=ledger,
+        cost_model=CostModel(
+            market_configs={
+                "US": MarketCostConfig(
+                    commission_bps_per_side=1.0,
+                    slippage_bps=2.0,
+                    min_spread_bps=0.5,
+                )
+            }
+        ),
+    )
 
     def generate_signals(**_):
         return [{"symbol": "SPY", "side": "BUY", "score": 0.81}]
@@ -188,25 +208,10 @@ def test_daily_event_pipeline_supports_ledger_snapshot_payload():
     def risk_check(**kwargs):
         return kwargs["proposed_orders"]
 
-    def fill_orders(**kwargs):
-        close_price = kwargs["daily_bars"]["SPY"]["close"]
-        order = kwargs["approved_orders"][0]
-        return [
-            {
-                "symbol": order["symbol"],
-                "side": order["side"],
-                "qty": order["qty"],
-                "price": close_price,
-                "market": order["market"],
-                "bucket": order["bucket"],
-                "fee": 0.0,
-            }
-        ]
-
     def update_ledger(**kwargs):
-        return ledger.update_day(
+        # Fills are already applied by PaperBrokerSim.fill_orders via place_order.
+        return ledger.mark_to_market(
             trading_day=kwargs["trading_day"],
-            fills=kwargs["fills"],
             daily_bars=kwargs["daily_bars"],
         )
 
@@ -214,13 +219,15 @@ def test_daily_event_pipeline_supports_ledger_snapshot_payload():
         generate_signals=generate_signals,
         propose_orders=propose_orders,
         risk_check=risk_check,
-        fill_orders=fill_orders,
+        fill_orders=broker.fill_orders,
         update_ledger=update_ledger,
     )
 
     events = backtester.run_day(trading_day=trading_day, daily_bars=daily_bars)
     ledger_snapshot = events[-1].payload
 
-    assert ledger_snapshot["equity_total"] == pytest.approx(100_000.0)
+    expected_notional = 10 * 514.0
+    expected_fee = expected_notional * ((1.0 + 2.0 + 0.5) / 10_000)
+    assert ledger_snapshot["equity_total"] == pytest.approx(100_000.0 - expected_fee)
     assert ledger_snapshot["realized_pnl_total"] == pytest.approx(0.0)
     assert ledger_snapshot["short_bucket"]["monthly_drawdown"] == pytest.approx(0.0)

@@ -186,6 +186,26 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-010 — Paper broker sim con interfaz estable para motores
+
+- **Fecha**: 2026-04-15
+- **Estado**: aceptada
+- **Contexto**: El plan de Fase 2 exige un `paper_broker_sim` sin API real que exponga la misma interfaz base del broker futuro para evitar reescrituras en `short_term_engine` y `long_term_engine`.
+- **Decisión**: Incorporar `core_sim.paper_broker_sim.PaperBrokerSim` con métodos `place_order` y `get_positions`, apoyado en `CostModel` (costos determinísticos por fill) y `PortfolioLedger` (estado de caja y posiciones).
+- **Por qué**:
+  - Define frontera clara entre motores (órdenes intent) y ejecución.
+  - Mantiene compatibilidad hacia broker real con contrato de métodos estable.
+  - Preserva auditabilidad al devolver `FillReport` con desglose de costos.
+- **Consecuencias**:
+  - Las órdenes deben incluir contrato mínimo (`symbol`, `side`, `qty`, `price`, `market`, `bucket`; `adv` opcional).
+  - `place_order` ejecuta fill inmediato (v1) y aplica `fee` calculada por `CostModel`.
+  - Se expone historial de fills para debugging y validación.
+- **Alternativas consideradas**:
+  - **Ejecutar órdenes directo desde engines sin adapter de broker**: descartada por acoplamiento y mayor costo de migración a live.
+  - **Broker sim sin costos**: descartada por no cumplir realismo mínimo del paper trading.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
