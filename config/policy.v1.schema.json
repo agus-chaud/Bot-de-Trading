@@ -204,6 +204,48 @@
           }
         }
       }
+    },
+    "short_term_pre_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "walk_forward", "thresholds"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "walk_forward": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["oos_trading_days", "step_trading_days", "min_oos_windows"],
+          "properties": {
+            "oos_trading_days": { "type": "integer", "minimum": 3 },
+            "step_trading_days": { "type": "integer", "minimum": 1 },
+            "min_oos_windows": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "monthly_short_drawdown_floor",
+            "max_fee_pct_of_initial_per_window",
+            "max_turnover_annualized"
+          ],
+          "properties": {
+            "monthly_short_drawdown_floor": {
+              "type": ["number", "null"],
+              "maximum": 0
+            },
+            "max_fee_pct_of_initial_per_window": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_turnover_annualized": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

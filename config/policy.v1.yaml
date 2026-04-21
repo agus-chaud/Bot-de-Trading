@@ -58,6 +58,18 @@ short_term_engine:
   risk_budget_trade_pct: 0.005       # presupuesto de riesgo por trade (0.5% del bucket corto)
   allow_leverage: false              # v1: sin apalancamiento
 
+# Pre-gate estadístico mínimo (walk-forward OOS del bloque corto; Fase 3 plan)
+short_term_pre_gate:
+  enabled: true
+  walk_forward:
+    oos_trading_days: 12
+    step_trading_days: 10
+    min_oos_windows: 2
+  thresholds:
+    monthly_short_drawdown_floor: null
+    max_fee_pct_of_initial_per_window: 0.05
+    max_turnover_annualized: 500.0
+
 # Costos simulados por mercado (Fase 2 aplicará en broker paper)
 markets:
   US:

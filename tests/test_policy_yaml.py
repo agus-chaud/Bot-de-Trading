@@ -35,6 +35,14 @@ def test_short_kill_switch_is_negative_fraction():
     assert ks == pytest.approx(-0.08)
 
 
+def test_short_term_pre_gate_block_present():
+    cfg = _load_policy()
+    pg = cfg.get("short_term_pre_gate")
+    assert isinstance(pg, dict)
+    assert "walk_forward" in pg and "thresholds" in pg
+    assert int(pg["walk_forward"]["min_oos_windows"]) >= 1
+
+
 def test_execution_mode_allowed():
     cfg = _load_policy()
     assert cfg["execution_mode"] in ("semi_auto", "auto")

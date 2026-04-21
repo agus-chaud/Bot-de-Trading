@@ -314,6 +314,27 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-016 — Pre-gate walk-forward del bloque corto (costos, turnover, DD mensual)
+
+- **Fecha**: 2026-04-21
+- **Estado**: aceptada
+- **Contexto**: El plan Fase 3 exige validación mínima pre-gate con walk-forward, costos, turnover y DD mensual del corto, y rechazo automático según política antes de considerar capital real.
+- **Decisión**:
+  - Añadir `short_term_pre_gate` opcional en `config/policy.v1.yaml` (validado por schema) con `walk_forward.{oos_trading_days,step_trading_days,min_oos_windows}` y `thresholds.{monthly_short_drawdown_floor|null,max_fee_pct_of_initial_per_window,max_turnover_annualized}`.
+  - Implementar `core_sim.short_term_pre_gate.run_short_term_pre_gate`: ventanas OOS independientes (cada una con ledger+broker nuevos), mismo `create_short_term_daily_backtester`, historial solo de días anteriores por símbolo.
+  - Exponer `scripts/run_short_term_pre_gate.py` para CI local / demo sintética; criterio de fallo si **alguna** ventana viola umbrales.
+- **Por qué**:
+  - Cumple el entregable sin mezclar tuning de hiperparámetros (motor v1 fijo): el “walk-forward” aquí es **evaluación OOS consecutiva** sobre la misma política.
+  - Reutiliza el pipeline paper para que costos y riesgo sean los mismos que en operación simulada.
+- **Consecuencias**:
+  - Hace falta un calendario de trading con suficientes días para `burn_in` (lookback + margen) + ventanas; si no, falla con `insufficient_oos_windows`.
+  - El proxy de turnover es deliberadamente simple; si se exige otro definición, hay que versionar policy y código juntos.
+- **Alternativas consideradas**:
+  - **Notebook único sin API en código**: descartada por poca repetibilidad en CI.
+  - **Una sola ventana hold-out**: descartada por no cumplir la intención de varias OOS del plan.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

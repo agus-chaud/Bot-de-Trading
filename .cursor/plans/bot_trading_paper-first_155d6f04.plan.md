@@ -11,8 +11,20 @@ todos:
   - id: data-layer
     content: Definir esquema de datos común + conectores US/AR (paper con datos reales) + calendario y corporate actions mínimos US
     status: pending
-  - id: engine-long
-    content: Implementar long_term_engine (core ETF + satélite) con rebalanceo mensual y bandas
+  - id: long-policy-yaml
+    content: "long_term: POLICY + policy.v1.yaml/schema — core 2-3 ETFs, satélite (topes, nº líneas), drift_rebalance_threshold_pp, regla día mensual"
+    status: pending
+  - id: long-weights-bands
+    content: "Funciones puras: target_weights en sleeve largo, pesos actuales MTM, drift, should_rebalance (calendario mensual ∧ bandas)"
+    status: pending
+  - id: long-intents
+    content: "Generador orders_intent (reason_codes largo, trazabilidad) sin reimplementar 30/70 ni 20/80 — solo notional del bucket largo vía allocator"
+    status: pending
+  - id: long-integration
+    content: "Cablear ciclo mensual en event engine/backtester + corporate actions v1 en qty antes de pesos + riesgo → paper_broker"
+    status: pending
+  - id: long-qa-ci
+    content: "Tests drift/bandas, no-trade dentro de banda, mes con split en ETF core, datos faltantes → skip documentado"
     status: pending
   - id: engine-short
     content: Implementar short_term_engine diario + filtros liquidez/vol + integración allocator
@@ -96,7 +108,7 @@ flowchart LR
    - **Universo v1:** acciones AR/US permitidas + ETFs índice US; **sin apalancamiento** ni derivados en v1 salvo documento explícito de excepción.
    - **Contrato I/O:** entrada = snapshot diario normalizado (`symbol`, `close`, `volume`, `currency`, calendario válido) + estado de portfolio; salida = `orders_intent[]` con `symbol`, `side`, `qty`, `reason_code`, `signal_score`, `risk_snapshot`.
    - **Fallbacks obligatorios:** si falta dato crítico (precio/volumen/calendario) o no pasa liquidez, no se opera ese símbolo y se registra `skip_reason` en log estructurado.
-   - **Validación mínima pre-gate:** backtest walk-forward del bloque corto con costos, turnover y DD mensual; rechazo automático si no cumple umbrales definidos en política.
+   - **Validación mínima pre-gate:** backtest walk-forward del bloque corto con costos, turnover y DD mensual; rechazo automático si no cumple umbrales definidos en política. *(Implementado: `core_sim/short_term_pre_gate.py`, `config/policy.v1.yaml` → `short_term_pre_gate`, `scripts/run_short_term_pre_gate.py`, tests `tests/test_short_term_pre_gate.py`.)*
    - **Agent-teams-lite + SDD flow (este bloque):**
      - `Spec/policy`: definir parámetros (`N`, `p_min`, `vol_max`, `K`, límites por ticker/sector) en `POLICY.md` + `config/policy.v1.yaml`.
      - `Data`: garantizar columnas requeridas, manejo de faltantes y calendario AR/US consistente.
@@ -105,10 +117,21 @@ flowchart LR
      - `Core sim`: validar que `orders_intent` sean consumibles por `paper_broker_sim` sin lógica duplicada.
      - `QA/CI`: tests unitarios (score/sizing/filtros) + integración (evento diario completo) + test de no-operación ante datos incompletos.
 
-2. **`long_term_engine` (70%)**  
-   - **Core pasivo**: pesos objetivo en 2–3 ETFs US (broad market).  
-   - **Satélite**: pocas líneas de convicción con tope de peso y revisión mensual.  
-   - **Rebalanceo mensual** con tolerancia por bandas (ej. drift > X pp antes de operar) para contener turnover.
+2. **`long_term_engine` (70% del capital objetivo; los pesos dentro del sleeve largo suman 100%)**  
+   - **Core pasivo (ETFs US broad market)**: 2–3 símbolos con **pesos objetivo explícitos** en `POLICY.md` + YAML; criterio documentado de baja redundancia (p. ej. mercado US total vs factor/size si aplica).  
+   - **Satélite**: lista acotada con **`max_satellite_weight_total`**, **`max_weight_per_satellite_line`** y **`max_satellite_names`** (entero); revisión solo en **fecha de rebalance mensual** (cambios off-cycle solo con procedimiento manual documentado).  
+   - **Calendario de rebalanceo**: regla inequívoca (p. ej. **primer día hábil US del mes** u otro día T); si **halt**, datos incompletos o sesión inválida → **no operar** ese ciclo y log estructurado (mismo espíritu que el corto).  
+   - **Bandas anti-turnover**: parámetro único **`drift_rebalance_threshold_pp`** (puntos porcentuales) definido por **línea** *o* por **agregado core** (elegir una convención en política para no doble-contar); solo se emiten órdenes si **fecha de rebalance** ∧ **algún drift supera umbral**.  
+   - **Corporate actions**: antes de calcular pesos, **ajustar posiciones** con el pipeline v1 de splits/dividendos ya previsto en Fase 2 (evita rebalanceos “fantasma”).  
+   - **Contrato I/O**: entrada = snapshot OHLCV normalizado + posiciones/MTM del sleeve largo (o estado ledger equivalente); salida = `orders_intent[]` con `reason_code` dedicados (p. ej. `long_rebalance_core`, `long_satellite_trim`, `long_satellite_add`), `target_weight`, `current_weight`, `drift_pp`, `risk_snapshot`.  
+   - **Límites de riesgo**: caps de notional por trade de rebalanceo opcionales (`max_long_rebalance_turnover_pct` del sleeve) y respeto de whitelist; el motor **no** recalcula 30/70 ni 20/80 — eso queda en **`allocator`**.  
+   - **Agent-teams-lite + SDD (este bloque)** — ver sección *SDD — change `engine-long-v1`* al final del documento:
+     - `Spec/policy`: sección largo en `POLICY.md`, claves `long_term` en YAML + `policy.v1.schema.json` + tests de parsing.
+     - `Data`: columnas mínimas, calendario US, faltantes → `skip_reason`.
+     - `Engines`: funciones puras (target, actual, drift, disparador) + generador de intents.
+     - `Risk`: concentración satélite, turnover de rebalanceo, interacción con guardrails globales.
+     - `Core sim`: un ciclo `MarketOpen` mensual que consuma intents en `paper_broker_sim` sin duplicar lógica del allocator.
+     - `QA/CI`: tests unitarios de bandas + integración con evento de split en ETF core.
 
 3. **`allocator`**  
    - Aplica simultáneamente **30/70** (corto/largo) y **20/80** (AR/US) dentro del total, con correcciones cuando un bucket no puede llenarse (falta de liquidez) — regla documentada (ej. redistribuir al hermano geográfico del mismo horizonte).
@@ -133,7 +156,7 @@ flowchart LR
 |------|----------------|
 | H1 | Config YAML + `POLICY.md` + tests de parsing |
 | H2 | `paper_broker_sim` + ledger + métricas básicas + test de costos |
-| H3 | `long_term_engine` + rebalanceo mensual + informe |
+| H3 | `long_term_engine` — policy/YAML largo, drift+bandas, intents mensuales, integración backtester, tests + mini-informe de drift/turnover del sleeve |
 | H4 | `short_term_engine` + kill switch -8% mensual + tests |
 | H5 | Notebooks o script de walk-forward + plantilla de informe KPI |
 | H6 | (Opcional) capa IA solo lectura: resume riesgos y drift sin ejecutar |
@@ -208,3 +231,59 @@ Este plan es **educativo y de ingeniería**; cumplimiento fiscal, regulación lo
 - [ ] Tests unitarios de score, ranking, filtros, sizing y redondeo por lotes.
 - [ ] Test de integración del evento diario completo (`SignalGenerated` -> `OrdersProposed` -> `RiskChecked`).
 - [ ] Test negativo: no generar órdenes con datos críticos faltantes.
+
+## SDD — change `engine-long-v1`
+
+### Proposal
+
+- **Problema**: el bloque `long_term_engine` estaba en tres viñetas; faltaban contrato de config, regla de calendario, semántica de bandas, interacción con allocator y criterios de QA.
+- **Enfoque**: v1 **determinística y auditable**: pesos objetivo dentro del sleeve 70%, rebalanceo mensual condicionado por **bandas**, satélite acotado, intents desacoplados de ejecución, reutilización de corporate actions y misma tubería riesgo → broker que el corto.
+- **Módulos impactados**: `POLICY.md`, `config/policy.v1.yaml`, `config/policy.v1.schema.json`, nuevo módulo `long_term_engine` (o rutas bajo `core_sim/`), `DailyEventBacktester` / runner mensual, tests.
+- **Riesgos**: doble aplicación de 30/70 si el engine largo mezcla capital total; ambigüedad drift por línea vs agregado; datos faltantes en ETF core el día de rebalance.
+
+### Spec (requisitos ejecutables)
+
+1. Pesos objetivo **core + satélite** viven en config y suman 100% **del sleeve largo** (no del portfolio total).
+2. Solo símbolos en whitelist US (y reglas AR si el satélite incluye AR — si no, explícitamente “satélite solo US” en política).
+3. El motor calcula **drift** entre peso objetivo y peso actual MTM por la convención elegida (línea o agregado core) y compara con `drift_rebalance_threshold_pp`.
+4. Solo en **día de rebalance mensual** puede emitir órdenes; además debe existir al menos un drift que supere el umbral (salvo política explícita de “forzar alineación” — v1 recomienda no forzar si todo está dentro de banda).
+5. Salida exclusivamente `orders_intent[]` con campos de trazabilidad (`target_weight`, `current_weight`, `drift_pp`, `reason_code`).
+6. Ante precio faltante o calendario inválido para un símbolo afectado: **no** generar orden para ese símbolo y registrar `skip_reason` (o abortar todo el ciclo largo — una sola política documentada).
+7. El motor **no** implementa split 30/70 ni 20/80; asume **notional del bucket largo** ya resuelto por el allocator o recibe `long_bucket_cash_notional` como input de ciclo (documentar cuál v1 en diseño).
+
+### Design (contrato y decisiones técnicas)
+
+- **Input**: snapshot diario/mensual alineado al corto (`symbol`, `ts`, `close`, `volume`, …) + estado de posiciones del sleeve largo + **fecha de sesión** + config `long_term`.
+- **Output** (`orders_intent[]`): extensión del contrato corto con `reason_code` del conjunto largo; sin `signal_score` salvo que se defina un score trivial “n/a” para unificar schema.
+- **Pipeline mensual**:
+  1. ¿Es día de rebalance según calendario US?
+  2. Aplicar corporate actions a posiciones si el store tiene eventos pendientes.
+  3. Calcular pesos actuales MTM y drift vs objetivo.
+  4. Si no hay brecha de banda → fin (sin órdenes).
+  5. Generar intents (compras/ventas) minimizando número de patas (opcional v2: optimizador; v1 puede ser proporcional simple).
+  6. Pasar por `risk_guardrails` → `allocator`/`paper_broker_sim` como el resto del sistema.
+- **Principio de seguridad**: ante duda de datos o suma de pesos objetivo ≠ 100% del sleeve, el engine no opera y loguea error de configuración.
+
+### Tasks (Checkpoint)
+
+#### Fase A — Spec/Policy (complejidad: baja-media)
+
+- [ ] Definir en `POLICY.md` universo core, satélite, topes, convención de drift y día de rebalance.
+- [ ] Añadir `long_term:` en `config/policy.v1.yaml` y validar con `policy.v1.schema.json` + tests de parsing.
+
+#### Fase B — Engine/Data (complejidad: media)
+
+- [ ] Implementar cálculo de pesos actuales y drift (funciones puras + tests).
+- [ ] Implementar `should_rebalance_long` (calendario ∧ bandas).
+- [ ] Implementar generador de `orders_intent` con `skip_reason` en datos incompletos.
+
+#### Fase C — Riesgo/Core sim (complejidad: media)
+
+- [ ] Integrar ciclo mensual en el event engine o runner dedicado (reutilizar `MarketOpen` con flag de motor).
+- [ ] Verificar que intents largos consuman el mismo path que los cortos hasta el fill simulado.
+
+#### Fase D — QA/CI (complejidad: media)
+
+- [ ] Test: dentro de banda en día de rebalance → cero órdenes.
+- [ ] Test: fuera de banda en día de rebalance → órdenes esperadas (dirección y magnitud acotadas).
+- [ ] Test de integración: split en ETF core antes del rebalance no produce qty erróneas.

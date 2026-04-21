@@ -182,4 +182,12 @@ Estos parámetros definen el comportamiento mínimo del motor corto en Fase 3 y 
 
 ---
 
+## 10. Pre-gate walk-forward (bloque corto, antes de subir capital)
+
+Objetivo: **rechazo automático** si en ventanas out-of-sample consecutivas el simulador con costos viola límites operativos. Los umbrales numéricos viven en `config/policy.v1.yaml` bajo `short_term_pre_gate.thresholds`; el piso de drawdown mensual del bucket corto usa por defecto el mismo valor que `short_kill_switch_monthly_dd` si `monthly_short_drawdown_floor` es `null`.
+
+Métricas mínimas por ventana: **costos totales** (fees del broker sim) respecto del capital inicial de la ventana; **proxy de turnover anualizado** a partir de nocional comprado y equity media; **mínimo** del drawdown mensual del bucket corto observado en los EOD de la ventana. La forma de las ventanas (`oos_trading_days`, `step_trading_days`, `min_oos_windows`) es configurable; con `enabled: false` el pre-gate no ejecuta validación (útil en entornos de desarrollo).
+
+---
+
 *Fin del documento — Fase 1 (especificación paper).*

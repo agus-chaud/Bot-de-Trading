@@ -39,12 +39,13 @@ Bot de trading/inversión en Python con foco en perfil moderado, arquitectura de
   - `DailyEventBacktester.run_day(..., pipeline_context={"history_by_symbol": ...})` admite también `session_minutes_from_open` cuando se quiera simular no-trade intradía
   - tests de integración en `tests/test_short_term_day_runner.py` (E2E, kill switch, no-trade, calidad de datos, pérdida diaria)
 - **Pruebas y CI** (criterio *smart-testing*): suite en `tests/` con foco en comportamiento; `pytest-cov` en `requirements.txt`; GitHub Actions ejecuta `pytest` con cobertura mínima sobre `core_sim`.
+- **Pre-gate walk-forward (Fase 3)**: `core_sim/short_term_pre_gate.py` + `short_term_pre_gate` en `config/policy.v1.yaml`; script `scripts/run_short_term_pre_gate.py` (demo sintética); tests en `tests/test_short_term_pre_gate.py`.
 
 ### Pendiente principal
 
 - Matriz de riesgo extendida al **motor largo** (pérdidas diarias/mensuales long/total, etc.) y módulo dedicado `risk_guardrails` si se extrae del runner.
 - Integración completa del `long_term_engine`.
-- Walk-forward, informe KPI y gates de aprobación para ramp-up.
+- Informe KPI agregado (Sharpe, Sortino, Calmar, alpha vs benchmark, etc.) y gate de ramp más allá del pre-gate mínimo del corto.
 
 ## Arquitectura resumida
 
@@ -86,6 +87,7 @@ flowchart LR
 pip install -r requirements.txt
 python -m pytest tests/ -v
 python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
+python scripts/run_short_term_pre_gate.py
 ```
 
 Por módulo (desarrollo acotado):

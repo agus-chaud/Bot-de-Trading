@@ -16,6 +16,7 @@ from .short_term_day_runner import (
     us_regular_session_length_minutes,
 )
 from .short_term_engine import RiskCaps, ShortEngineConfig, build_orders_intent, compute_signal_candidates, rank_top_k_by_market
+from .short_term_pre_gate import PreGateReport, PreGateWindowResult, run_short_term_pre_gate
 
 __all__ = [
     "CostBreakdown",
@@ -33,6 +34,8 @@ __all__ = [
     "MarketCostConfig",
     "orders_intent_to_broker_orders",
     "PaperBrokerSim",
+    "PreGateReport",
+    "PreGateWindowResult",
     "PortfolioLedger",
     "PositionState",
     "RiskCaps",
@@ -42,4 +45,5 @@ __all__ = [
     "build_orders_intent",
     "compute_signal_candidates",
     "rank_top_k_by_market",
+    "run_short_term_pre_gate",
 ]
