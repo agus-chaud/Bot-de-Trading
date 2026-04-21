@@ -56,8 +56,19 @@ class DailyEventBacktester:
         self.calendar_store = calendar_store
         self.corporate_actions_store = corporate_actions_store
 
-    def run_day(self, trading_day: date, daily_bars: dict[str, dict[str, float]]) -> list[EventStep]:
-        """Run one daily simulation cycle and return the event trace."""
+    def run_day(
+        self,
+        trading_day: date,
+        daily_bars: dict[str, dict[str, float]],
+        *,
+        pipeline_context: dict[str, Any] | None = None,
+    ) -> list[EventStep]:
+        """Run one daily simulation cycle and return the event trace.
+
+        `pipeline_context` optional se fusiona en el contexto pasado a
+        `generate_signals`, `propose_orders` y `risk_check` (p.ej. historial OHLCV).
+        `fill_orders` y `update_ledger` reciben solo los kwargs necesarios.
+        """
         events: list[EventStep] = []
         symbols = set(daily_bars)
 
@@ -87,16 +98,20 @@ class DailyEventBacktester:
         }
         events.append(EventStep(name="MarketOpen", payload=market_open_payload))
 
-        signals = self.generate_signals(trading_day=trading_day, daily_bars=daily_bars)
+        ctx: dict[str, Any] = {
+            "trading_day": trading_day,
+            "daily_bars": daily_bars,
+            "market_open": market_open_payload,
+            **dict(pipeline_context or {}),
+        }
+
+        signals = self.generate_signals(**ctx)
         events.append(EventStep(name="SignalGenerated", payload=signals))
 
-        proposed_orders = self.propose_orders(trading_day=trading_day, signals=signals)
+        proposed_orders = self.propose_orders(**{**ctx, "signals": signals})
         events.append(EventStep(name="OrdersProposed", payload=proposed_orders))
 
-        risk_checked_orders = self.risk_check(
-            trading_day=trading_day,
-            proposed_orders=proposed_orders,
-        )
+        risk_checked_orders = self.risk_check(**{**ctx, "proposed_orders": proposed_orders})
         events.append(EventStep(name="RiskChecked", payload=risk_checked_orders))
 
         fills = self.fill_orders(

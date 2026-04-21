@@ -127,6 +127,15 @@ def test_should_fail_when_missing_close_for_open_position():
         )
 
 
+def test_mark_to_market_same_day_updates_single_equity_curve_point():
+    ledger = PortfolioLedger(starting_cash=50_000.0)
+    day = date(2026, 6, 10)
+    ledger.mark_to_market(trading_day=day, daily_bars={})
+    ledger.mark_to_market(trading_day=day, daily_bars={})
+    assert len(ledger.equity_curve_points) == 1
+    assert ledger.equity_curve_points[0]["trading_day"] == day.isoformat()
+
+
 def test_should_update_short_drawdown_and_reset_by_calendar_month():
     ledger = PortfolioLedger(starting_cash=10_000)
     day_one = ledger.update_day(
@@ -155,6 +164,9 @@ def test_should_update_short_drawdown_and_reset_by_calendar_month():
     )
 
     assert day_one["short_bucket"]["monthly_peak"] == pytest.approx(1_000.0)
+    assert day_one["short_bucket"].get("daily_return", 0.0) == pytest.approx(0.0)
     assert day_two["short_bucket"]["monthly_drawdown"] == pytest.approx(-0.1)
+    assert day_two["short_bucket"]["daily_return"] == pytest.approx((900.0 - 1_000.0) / 1_000.0)
     assert day_three["short_bucket"]["monthly_peak"] == pytest.approx(950.0)
     assert day_three["short_bucket"]["monthly_drawdown"] == pytest.approx(0.0)
+    assert day_three["short_bucket"]["daily_return"] == pytest.approx((950.0 - 900.0) / 900.0)

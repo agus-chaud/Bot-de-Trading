@@ -31,19 +31,24 @@ Usar roles para **acotar** qué toca cada subagente o PR. Solapamiento mínimo.
 | Rol | Responsabilidad | Rutas típicas |
 |-----|-----------------|---------------|
 | **Spec / policy** | `POLICY.md`, `config/*.yaml`, `config/symbols/*`, schema JSON | `POLICY.md`, `config/` |
-| **Core sim** | Paper broker, ledger, costos, eventos | (Fase 2) `src/...` según se cree el árbol |
-| **Data** | Esquema OHLCV, conectores, calendario | (Fase 2+) capa datos |
-| **Engines** | `short_term_engine`, `long_term_engine` solo señales → órdenes intent | motores aislados del broker |
-| **Risk** | `risk_guardrails`, kill switch -8% mensual corto, integración con allocator | núcleo riesgo |
-| **QA / CI** | Tests, validación schema, pipelines | `tests/`, `.github/workflows/` |
+| **Core sim** | Paper broker, ledger, costos, event engine | `core_sim/paper_broker_sim.py`, `core_sim/ledger.py`, `core_sim/event_engine.py`, `core_sim/cost_model.py` |
+| **Data** | Snapshot OHLCV + historial, whitelist, calendario en `MarketOpen` | `core_sim/short_term_day_runner.py` (capa Data del corto), `core_sim/calendar_store.py` |
+| **Engines** | Señales → intents; integración diaria corta | `core_sim/short_term_engine.py`, `core_sim/short_term_day_runner.py` |
+| **Risk** | Kill switch mensual corto, pérdida diaria bucket corto, ventanas no-trade, `halt_on_data_quality`, whitelist defensiva; allocator 30/70 + 20/80 en sizing | `core_sim/short_term_day_runner.py` (handlers `propose_orders` / `risk_check`), `config/policy.v1.yaml` → `risk`, `weights`, `geo` |
+| **QA / CI** | Tests por **comportamiento** (ver *Smart testing*), schema policy, cobertura `core_sim` en CI | `tests/`, `.github/workflows/ci.yml` |
 
 Un agente en rol **Spec** no debería implementar broker simulado; uno en rol **Core sim** no debería reescribir listas blancas sin coordinación con **Spec**.
+
+## Smart testing (criterio de calidad)
+
+Alineado a la skill **smart-testing**: probamos **comportamiento observable**, no detalles de implementación; prioridad **reglas de negocio / riesgo** → integración (`DailyEventBacktester` + pipeline corto) → helpers puros. Evitar sobre-mocking de módulos propios (`ledger`, `PaperBrokerSim`): preferir instancias reales en tests de integración. Los nombres de test describen el efecto (“should…”, “blocks…”, “stops…”). Cobertura es indicador **secundario** a la confianza en reglas; en CI se exige umbral mínimo sobre `core_sim` (ver workflow).
 
 ## Comandos útiles
 
 ```text
 pip install -r requirements.txt
 python -m pytest tests/ -v
+python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
 ```
 
 ## Convenciones

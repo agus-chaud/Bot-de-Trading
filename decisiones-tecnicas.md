@@ -206,6 +206,114 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-011 — Short-term engine v1 con contrato explícito y funciones puras
+
+- **Fecha**: 2026-04-15
+- **Estado**: aceptada
+- **Contexto**: El bloque de `short_term_engine` estaba definido a nivel conceptual en el plan, pero sin contrato operativo detallado para señal, filtrado, sizing, trazabilidad y fallbacks de datos.
+- **Decisión**: Formalizar v1 del motor corto con contrato explícito y helpers determinísticos en `core_sim.short_term_engine`: cálculo de candidatos (`compute_signal_candidates`), ranking por mercado (`rank_top_k_by_market`) y generación de `orders_intent` (`build_orders_intent`) con `skip_reasons` y métricas de ciclo.
+- **Por qué**:
+  - Evita ambigüedad de implementación entre equipos/roles (`Spec`, `Data`, `Engines`, `Risk`, `QA`).
+  - Permite testeo unitario de reglas críticas sin acoplarse al runtime completo.
+  - Refuerza auditabilidad: cada no-operación queda codificada por motivo explícito.
+- **Consecuencias**:
+  - El flujo del motor corto queda más predecible y mantenible, con interfaces claras.
+  - Se exige disciplina de contratos para evitar drift entre policy, engine y tests.
+  - Se habilita integración incremental con `event_engine` y `risk_guardrails` sin reescribir lógica.
+- **Alternativas consideradas**:
+  - **Implementación monolítica dentro del backtester**: descartada por acoplamiento alto y menor testabilidad.
+  - **Heurística ad hoc sin contratos de salida**: descartada por baja auditabilidad y riesgo operativo.
+
+---
+
+## ADR-012 — Sincronización obligatoria POLICY/YAML/schema para parámetros del motor corto
+
+- **Fecha**: 2026-04-15
+- **Estado**: aceptada
+- **Contexto**: Al introducir parámetros operativos de `short_term_engine` (`N`, `p_min`, `vol_max`, `K`, `risk_budget_trade_pct`), existe riesgo de divergencia entre documentación humana y configuración parseable usada por código/CI.
+- **Decisión**: Incorporar bloque `short_term_engine` en `config/policy.v1.yaml`, volverlo obligatorio en `config/policy.v1.schema.json`, y documentar los mismos valores en `POLICY.md` con regla explícita de actualización en el mismo cambio.
+- **Por qué**:
+  - Mantiene coherencia entre política, runtime y validación automática.
+  - Previene errores silenciosos por claves faltantes o tipos inválidos.
+  - Facilita gobernanza de cambios de riesgo con evidencia verificable.
+- **Consecuencias**:
+  - Cualquier ajuste de parámetros del motor corto debe tocar tres artefactos coordinados.
+  - Los tests de schema se vuelven guardrail central para CI.
+  - Mayor costo de cambio inicial, menor probabilidad de drift en producción.
+- **Alternativas consideradas**:
+  - **Solo documentar en `POLICY.md`**: descartada por falta de validación automática.
+  - **Solo YAML sin narrativa en policy**: descartada por menor claridad para revisión humana y auditoría funcional.
+
+---
+
+## ADR-013 — Pipeline diario corto integrado al `DailyEventBacktester`
+
+- **Fecha**: 2026-04-21
+- **Estado**: aceptada
+- **Contexto**: El motor corto v1 existía como funciones puras (`short_term_engine`) pero faltaba el lazo **datos → señal → órdenes → riesgo → broker sim** con whitelist, calendario y kill switch alineados al plan.
+- **Decisión**:
+  - Añadir `core_sim.short_term_day_runner` con límites **agent-teams-lite** (Data / Engines / Risk / Core sim) documentados en el módulo.
+  - Exponer `create_short_term_daily_backtester`, `create_short_term_pipeline_handlers`, `load_merged_whitelist` y `orders_intent_to_broker_orders`.
+  - Extender `DailyEventBacktester.run_day(..., pipeline_context=...)` para inyectar `history_by_symbol` y contexto sin acoplar el core a un solo motor.
+  - Hacer **idempotente** `PortfolioLedger.mark_to_market` respecto de `equity_curve_points` cuando se repite el mismo `trading_day`, permitiendo refrescar DD del bucket corto antes del `risk_check` y otra vez en `LedgerUpdated` sin duplicar puntos.
+- **Por qué**:
+  - El paper-first exige trazabilidad end-to-end; sin integración, el motor corto no es operable ni testeable como sistema.
+  - El `pipeline_context` mantiene el event engine genérico y evita hardcodear historial en la firma mínima (`daily_bars` del día).
+  - La idempotencia del ledger evita contaminar la curva de equity al llamar MTM más de una vez en el mismo día de simulación.
+- **Consecuencias**:
+  - Los handlers de señal/propuesta/riesgo deben tolerar kwargs extra (`market_open`, `history_by_symbol`, …) o usar `**kwargs`.
+  - El percentil de volumen cross-sectional con un solo símbolo líquido se define como **1.0** (evita bloqueo artificial por `p_min`).
+- **Alternativas consideradas**:
+  - **Subclases de `DailyEventBacktester` por motor**: descartada por duplicación y menor reutilización.
+  - **Sin idempotencia en MTM**: descartada por duplicar puntos en la curva al refrescar riesgo intradía.
+
+---
+
+## ADR-014 — Sistema de documentación: lector humano primero, memoria de agente en Engram
+
+- **Fecha**: 2026-04-21
+- **Estado**: aceptada
+- **Contexto**: El repo combina normas operativas (`AGENTS.md`), decisiones con historial (`decisiones-tecnicas.md`), política ejecutable (`POLICY.md` + YAML + schema) y plan vivo en `.cursor/plans/`. Hacía falta explicitar **para quién** se escribe cada capa y cómo los agentes retienen convenciones entre sesiones.
+- **Decisión**:
+  - Priorizar la documentación para **el dueño del repo** (comprensión y retomada después de tiempo sin tocar el código).
+  - Los agentes deben **persistir en Engram** decisiones, convenciones y preferencias relevantes (p. ej. vía `mem_save` cuando el MCP Engram esté disponible), sin sustituir ADRs ni fuentes de verdad versionadas en git.
+  - Mantener un **mapa de retomada breve** en `AGENTS.md` (orden de lectura y enlaces); si la narrativa de “cómo retomar” crece, extraer el detalle a `docs/` y enlazar desde `AGENTS.md` en lugar de inflar el archivo de reglas.
+- **Por qué**:
+  - Separar “recordar el sistema” (humano + git) de “recordar el hilo de trabajo del agente” (Engram) reduce fricción y evita duplicar en markdown lo que ya vive en ADR o en policy versionada.
+  - Un índice corto en `AGENTS.md` aprovecha el archivo que ya se abre por convención en sesiones con IA.
+- **Consecuencias**:
+  - Nuevas convenciones de documentación deben reflejarse aquí como ADR cuando cambien el modelo mental del proyecto (no como notas sueltas sin trazabilidad).
+  - Si Engram no está conectado en una sesión, el agente no pierde la fuente de verdad: sigue siendo este repo y `AGENTS.md`.
+- **Alternativas consideradas**:
+  - **Solo Engram, sin ADR para convenciones de docs**: descartada porque la memoria externa no reemplaza historial versionado ni revisión en PR.
+  - **Un solo documento largo mezclando ADR y guía humana**: descartada por dificultad de mantenimiento y de saber qué es norma vs historia.
+
+---
+
+## ADR-015 — Riesgo extendido + allocator 30/70·20/80 en pipeline corto; pruebas por comportamiento
+
+- **Fecha**: 2026-04-21
+- **Estado**: aceptada
+- **Contexto**: El plan paper-first exige matriz de riesgo determinística y reparto 30/70 (corto/largo) y 20/80 (AR/US) antes de escalar a más motores. El pipeline corto ya existía con kill switch y whitelist, pero faltaban límites diarios, ventanas no-trade, calidad de datos explícita y allocator en el lazo de órdenes.
+- **Decisión**:
+  - **Ledger**: exponer `short_bucket.daily_return` como variación del MV del bucket corto respecto del último EOD con **fecha de trading anterior** (mapa `date → short MV`), de modo que varias MTM el mismo día no corrompen el ratio.
+  - **Runner** (`short_term_day_runner`): en `propose_orders` y `risk_check`, aplicar (en orden de severidad operativa) `halt_on_data_quality` + `risk_flags`, ventanas no-trade US (390 min; `session_minutes_from_open` opcional en `pipeline_context`), pérdida diaria corta vs `max_daily_loss_short_pct`, kill switch mensual, y defensa por whitelist/mercado.
+  - **Calidad de datos**: `not_in_daily_bars` para símbolos fuera del `daily_bars` del día **no** dispara halt (universo parcial); sí halt con `daily_bars` vacío o skips estructurales (close/volumen/histórico inválido, etc.).
+  - **Allocator**: `short_tranche_headroom = max(0, weights.short * equity − MV corto)` y `geo_headroom[M] = max(0, geo[M] * equity − MV total en M)` inyectados en `build_orders_intent` junto con cash y caps de riesgo por ticker/sector.
+  - **Pruebas (smart-testing)**: tests de integración con `PortfolioLedger` + `PaperBrokerSim` reales; nombres orientados a comportamiento; CI con `pytest-cov` sobre `core_sim` y umbral mínimo de cobertura.
+- **Por qué**:
+  - El riesgo tiene que fallar **antes** de ejecutar, con la misma fuente de verdad que el informe (`ledger` + policy).
+  - El allocator sobre totales respeta el plan hasta que exista `long_term_engine` (el headroom AR/US ya considera posiciones long cuando existan).
+  - Cobertura en CI como red de seguridad sin sustituir tests mal diseñados (la confianza sigue en reglas y escenarios).
+- **Consecuencias**:
+  - Quien integre intradía debe pasar `session_minutes_from_open`; sin él, el backtest diario EOD no aplica no-trade (comportamiento explícito).
+  - Cualquier cambio de semántica de `halt_on_data_quality` debe coordinarse con tests en `test_short_term_day_runner.py`.
+- **Alternativas consideradas**:
+  - **Exigir barra diaria para toda la whitelist**: descartada — rompe feeds parciales y no distingue “falta de universo” de “dato corrupto”.
+  - **Allocator solo dentro del 30% corto sin mirar geo global**: descartada por desalineación con `POLICY.md` / plan (20/80 sobre total).
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

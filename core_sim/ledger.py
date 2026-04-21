@@ -31,6 +31,8 @@ class PortfolioLedger:
         self._current_short_month: tuple[int, int] | None = None
         self._short_monthly_peak = 0.0
         self._short_monthly_drawdown = 0.0
+        # short MV por fecha (última escritura gana) para `daily_return` con varias MTM en un día
+        self._short_eod_by_trading_date: dict[date, float] = {}
 
     def apply_fills(self, fills: list[dict[str, str | float]]) -> None:
         """Apply one day of fills in order."""
@@ -72,14 +74,19 @@ class PortfolioLedger:
                 short_equity += market_value
 
         equity_total = self.cash + market_value_total
-        self.equity_curve_points.append(
-            {
-                "trading_day": trading_day.isoformat(),
-                "equity_total": equity_total,
-            }
-        )
+        day_key = trading_day.isoformat()
+        curve_point = {"trading_day": day_key, "equity_total": equity_total}
+        if self.equity_curve_points and self.equity_curve_points[-1]["trading_day"] == day_key:
+            self.equity_curve_points[-1] = curve_point
+        else:
+            self.equity_curve_points.append(curve_point)
         short_bucket = self._update_short_drawdown(
             trading_day=trading_day,
+            short_equity=short_equity,
+        )
+        _, short_bucket = self._attach_short_daily_return(
+            trading_day=trading_day,
+            short_bucket=short_bucket,
             short_equity=short_equity,
         )
 
@@ -227,3 +234,22 @@ class PortfolioLedger:
             "monthly_peak": self._short_monthly_peak,
             "monthly_drawdown": self._short_monthly_drawdown,
         }
+
+    def _attach_short_daily_return(
+        self,
+        trading_day: date,
+        short_bucket: dict[str, float],
+        short_equity: float,
+    ) -> tuple[float, dict[str, float]]:
+        """Rend. diario del bucket corto vs. última MTM con fecha estrictamente anterior a `trading_day`."""
+        prior_dates = [d for d in self._short_eod_by_trading_date if d < trading_day]
+        if not prior_dates:
+            daily = 0.0
+        else:
+            d_prev = max(prior_dates)
+            prev = float(self._short_eod_by_trading_date[d_prev])
+            daily = 0.0 if prev <= 0.0 else (float(short_equity) - prev) / prev
+        self._short_eod_by_trading_date[trading_day] = float(short_equity)
+        out: dict[str, float] = dict(short_bucket)
+        out["daily_return"] = float(daily)
+        return float(daily), out
