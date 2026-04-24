@@ -361,6 +361,27 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-018 — Framing de negocio y secuencia de despliegue (paper -> real)
+
+- **Fecha**: 2026-04-24
+- **Estado**: aceptada
+- **Contexto**: El proyecto ya tenía arquitectura y controles técnicos bien definidos, pero faltaba fijar explícitamente el problema de negocio en la documentación operativa: no hay tiempo para trading manual consistente, y operar discrecionalmente bajo presión introduce sesgo y errores de ejecución.
+- **Decisión**:
+  - Establecer como objetivo de negocio un sistema de decisión **repetible, auditable y medible**, no señales ad-hoc.
+  - Mantener como secuencia obligatoria: **paper trading con datos reales -> pre-gate/gates de riesgo y performance -> ramp-up gradual a capital real**.
+  - Documentar este framing en `README.md` y `AGENTS.md` para alinear trabajo humano y de agentes con la misma tesis operativa.
+- **Por qué**:
+  - Sin marco de negocio explícito, el equipo puede optimizar código sin responder al problema real (disciplina de ejecución con tiempo limitado).
+  - La transición por gates reduce riesgo de sobreajuste y de salto prematuro a dinero real.
+- **Consecuencias**:
+  - Cambios futuros deben justificar cómo mejoran la robustez del proceso, no solo métricas aisladas de backtest.
+  - La discusión de “cuándo pasar a real” queda subordinada a criterios ex-ante y evidencia reproducible.
+- **Alternativas consideradas**:
+  - **Narrativa implícita solo en chats/notas sueltas**: descartada por pérdida de contexto entre sesiones.
+  - **Ir a real apenas el paper da positivo en corto plazo**: descartada por fragilidad estadística y mayor riesgo operacional.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

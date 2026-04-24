@@ -2,6 +2,12 @@
 
 Bot de trading/inversión en Python con foco en perfil moderado, arquitectura desacoplada y riesgo determinístico en código.
 
+## Problema de negocio que resuelve
+
+No todos podemos estar mirando mercado todo el día para decidir compras y ventas manuales. El problema real no es "falta de ideas", es **falta de proceso consistente bajo presión**: cuando operas a mano, el sesgo emocional, la falta de tiempo y la ejecución improvisada suelen destruir rentabilidad.
+
+Este proyecto busca resolver eso con una tesis simple: **si quieres ganar plata de forma sostenible, necesitas un sistema repetible, medible y auditable**.
+
 ## Objetivo del proyecto
 
 - Priorizar `paper trading` con datos reales antes de cualquier integración live.
@@ -10,6 +16,25 @@ Bot de trading/inversión en Python con foco en perfil moderado, arquitectura de
   - `long_term_engine` (mensual, 70% objetivo)
 - Centralizar controles críticos en un núcleo común: `risk_guardrails`, `allocator`, `paper_broker_sim`, `ledger`.
 - Mantener trazabilidad y auditabilidad de decisiones de riesgo y ejecución.
+
+## Enfoque inicial: paper trading para aprender sin perder plata
+
+El arranque en `paper trading` no es miedo
+
+- Permite validar metodología con datos reales y costos simulados antes de exponer capital.
+- Obliga a medir resultados netos (incluyendo fricción), no solo señales lindas.
+- Hace visibles fallos de lógica/riesgo temprano (kill switch, límites, calidad de datos, rebalanceos).
+
+En resumen: primero se prueba el proceso, despues se escala con plata de verdad.
+
+## Siguiente paso: pasar a capital real (cuando el sistema lo merezca)
+
+La transición a real está planteada como gate, no como salto de fe:
+
+- `pre-gate` estadístico (walk-forward OOS) para bloquear sobreajuste.
+- Criterios de riesgo y performance definidos de antemano.
+- Ramp-up gradual de exposición (por etapas), manteniendo los mismos guardarraíles.
+
 
 ## Estado actual (abril 2026)
 
@@ -47,31 +72,14 @@ Bot de trading/inversión en Python con foco en perfil moderado, arquitectura de
 - Integración completa del `long_term_engine`.
 - Informe KPI agregado (Sharpe, Sortino, Calmar, alpha vs benchmark, etc.) y gate de ramp más allá del pre-gate mínimo del corto.
 
-## Arquitectura resumida
 
-```mermaid
-flowchart LR
-  subgraph data [Data]
-    US[US_OHLCV_ETFs]
-    AR[AR_OHLCV]
-    CAL[Calendar_CorpActions]
-  end
-  subgraph engines [Engines]
-    ST[short_term_engine]
-    LT[long_term_engine]
-  end
-  subgraph core [Core]
-    RISK[risk_guardrails]
-    ALLOC[allocator_20_80_30_70]
-    SIM[paper_broker_sim]
-    LEDGER[ledger_metrics]
-  end
-  data --> engines
-  engines --> RISK
-  RISK --> ALLOC
-  ALLOC --> SIM
-  SIM --> LEDGER
-```
+## Componentes clave y cómo se vinculan
+
+- `calendar_store` + `corporate_actions`: definen dias y horarios válidos US/AR y ajustan posiciones por splits/dividendos para evitar rebalanceos "fantasma".
+- `short_term_engine` + `short_term_day_runner`: motor diario de corto plazo (momentum + filtros de liquidez/volatilidad + top-K + sizing por riesgo + kill switch).
+- `short_term_pre_gate`: walk-forward OOS automático del bloque corto antes de habilitar más capital.
+- `long_term_engine` + `long_term_monthly_runner`: motor mensual del sleeve largo (pesos objetivo, bandas de drift, intents de rebalanceo).
+- Flujo completo: Data -> Engines -> Risk/Allocator -> `paper_broker_sim` -> `ledger`; ambos motores convergen en el mismo núcleo para mantener consistencia y auditoría.
 
 ## Contratos y documentación clave
 
