@@ -13,19 +13,19 @@ todos:
     status: pending
   - id: long-policy-yaml
     content: "long_term: POLICY + policy.v1.yaml/schema — core 2-3 ETFs, satélite (topes, nº líneas), drift_rebalance_threshold_pp, regla día mensual"
-    status: pending
+    status: completed
   - id: long-weights-bands
     content: "Funciones puras: target_weights en sleeve largo, pesos actuales MTM, drift, should_rebalance (calendario mensual ∧ bandas)"
-    status: pending
+    status: completed
   - id: long-intents
-    content: "Generador orders_intent (reason_codes largo, trazabilidad) sin reimplementar 30/70 ni 20/80 — solo notional del bucket largo vía allocator"
-    status: pending
+    content: Generador orders_intent (reason_codes largo, trazabilidad) sin reimplementar 30/70 ni 20/80 — solo notional del bucket largo vía allocator
+    status: completed
   - id: long-integration
-    content: "Cablear ciclo mensual en event engine/backtester + corporate actions v1 en qty antes de pesos + riesgo → paper_broker"
-    status: pending
+    content: Cablear ciclo mensual en event engine/backtester + corporate actions v1 en qty antes de pesos + riesgo → paper_broker
+    status: completed
   - id: long-qa-ci
-    content: "Tests drift/bandas, no-trade dentro de banda, mes con split en ETF core, datos faltantes → skip documentado"
-    status: pending
+    content: Tests drift/bandas, no-trade dentro de banda, mes con split en ETF core, datos faltantes → skip documentado
+    status: completed
   - id: engine-short
     content: Implementar short_term_engine diario + filtros liquidez/vol + integración allocator
     status: pending

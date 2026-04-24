@@ -35,6 +35,16 @@ def test_short_kill_switch_is_negative_fraction():
     assert ks == pytest.approx(-0.08)
 
 
+def test_long_term_engine_weights_sum_to_one():
+    cfg = _load_policy()
+    lt = cfg["long_term_engine"]
+    core = sum(float(row["target_weight"]) for row in lt["core_lines"])
+    sat = sum(float(row["target_weight"]) for row in lt["satellite_lines"])
+    assert abs(core + sat - 1.0) < 1e-9
+    sat_sum = sat
+    assert sat_sum <= float(lt["satellite_limits"]["max_satellite_weight_total"]) + 1e-9
+
+
 def test_short_term_pre_gate_block_present():
     cfg = _load_policy()
     pg = cfg.get("short_term_pre_gate")

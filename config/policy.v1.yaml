@@ -49,6 +49,27 @@ risk:
   adv_min_shares_day: 500000
   short_kill_switch_until: manual_reset  # alternativa documentada: month_end
 
+# Motor largo (sleeve 70%): core pasivo US + satélite acotado; pesos del bloque suman 1.0
+long_term_engine:
+  drift_rebalance_threshold_pp: 2.0          # umbral por línea (pp) — convención per_line (POLICY §11)
+  drift_convention: per_line
+  rebalance_rule: first_us_trading_day_of_calendar_month
+  max_long_rebalance_turnover_pct: null     # opcional: tope a sum(|Δw|) del sleeve; null = sin tope en engine v1
+  satellite_markets:
+    - US
+  core_lines:
+    - symbol: SPY
+      target_weight: 0.55
+    - symbol: IWM
+      target_weight: 0.30
+  satellite_lines:
+    - symbol: QQQ
+      target_weight: 0.15
+  satellite_limits:
+    max_satellite_weight_total: 0.20
+    max_weight_per_satellite_line: 0.15
+    max_satellite_names: 3
+
 # Parámetros explícitos del short_term_engine v1 (Fase 3, señal diaria auditable)
 short_term_engine:
   momentum_lookback_days: 20         # N días para retorno acumulado

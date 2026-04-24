@@ -15,6 +15,7 @@
     "execution_mode",
     "symbols",
     "risk",
+    "long_term_engine",
     "short_term_engine",
     "markets",
     "logging",
@@ -125,6 +126,88 @@
         "short_kill_switch_until": {
           "type": "string",
           "enum": ["manual_reset", "month_end"]
+        }
+      }
+    },
+    "long_term_engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "drift_rebalance_threshold_pp",
+        "drift_convention",
+        "rebalance_rule",
+        "max_long_rebalance_turnover_pct",
+        "satellite_markets",
+        "core_lines",
+        "satellite_lines",
+        "satellite_limits"
+      ],
+      "properties": {
+        "drift_rebalance_threshold_pp": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Umbral de drift por línea en puntos porcentuales (pp)."
+        },
+        "drift_convention": {
+          "type": "string",
+          "enum": ["per_line"],
+          "description": "v1: drift medido por símbolo vs objetivo del sleeve largo."
+        },
+        "rebalance_rule": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Regla inequívoca de día de revisión mensual (v1: primer día de sesión US del mes)."
+        },
+        "max_long_rebalance_turnover_pct": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Tope opcional a sum(|Δw|) al escalar el rebalanceo dentro del sleeve largo."
+        },
+        "satellite_markets": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "enum": ["US"] }
+        },
+        "core_lines": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["symbol", "target_weight"],
+            "properties": {
+              "symbol": { "type": "string", "minLength": 1 },
+              "target_weight": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "satellite_lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["symbol", "target_weight"],
+            "properties": {
+              "symbol": { "type": "string", "minLength": 1 },
+              "target_weight": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "satellite_limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_satellite_weight_total",
+            "max_weight_per_satellite_line",
+            "max_satellite_names"
+          ],
+          "properties": {
+            "max_satellite_weight_total": { "type": "number", "minimum": 0, "maximum": 1 },
+            "max_weight_per_satellite_line": { "type": "number", "minimum": 0, "maximum": 1 },
+            "max_satellite_names": { "type": "integer", "minimum": 0 }
+          }
         }
       }
     },

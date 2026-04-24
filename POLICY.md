@@ -182,7 +182,58 @@ Estos parámetros definen el comportamiento mínimo del motor corto en Fase 3 y 
 
 ---
 
-## 10. Pre-gate walk-forward (bloque corto, antes de subir capital)
+## 10. `long_term_engine` v1 (sleeve largo dentro del 70 %)
+
+El **sleeve largo** es la fracción de cartera asignada al horizonte largo dentro del objetivo **30/70** global. Los **pesos objetivo declarados en esta sección suman 1,0 (100 %)** *solo dentro del sleeve largo*; el motor **no** recalcula el 30/70 ni el 20/80 (eso corresponde al `allocator`).
+
+### 10.1 Core pasivo (ETFs US broad market)
+
+- **Cantidad de líneas core:** entre **2 y 3** símbolos US, cada uno con `target_weight` explícito en `config/policy.v1.yaml` → `long_term_engine.core_lines`.
+- **Criterio de baja redundancia (v1 por defecto):** combinar **beta amplia large-cap** (`SPY`, S&P 500) con **exposición small-cap US** (`IWM`, Russell 2000) para no duplicar solo capa large-cap. El satélite (`QQQ`) aporta sesgo **growth / mega-cap tech** con tope propio; solape SPY–QQQ es consciente y **acotado por peso** del satélite.
+- **Cambios de universo core:** solo en **fecha de rebalance mensual** salvo **procedimiento manual documentado** (commit + nota operativa) para cambios off-cycle.
+
+### 10.2 Satélite (lista acotada)
+
+Parámetros en YAML bajo `long_term_engine.satellite_limits` y líneas en `satellite_lines`:
+
+| Parámetro | Rol |
+|-----------|-----|
+| `max_satellite_weight_total` | Suma máxima de pesos objetivo del satélite. |
+| `max_weight_per_satellite_line` | Techo por línea satélite. |
+| `max_satellite_names` | Número máximo de tickers satélite simultáneos. |
+
+**Mercados v1:** satélite **solo US** (`satellite_markets: [US]`). Extensión AR quedaría explícita en versión futura de política + schema.
+
+**Gobernanza off-cycle:** variar tickers o pesos del satélite fuera del día de rebalance solo con **cambio coordinado** de `POLICY.md`, YAML y revisión humana (no automático en v1).
+
+### 10.3 Calendario y disparador de rebalanceo
+
+- **Día de revisión:** **primer día de sesión US** (`XNYS` / calendario versionado) de cada **mes calendario** (`rebalance_rule: first_us_trading_day_of_calendar_month`).
+- **Bandas anti-turnover:** convención **por línea** (`drift_convention: per_line`). Para cada símbolo del universo largo, \( \text{drift\_pp} = |\,w_{\text{obj}} - w_{\text{MTM}}\,| \times 100 \). Solo se considera emitir órdenes si **es día de rebalance** **y** existe al menos una línea con `drift_pp` **estrictamente mayor** que `drift_rebalance_threshold_pp`.
+- **halt / datos incompletos / sesión no US:** si el ciclo largo no puede valorar de forma fiable el universo (p. ej. `halt_on_data_quality`, sesión no válida, o **precio faltante o no finito** para cualquier símbolo del universo en el día de rebalance), la política v1 es **no operar el ciclo completo** y registrar motivo estructurado (`missing_or_invalid_price_abort_cycle`, etc.) — **sin** rebalanceo parcial a ciegas.
+
+### 10.4 Corporate actions y pesos
+
+Antes de calcular pesos MTM, las **cantidades** deben reflejar el pipeline v1 de **splits/dividendos** (ver plan Fase 2). El `long_term_engine` asume posiciones ya ajustadas por el orquestador; no sustituye al store de corporate actions.
+
+### 10.5 Salida: `orders_intent`
+
+Cada intent incluye al menos: `symbol`, `market`, `bucket: long`, `side`, `qty`, `intent_notional`, `reason_code` (`long_rebalance_core`, `long_rebalance_core_trim`, `long_satellite_add`, `long_satellite_trim`), `target_weight`, `current_weight`, `drift_pp`, `risk_snapshot`. No se incluye `signal_score` (no aplica en v1).
+
+### 10.6 Parámetros por defecto (obligatorio sincronizar con YAML)
+
+| Parámetro | Valor por defecto | Uso |
+|-----------|-------------------|-----|
+| `drift_rebalance_threshold_pp` | **2,0** | Umbral en puntos porcentuales por línea. |
+| `drift_convention` | **per_line** | Drift por símbolo vs objetivo. |
+| `rebalance_rule` | **first_us_trading_day_of_calendar_month** | Día de revisión mensual. |
+| `max_long_rebalance_turnover_pct` | **null** | Sin tope de sum(|Δw|) en engine v1 si es `null`. |
+
+**Regla de gobernanza:** mismos valores y semántica en `POLICY.md` y `config/policy.v1.yaml` en un único commit.
+
+---
+
+## 11. Pre-gate walk-forward (bloque corto, antes de subir capital)
 
 Objetivo: **rechazo automático** si en ventanas out-of-sample consecutivas el simulador con costos viola límites operativos. Los umbrales numéricos viven en `config/policy.v1.yaml` bajo `short_term_pre_gate.thresholds`; el piso de drawdown mensual del bucket corto usa por defecto el mismo valor que `short_kill_switch_monthly_dd` si `monthly_short_drawdown_floor` es `null`.
 

@@ -314,6 +314,32 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-017 — `long_term_engine` v1 (policy + funciones puras + contrato de intents)
+
+- **Fecha**: 2026-04-21
+- **Estado**: aceptada
+- **Contexto**: El plan paper-first define el sleeve largo (70 % global) con core pasivo US, satélite acotado, rebalanceo mensual con bandas y salida `orders_intent`, pero faltaba contrato ejecutable alineado a `POLICY.md` + YAML + CI.
+- **Decisión**:
+  - Añadir sección **§10** en `POLICY.md` y bloque obligatorio `long_term_engine` en `config/policy.v1.yaml` validado por `policy.v1.schema.json` (core 2–3 líneas, satélite con topes, `drift_convention: per_line`, `rebalance_rule` inequívoca).
+  - Implementar `core_sim.long_term_engine` con funciones puras: `target_weights`, `current_weights_mtm`, `drift_per_line_pp`, `should_rebalance_long`, `is_first_us_trading_day_of_month`, `build_long_term_orders_intent` y `long_term_engine_config_from_policy_dict`.
+  - **Día de rebalance**: primer día de sesión US del mes calendario (entrada explícita `us_sessions` desde `TradingCalendarStore` u orquestador).
+  - **Drift**: por línea; disparo si algún `drift_pp` **>** `drift_rebalance_threshold_pp` en día de rebalance.
+  - **Datos**: precio faltante o no válido para cualquier símbolo del universo en día de rebalance → **abortar ciclo completo** (`missing_or_invalid_price_abort_cycle`), sin rebalanceo parcial.
+  - **Corporate actions**: el engine **no** aplica splits; asume `positions_qty` ya ajustadas antes del cómputo MTM (coherente con Fase 2).
+  - **Turnover opcional**: `max_long_rebalance_turnover_pct` acota `sum(|Δw|)` escalando proporcionalmente los deltas de peso antes de generar órdenes.
+  - **QA (smart-testing)**: tests de comportamiento en `tests/test_long_term_engine.py` (banda, día no rebalance, abort por precio, post-split estable, tope de turnover, whitelist).
+- **Por qué**:
+  - Mantiene el motor **determinístico y auditable**, desacoplado del 30/70 y 20/80 (allocator), y coherente con agent-teams-lite (Spec vs Engines vs Data).
+  - La convención “abortar ciclo” evita estados parcialmente rebalanceados cuando falta un precio crítico.
+- **Consecuencias**:
+  - Falta integrar el **runner mensual** en `DailyEventBacktester` / pipeline (tarea Fase C del plan SDD `engine-long-v1`); este ADR cubre Fase A–B + QA base.
+  - Cualquier cambio de pesos o topes exige commit coordinado `POLICY.md` + YAML + schema.
+- **Alternativas consideradas**:
+  - **Rebalance parcial si falta un ticker**: descartada por riesgo de cartera inconsistente vs objetivos.
+  - **Drift agregado solo sobre el bloque core**: descartada en v1 para evitar doble conteo y ambigüedad con satélite; se deja `per_line` como única convención schema.
+
+---
+
 ## ADR-016 — Pre-gate walk-forward del bloque corto (costos, turnover, DD mensual)
 
 - **Fecha**: 2026-04-21
