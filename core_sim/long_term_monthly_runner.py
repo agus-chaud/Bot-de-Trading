@@ -46,10 +46,36 @@ def _empty_proposal(halt_reason: str) -> dict[str, Any]:
     }
 
 
+def _apply_corporate_actions(
+    positions_qty_long: dict[str, float],
+    corporate_actions: list[dict[str, Any]],
+) -> tuple[dict[str, float], list[dict[str, Any]]]:
+    """Aplica corporate actions a las posiciones antes de calcular pesos.
+
+    Retorna (adjusted_qty, applied_list).  No muta el dict original.
+    Solo procesa splits; dividends no ajustan qty (efecto en cash resuelto en otro lugar).
+    """
+    adjusted = dict(positions_qty_long)
+    applied: list[dict[str, Any]] = []
+    for action in corporate_actions:
+        symbol = str(action.get("symbol", "")).strip().upper()
+        action_type = str(action.get("action_type", ""))
+        value = float(action.get("value", 1.0))
+        if symbol not in adjusted:
+            continue
+        if action_type == "split":
+            adjusted[symbol] = adjusted[symbol] * value
+            applied.append({"symbol": symbol, "action_type": action_type, "value": value})
+        # dividend: no ajusta qty
+    return adjusted, applied
+
+
 def create_long_term_pipeline_handlers(
     policy_doc: dict[str, Any],
     repo_root: Path,
     ledger: Any,
+    *,
+    calendar_store: Any = None,
 ) -> dict[str, Callable[..., Any]]:
     """Handlers listos para inyectar en `DailyEventBacktester` (signals/propose/risk).
 
@@ -71,7 +97,9 @@ def create_long_term_pipeline_handlers(
         trading_day: date = ctx["trading_day"]
         daily_bars: dict[str, dict[str, float]] = ctx.get("daily_bars") or {}
 
-        us_sessions = ctx.get("us_sessions")
+        us_sessions = ctx.get("us_sessions") or (
+            calendar_store.us_sessions if calendar_store is not None else None
+        )
         if us_sessions is None:
             return _empty_signal("missing_us_sessions")
 
@@ -90,6 +118,13 @@ def create_long_term_pipeline_handlers(
         halt_long = bool(ctx.get("halt_long_engine", False))
         data_quality_halt = bool(ctx.get("data_quality_halt", False))
 
+        # Aplicar corporate actions antes de calcular pesos para evitar rebalanceos fantasma.
+        market_open: dict[str, Any] = ctx.get("market_open") or {}
+        corporate_actions: list[dict[str, Any]] = market_open.get("corporate_actions") or []
+        adjusted_positions_qty, ca_applied = _apply_corporate_actions(
+            positions_qty_long, corporate_actions
+        )
+
         # Precios del sleeve: cierre de cada símbolo de la whitelist US en daily_bars.
         prices: dict[str, float] = {}
         for sym in whitelist_us:
@@ -103,12 +138,16 @@ def create_long_term_pipeline_handlers(
             us_sessions=frozenset(us_sessions),
             long_bucket_mtm=float(long_bucket_mtm),
             long_cash=float(long_cash),
-            positions_qty=dict(positions_qty_long),
+            positions_qty=adjusted_positions_qty,
             prices=prices,
             whitelist_us=whitelist_us,
             halt_long_engine=halt_long,
             data_quality_halt=data_quality_halt,
         )
+
+        if ca_applied:
+            metrics = dict(metrics)
+            metrics["corporate_actions_applied"] = ca_applied
         return {
             "engine": "long_term_v1",
             "intents": intents,
@@ -169,7 +208,7 @@ def create_long_term_monthly_backtester(
     """Ensambla `DailyEventBacktester` con pipeline largo + broker + ledger."""
     from .event_engine import DailyEventBacktester
 
-    h = create_long_term_pipeline_handlers(policy_doc, repo_root, ledger)
+    h = create_long_term_pipeline_handlers(policy_doc, repo_root, ledger, calendar_store=calendar_store)
 
     def update_ledger(**kwargs: Any) -> dict[str, Any]:
         return ledger.mark_to_market(trading_day=kwargs["trading_day"], daily_bars=kwargs["daily_bars"])

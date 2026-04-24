@@ -297,3 +297,147 @@ def test_risk_check_filters_non_us_symbols():
     syms = {o["symbol"] for o in approved}
     assert "GGAL" not in syms
     assert "SPY" in syms or "IWM" in syms  # al menos uno de los US pasa
+
+
+# ---------------------------------------------------------------------------
+# Gap 1 — Corporate actions: split aplica qty ajustada
+# ---------------------------------------------------------------------------
+
+
+def test_corporate_action_split_applies_adjusted_qty():
+    """Un split 2:1 en SPY debe duplicar la qty antes de calcular pesos.
+
+    Con la qty pre-split, el peso calculado sería incorrecto (precio nuevo × qty
+    vieja).  Después del split, qty×precio_nuevo debe reflejar el peso real.
+    """
+    policy = _policy_doc()
+    ledger = _make_ledger()
+    h = create_long_term_pipeline_handlers(policy, REPO_ROOT, ledger)
+
+    # SPY pre-split: qty = 275, precio post-split = 50 → valor = 275×50 = 13_750
+    # Pero la qty ajustada debería ser 275×2 = 550, valor = 550×50 = 27_500
+    # SPY target = 55% de 100_000 = 55_000 → con qty pre-split hay drift enorme
+    spy_qty_pre_split = 275.0  # la mitad de la qty on-target (275 × 50 = 13_750, muy por debajo)
+    spy_price_post_split = 50.0  # precio se divide por 2 en un split 2:1
+
+    positions_pre_split = {
+        "SPY": spy_qty_pre_split,
+        "IWM": _QTY_ON_TARGET["IWM"],
+        "QQQ": _QTY_ON_TARGET["QQQ"],
+    }
+
+    daily_bars_post_split = {
+        "SPY": {"close": spy_price_post_split, "volume": 1_000_000},
+        "IWM": {"close": 50.0, "volume": 500_000},
+        "QQQ": {"close": 300.0, "volume": 200_000},
+    }
+
+    corporate_actions = [
+        {"date": str(_REBALANCE_DAY), "symbol": "SPY", "action_type": "split", "value": 2.0}
+    ]
+
+    ctx = _base_ctx(
+        trading_day=_REBALANCE_DAY,
+        positions_qty_long=positions_pre_split,
+    )
+    ctx["daily_bars"] = daily_bars_post_split
+    ctx["market_open"] = {"is_us_session": True, "corporate_actions": corporate_actions}
+
+    signals = h["generate_signals"](**ctx)
+
+    # La métrica debe registrar que se aplicó el corporate action
+    metrics = signals.get("metrics") or {}
+    ca_applied = metrics.get("corporate_actions_applied") or []
+    assert any(ca["symbol"] == "SPY" and ca["action_type"] == "split" for ca in ca_applied), (
+        "Se esperaba corporate_actions_applied con el split de SPY"
+    )
+
+
+def test_split_adjusted_qty_leaves_weights_stable_at_runner_level():
+    """Split 2:1 en SPY con posiciones exactamente en target → cero intents (no drift).
+
+    Escenario: antes del split SPY tenía 550 acciones @ 100 (valor = 55_000).
+    Después del split: precio cae a 50, qty se duplica a 1100 (valor sigue = 55_000).
+    El runner recibe qty pre-split (550) + precio post-split (50) → sin el fix
+    calcularía peso 550×50/100_000 = 0.275 (drift enorme).  Con el fix aplica split
+    2:1 → 1100×50/100_000 = 0.55 (exactamente on-target → without_drift_band).
+    """
+    policy = _policy_doc()
+    ledger = _make_ledger()
+    h = create_long_term_pipeline_handlers(policy, REPO_ROOT, ledger)
+
+    # Precio post-split = 50 (precio original 100 / 2)
+    spy_price_post_split = 50.0
+    # Qty pre-split = on-target (550); después del 2:1 el engine verá 1100 @ 50
+    spy_qty_pre_split = _QTY_ON_TARGET["SPY"]  # 550.0
+
+    positions_pre_split = {
+        "SPY": spy_qty_pre_split,
+        "IWM": _QTY_ON_TARGET["IWM"],
+        "QQQ": _QTY_ON_TARGET["QQQ"],
+    }
+
+    # Con el split, el precio baja a 50 pero el valor económico se mantiene igual.
+    # MTM ajustado: SPY 1100×50=55_000, IWM 600×50=30_000, QQQ 50×300=15_000 → 100_000
+    # (mismo MTM porque el valor económico no cambia en un split)
+    daily_bars_post_split = {
+        "SPY": {"close": spy_price_post_split, "volume": 1_000_000},
+        "IWM": {"close": 50.0, "volume": 500_000},
+        "QQQ": {"close": 300.0, "volume": 200_000},
+    }
+
+    corporate_actions = [
+        {"date": str(_REBALANCE_DAY), "symbol": "SPY", "action_type": "split", "value": 2.0}
+    ]
+
+    ctx = _base_ctx(
+        trading_day=_REBALANCE_DAY,
+        positions_qty_long=positions_pre_split,
+        long_bucket_mtm=_LONG_MTM,
+    )
+    ctx["daily_bars"] = daily_bars_post_split
+    ctx["market_open"] = {"is_us_session": True, "corporate_actions": corporate_actions}
+
+    signals = h["generate_signals"](**ctx)
+    proposed = h["propose_orders"](**{**ctx, "signals": signals})
+
+    # Con qty ajustada correctamente (1100 @ 50 = 55_000 = 55% de 100_000),
+    # no debe haber drift → cero intents
+    assert proposed["orders_intent"] == [], (
+        "El split 2:1 on-target no debe generar rebalanceo fantasma"
+    )
+    skips = signals.get("skips") or []
+    assert any(s.get("reason") == "within_drift_band" for s in skips), (
+        "Se esperaba within_drift_band (no drift después del split)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Gap 2 — us_sessions auto-derivación desde calendar_store
+# ---------------------------------------------------------------------------
+
+
+def test_us_sessions_auto_derived_from_calendar_store():
+    """Si us_sessions no está en pipeline_context, debe derivarse de calendar_store."""
+    policy = _policy_doc()
+    ledger = _make_ledger()
+
+    # Mock de calendar_store con us_sessions
+    calendar_store = MagicMock()
+    calendar_store.us_sessions = _US_SESSIONS_APRIL
+
+    h = create_long_term_pipeline_handlers(policy, REPO_ROOT, ledger, calendar_store=calendar_store)
+
+    # Contexto SIN us_sessions — el handler debe derivarlo del calendar_store
+    ctx = _base_ctx(trading_day=_REBALANCE_DAY)
+    del ctx["us_sessions"]
+
+    signals = h["generate_signals"](**ctx)
+
+    # No debe retornar missing_us_sessions
+    skips = signals.get("skips") or []
+    assert not any(s.get("reason") == "missing_us_sessions" for s in skips), (
+        "No debe fallar con missing_us_sessions cuando calendar_store provee us_sessions"
+    )
+    # El engine debe haber procesado normalmente
+    assert signals.get("engine") == "long_term_v1"
