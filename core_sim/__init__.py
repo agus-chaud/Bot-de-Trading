@@ -1,5 +1,6 @@
 """Simulation core package."""
 
+from .allocator import AllocatorResult, AllocationWeights, AllocationGeo, RedistributionEntry, compute_allocation
 from .calendar_store import TradingCalendarStore
 from .cost_model import CostBreakdown, CostModel, MarketCostConfig, SlippageMode
 from .corporate_actions import CorporateAction, CorporateActionsStore
@@ -35,6 +36,11 @@ from .short_term_engine import RiskCaps, ShortEngineConfig, build_orders_intent,
 from .short_term_pre_gate import PreGateReport, PreGateWindowResult, run_short_term_pre_gate
 
 __all__ = [
+    "AllocatorResult",
+    "AllocationWeights",
+    "AllocationGeo",
+    "RedistributionEntry",
+    "compute_allocation",
     "create_long_term_monthly_backtester",
     "create_long_term_pipeline_handlers",
     "CostBreakdown",

@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 import yaml
 
+from .allocator import AllocationGeo, AllocationWeights, compute_allocation
 from .short_term_engine import (
     RiskCaps,
     ShortEngineConfig,
@@ -371,14 +372,17 @@ def create_short_term_pipeline_handlers(
         if max_daily_short < 0.0 and daily_ret < max_daily_short:
             return _empty_proposal("short_daily_loss_limit")
 
-        by_m = portfolio_market_value_by_market(snap)
-        t_short = short_w * equity_total
-        t_ar = g_ar * equity_total
-        t_us = g_us * equity_total
-        short_tranche_headroom = max(0.0, t_short - short_mv)
+        alloc = compute_allocation(
+            equity_total=equity_total,
+            positions_snapshot=snap.get("positions") or {},
+            cash=float(snap.get("cash", 0.0)),
+            weights=AllocationWeights(short=short_w, long=1.0 - short_w),
+            geo=AllocationGeo(AR=g_ar, US=g_us),
+        )
+        short_tranche_headroom = alloc.headroom_by_bucket["short-AR"] + alloc.headroom_by_bucket["short-US"]
         geo_headroom = {
-            "US": max(0.0, t_us - by_m["US"]),
-            "AR": max(0.0, t_ar - by_m["AR"]),
+            "US": alloc.headroom_by_bucket["short-US"],
+            "AR": alloc.headroom_by_bucket["short-AR"],
         }
 
         lot_raw = ctx.get("lot_size_by_market") or {}
