@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Callable
 
 from .calendar_store import TradingCalendarStore
 from .corporate_actions import CorporateActionsStore
+from .pending_order_queue import PendingOrder, PendingOrderQueue
 
 
 EventHandler = Callable[..., Any]
@@ -47,6 +49,8 @@ class DailyEventBacktester:
         update_ledger: EventHandler,
         calendar_store: TradingCalendarStore | None = None,
         corporate_actions_store: CorporateActionsStore | None = None,
+        execution_mode: str = "auto",
+        pending_queue: PendingOrderQueue | None = None,
     ) -> None:
         self.generate_signals = generate_signals
         self.propose_orders = propose_orders
@@ -55,6 +59,8 @@ class DailyEventBacktester:
         self.update_ledger = update_ledger
         self.calendar_store = calendar_store
         self.corporate_actions_store = corporate_actions_store
+        self.execution_mode = execution_mode
+        self.pending_queue = pending_queue
 
     def run_day(
         self,
@@ -114,11 +120,49 @@ class DailyEventBacktester:
         risk_checked_orders = self.risk_check(**{**ctx, "proposed_orders": proposed_orders})
         events.append(EventStep(name="RiskChecked", payload=risk_checked_orders))
 
-        fills = self.fill_orders(
-            trading_day=trading_day,
-            approved_orders=risk_checked_orders,
-            daily_bars=daily_bars,
-        )
+        if self.execution_mode == "semi_auto" and self.pending_queue is not None:
+            _logger = logging.getLogger("event_engine")
+            now_iso = datetime.now(tz=timezone.utc).isoformat()
+
+            # Stop loss orders bypass the queue — they must be filled immediately
+            stop_loss_orders = [o for o in risk_checked_orders if o.get("reason") == "stop_loss"]
+            queued_orders = [o for o in risk_checked_orders if o.get("reason") != "stop_loss"]
+
+            for i, order in enumerate(queued_orders):
+                self.pending_queue.add(
+                    PendingOrder(
+                        order_id=f"{trading_day.isoformat()}_{i}",
+                        symbol=str(order.get("symbol", "")),
+                        qty=int(float(order.get("qty", 0))),
+                        side=str(order.get("side", "")),
+                        market=str(order.get("market", "")),
+                        engine=str(order.get("bucket", "short")),
+                        proposed_at=now_iso,
+                        meta=dict(order),
+                    )
+                )
+            _logger.info(
+                "orders queued for human approval",
+                extra={"count": len(queued_orders), "trading_day": trading_day.isoformat()},
+            )
+            if stop_loss_orders:
+                fills = self.fill_orders(
+                    trading_day=trading_day,
+                    approved_orders=stop_loss_orders,
+                    daily_bars=daily_bars,
+                )
+                _logger.info(
+                    "stop loss orders filled directly",
+                    extra={"count": len(stop_loss_orders), "trading_day": trading_day.isoformat()},
+                )
+            else:
+                fills = []
+        else:
+            fills = self.fill_orders(
+                trading_day=trading_day,
+                approved_orders=risk_checked_orders,
+                daily_bars=daily_bars,
+            )
         events.append(EventStep(name="OrdersFilled", payload=fills))
 
         ledger_snapshot = self.update_ledger(trading_day=trading_day, fills=fills, daily_bars=daily_bars)

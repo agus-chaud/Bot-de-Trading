@@ -34,6 +34,8 @@ from .short_term_day_runner import (
 )
 from .short_term_engine import RiskCaps, ShortEngineConfig, build_orders_intent, compute_signal_candidates, rank_top_k_by_market
 from .short_term_pre_gate import PreGateReport, PreGateWindowResult, run_short_term_pre_gate
+from .risk_guardrails import GuardrailResult, check_short_risk, check_long_risk, log_risk_cycle
+from .pending_order_queue import PendingOrder, PendingOrderQueue
 
 __all__ = [
     "AllocatorResult",
@@ -80,4 +82,10 @@ __all__ = [
     "compute_signal_candidates",
     "rank_top_k_by_market",
     "run_short_term_pre_gate",
+    "GuardrailResult",
+    "check_short_risk",
+    "check_long_risk",
+    "log_risk_cycle",
+    "PendingOrder",
+    "PendingOrderQueue",
 ]

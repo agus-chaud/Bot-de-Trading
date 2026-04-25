@@ -126,6 +126,17 @@
         "short_kill_switch_until": {
           "type": "string",
           "enum": ["manual_reset", "month_end"]
+        },
+        "stop_loss": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["atr_multiplier", "atr_lookback", "fallback_pct_us", "fallback_pct_ar"],
+          "properties": {
+            "atr_multiplier": { "type": "number", "exclusiveMinimum": 0 },
+            "atr_lookback": { "type": "integer", "minimum": 1 },
+            "fallback_pct_us": { "type": "number", "maximum": 0 },
+            "fallback_pct_ar": { "type": "number", "maximum": 0 }
+          }
         }
       }
     },

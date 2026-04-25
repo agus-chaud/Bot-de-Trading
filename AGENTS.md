@@ -36,10 +36,38 @@ Usar roles para **acotar** qué toca cada subagente o PR. Solapamiento mínimo.
 | **Core sim** | Paper broker, ledger, costos, event engine | `core_sim/paper_broker_sim.py`, `core_sim/ledger.py`, `core_sim/event_engine.py`, `core_sim/cost_model.py` |
 | **Data** | Snapshot OHLCV + historial, whitelist, calendario en `MarketOpen`, corporate actions v1 | `core_sim/short_term_day_runner.py`, `core_sim/long_term_engine.py` (input contract), `core_sim/calendar_store.py` |
 | **Engines** | Señales → intents; integración diaria corta; motor largo mensual por bandas; pre-gate walk-forward OOS | `core_sim/short_term_engine.py`, `core_sim/short_term_day_runner.py`, `core_sim/long_term_engine.py`, `core_sim/short_term_pre_gate.py`, `scripts/run_short_term_pre_gate.py` |
-| **Risk** | Kill switch mensual corto, pérdida diaria bucket corto, ventanas no-trade, `halt_on_data_quality`, whitelist defensiva; allocator 30/70 + 20/80 en sizing | `core_sim/short_term_day_runner.py` (handlers `propose_orders` / `risk_check`), `config/policy.v1.yaml` → `risk`, `weights`, `geo` |
+| **Risk** | Guardrails centralizados en `risk_guardrails.py`: fail-fast data quality, ventanas no-trade, kill switch mensual corto, pérdida diaria bucket corto, stop loss ATR por ticker; allocator 30/70 + 20/80 en sizing; gestión de riesgo motor largo (-1.5% diario) | `core_sim/risk_guardrails.py`, `core_sim/short_term_day_runner.py` (handlers `propose_orders` / `risk_check`), `core_sim/long_term_monthly_runner.py`, `config/policy.v1.yaml` → `risk`, `weights`, `geo`, `stop_loss` |
 | **QA / CI** | Tests por **comportamiento** (ver *Smart testing*), schema policy, cobertura `core_sim` en CI | `tests/`, `.github/workflows/ci.yml` |
 
 Un agente en rol **Spec** no debería implementar broker simulado; uno en rol **Core sim** no debería reescribir listas blancas sin coordinación con **Spec**.
+
+## Arquitectura de riesgo (Fase 4)
+
+El módulo `core_sim/risk_guardrails.py` es el **punto centralizado de decisiones de riesgo** del sistema:
+
+- **`check_short_risk()`**: ejecuta fail-fast por orden de severidad operativa:
+  1. Calidad de datos (`data_quality_flags`).
+  2. Ventana no-trade intradía (390 min sesión US).
+  3. Kill switch por drawdown mensual bucket corto (-8%).
+  4. Límite de pérdida diaria bucket corto.
+  - Retorna `GuardrailResult` con decisión binaria (trade / no-trade) y motivo. **No ejecuta**, solo recomienda.
+
+- **`check_long_risk()`**: guardrail simplificado para motor largo:
+  - Límite diario del sleeve largo (-1.5% del equity).
+  - Retorna `GuardrailResult` análogo.
+
+- **`check_stop_loss()` + `compute_atr()`**: evaluación de stop loss por ticker:
+  - Calcula ATR(14) sobre histórico; si faltan 15 barras, usa fallback porcentaje.
+  - **Bypass de otros guardrails**: un stop loss **SIEMPRE sale**, incluso fuera de ventana no-trade.
+  - En semi_auto, la orden de stop se ejecuta directo sin pasar a `PendingOrderQueue`.
+
+- **`log_risk_cycle()`**: JSON estructurado con decisión, flags, métricas de MTM y timestamp para auditoría.
+
+**Aclaración arquitectónica**: `risk_guardrails` NO es un ejecutor — es un **componente de recomendación**. El executor real está en:
+- `short_term_day_runner.py` (handlers `propose_orders` y `risk_check`): verifica recomendaciones de `check_short_risk()` + `check_stop_loss()` y decide si bloquea la orden o permite ejecución.
+- `long_term_monthly_runner.py` (handler de rebalanceo): verifica `check_long_risk()` antes de generar intents.
+
+Esto permite auditar "por qué no se ejecutó" separando la lógica de decisión (guardrails) del flujo operativo (runners).
 
 ## Smart testing (criterio de calidad)
 

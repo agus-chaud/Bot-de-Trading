@@ -21,6 +21,7 @@ from .long_term_engine import (
     build_long_term_orders_intent,
     long_term_engine_config_from_policy_dict,
 )
+from .risk_guardrails import check_long_risk, log_risk_cycle
 from .short_term_day_runner import load_merged_whitelist, orders_intent_to_broker_orders
 
 
@@ -92,6 +93,7 @@ def create_long_term_pipeline_handlers(
     lt_cfg: LongTermEngineConfig = long_term_engine_config_from_policy_dict(
         policy_doc["long_term_engine"]
     )
+    max_daily_long = float(policy_doc["risk"]["max_daily_loss_long_pct"])
 
     def generate_signals(**ctx: Any) -> dict[str, Any]:
         trading_day: date = ctx["trading_day"]
@@ -160,6 +162,20 @@ def create_long_term_pipeline_handlers(
         if not isinstance(signals, dict):
             return _empty_proposal("invalid_signals")
 
+        snap = ledger.mark_to_market(trading_day=ctx["trading_day"], daily_bars=ctx["daily_bars"])
+        sb = snap or {}
+        guardrail = check_long_risk(sb, {"max_daily_long": max_daily_long})
+        if not guardrail.allowed:
+            log_risk_cycle(
+                engine="long",
+                date=ctx["trading_day"].isoformat(),
+                guardrail=guardrail,
+                orders_proposed=0,
+                orders_filled=0,
+                kill_switch_active=False,
+            )
+            return _empty_proposal(guardrail.reason)
+
         intents: list[dict[str, Any]] = signals.get("intents") or []
         metrics: dict[str, Any] = signals.get("metrics") or {}
 
@@ -169,6 +185,14 @@ def create_long_term_pipeline_handlers(
             return _empty_proposal(str(skip_reason))
 
         broker_orders = orders_intent_to_broker_orders(intents)
+        log_risk_cycle(
+            engine="long",
+            date=ctx["trading_day"].isoformat(),
+            guardrail=guardrail,
+            orders_proposed=len(intents),
+            orders_filled=0,
+            kill_switch_active=False,
+        )
         return {
             "orders_intent": intents,
             "broker_orders": broker_orders,
@@ -181,6 +205,12 @@ def create_long_term_pipeline_handlers(
             broker_orders: list[dict[str, Any]] = proposed.get("broker_orders") or []
         else:
             broker_orders = list(proposed)
+
+        snap = ledger.mark_to_market(trading_day=ctx["trading_day"], daily_bars=ctx["daily_bars"])
+        sb = snap or {}
+        guardrail = check_long_risk(sb, {"max_daily_long": max_daily_long})
+        if not guardrail.allowed:
+            return []
 
         # v1: long es sólo US → filtrar por whitelist_us
         approved: list[dict[str, str | float]] = []

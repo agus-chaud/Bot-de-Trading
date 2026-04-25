@@ -68,18 +68,25 @@ La transición a real está planteada como gate, no como salto de fe:
 
 ### Pendiente principal
 
-- Matriz de riesgo extendida al **motor largo** (pérdidas diarias/mensuales long/total, etc.) y módulo dedicado `risk_guardrails` si se extrae del runner.
-- Integración completa del `long_term_engine`.
+- Integración completa del `long_term_monthly_runner` en `event_engine`.
 - Informe KPI agregado (Sharpe, Sortino, Calmar, alpha vs benchmark, etc.) y gate de ramp más allá del pre-gate mínimo del corto.
+- Conectar fuentes de datos reales (feeds, APIs broker) con `PaperBrokerSim` como adaptador, manteniendo interfaces estables.
 
 
 ## Componentes clave y cómo se vinculan
 
 - `calendar_store` + `corporate_actions`: definen dias y horarios válidos US/AR y ajustan posiciones por splits/dividendos para evitar rebalanceos "fantasma".
-- `short_term_engine` + `short_term_day_runner`: motor diario de corto plazo (momentum + filtros de liquidez/volatilidad + top-K + sizing por riesgo + kill switch).
+- `risk_guardrails`: módulo centralizado de decisiones de riesgo (fail-fast por calidad de datos, ventanas no-trade, límites diarios, kill switch); retorna `GuardrailResult`, no ejecuta.
+  - `check_short_risk()`: validaciones del motor corto (data quality → no-trade window → kill switch → daily loss).
+  - `check_long_risk()`: guardrail diario -1.5% para motor largo.
+  - `compute_atr()` + `check_stop_loss()`: stop loss por ticker individual usando ATR(14) con fallback a porcentaje.
+  - `log_risk_cycle()`: JSON logging estructurado de decisiones de riesgo.
+- `short_term_engine` + `short_term_day_runner`: motor diario de corto plazo (momentum + filtros de liquidez/volatilidad + top-K + sizing por riesgo); integra `risk_guardrails` en pipeline.
+- `pending_order_queue`: cola para modo semi_auto, permite validación manual antes de ejecutar.
 - `short_term_pre_gate`: walk-forward OOS automático del bloque corto antes de habilitar más capital.
-- `long_term_engine` + `long_term_monthly_runner`: motor mensual del sleeve largo (pesos objetivo, bandas de drift, intents de rebalanceo).
-- Flujo completo: Data -> Engines -> Risk/Allocator -> `paper_broker_sim` -> `ledger`; ambos motores convergen en el mismo núcleo para mantener consistencia y auditoría.
+- `long_term_engine` + `long_term_monthly_runner`: motor mensual del sleeve largo (pesos objetivo, bandas de drift, intents de rebalanceo); integra `check_long_risk()`.
+- `event_engine`: orquestador diario con soporte para `execution_mode` (auto/semi_auto) y bypass de stop loss en semi_auto.
+- Flujo completo: Data -> Engines -> `risk_guardrails` -> Allocator -> `paper_broker_sim` -> `ledger`; ambos motores convergen en el mismo núcleo para mantener consistencia y auditoría.
 
 ## Contratos y documentación clave
 

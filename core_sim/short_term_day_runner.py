@@ -19,6 +19,7 @@ from typing import Any, Callable
 import yaml
 
 from .allocator import AllocationGeo, AllocationWeights, compute_allocation
+from .risk_guardrails import check_short_risk, check_stop_loss, log_risk_cycle
 from .short_term_engine import (
     RiskCaps,
     ShortEngineConfig,
@@ -290,6 +291,13 @@ def create_short_term_pipeline_handlers(
     halt_on_dq = bool(risk_cfg.get("halt_on_data_quality", True))
     no_trade_first = int(risk_cfg["no_trade_first_minutes"])
     no_trade_last = int(risk_cfg["no_trade_last_minutes"])
+    _sl_raw = risk_cfg.get("stop_loss") or {}
+    stop_loss_config = {
+        "atr_multiplier": float(_sl_raw.get("atr_multiplier", 2.0)),
+        "atr_lookback": int(_sl_raw.get("atr_lookback", 14)),
+        "fallback_pct_us": float(_sl_raw.get("fallback_pct_us", -0.05)),
+        "fallback_pct_ar": float(_sl_raw.get("fallback_pct_ar", -0.08)),
+    }
 
     def _empty_proposal(halt_reason: str) -> dict[str, Any]:
         return {
@@ -347,15 +355,6 @@ def create_short_term_pipeline_handlers(
         if not isinstance(signals, dict):
             return _empty_proposal("invalid_signals")
         flags = signals.get("risk_flags") or {}
-        if bool(flags.get("halt_on_data_quality", True)) and not bool(flags.get("data_quality_ok", True)):
-            return _empty_proposal("halt_data_quality")
-
-        if in_no_trade_window(
-            no_trade_first=no_trade_first,
-            no_trade_last=no_trade_last,
-            session_minutes_from_open=ctx.get("session_minutes_from_open"),
-        ):
-            return _empty_proposal("no_trade_window")
 
         selected = signals.get("selected") or []
         snap = ledger.mark_to_market(trading_day=ctx["trading_day"], daily_bars=ctx["daily_bars"])
@@ -365,12 +364,23 @@ def create_short_term_pipeline_handlers(
         short_cash = min(float(snap["cash"]), short_equity)
 
         sb = snap.get("short_bucket") or {}
-        if float(sb.get("monthly_drawdown", 0.0)) <= kill_dd:
-            return _empty_proposal("short_monthly_kill_switch")
-
-        daily_ret = float(sb.get("daily_return", 0.0))
-        if max_daily_short < 0.0 and daily_ret < max_daily_short:
-            return _empty_proposal("short_daily_loss_limit")
+        risk_config = {
+            "kill_dd": kill_dd,
+            "max_daily_short": max_daily_short,
+            "no_trade_first": no_trade_first,
+            "no_trade_last": no_trade_last,
+        }
+        guardrail = check_short_risk(sb, flags, risk_config, ctx.get("session_minutes_from_open"))
+        if not guardrail.allowed:
+            log_risk_cycle(
+                engine="short",
+                date=ctx["trading_day"].isoformat(),
+                guardrail=guardrail,
+                orders_proposed=0,
+                orders_filled=0,
+                kill_switch_active=(guardrail.reason == "short_monthly_kill_switch"),
+            )
+            return _empty_proposal(guardrail.reason)
 
         alloc = compute_allocation(
             equity_total=equity_total,
@@ -402,6 +412,47 @@ def create_short_term_pipeline_handlers(
             geo_headroom=geo_headroom,
         )
         broker_orders = orders_intent_to_broker_orders(intents)
+
+        # Evaluate stop loss for every open short position regardless of guardrail state
+        all_positions = snap.get("positions") or {}
+        sl_positions: dict[str, dict] = {}
+        for sym, pos in all_positions.items():
+            if str(pos.get("bucket")) == "short":
+                sl_positions[sym] = {
+                    "entry_price": float(pos.get("avg_cost", 0.0)),
+                    "qty": float(pos.get("qty", 0.0)),
+                    "market": str(pos.get("market", "US")),
+                }
+        ohlcv_history: dict[str, list[dict]] = ctx.get("ohlcv_history") or {}
+        sl_triggered = check_stop_loss(
+            positions=sl_positions,
+            daily_bars=ctx["daily_bars"],
+            price_history=ohlcv_history,
+            config=stop_loss_config,
+        )
+        for sym in sl_triggered:
+            pos_info = sl_positions[sym]
+            bar = ctx["daily_bars"].get(sym) or {}
+            broker_orders.append(
+                {
+                    "symbol": sym,
+                    "side": "sell",
+                    "qty": float(pos_info["qty"]),
+                    "price": float(bar.get("close", 0.0)),
+                    "market": pos_info["market"],
+                    "bucket": "short",
+                    "reason": "stop_loss",
+                }
+            )
+
+        log_risk_cycle(
+            engine="short",
+            date=ctx["trading_day"].isoformat(),
+            guardrail=guardrail,
+            orders_proposed=len(intents),
+            orders_filled=0,  # fills happen later in the event pipeline
+            kill_switch_active=False,
+        )
         return {
             "orders_intent": intents,
             "broker_orders": broker_orders,
@@ -416,33 +467,32 @@ def create_short_term_pipeline_handlers(
         else:
             broker_orders = proposed
 
+        # Stop loss orders always pass — split them out before the guardrail check
+        stop_loss_orders = [o for o in broker_orders if o.get("reason") == "stop_loss"]
+        normal_orders = [o for o in broker_orders if o.get("reason") != "stop_loss"]
+
         signals = ctx.get("signals") or {}
         flags = signals.get("risk_flags") or {}
-        if bool(flags.get("halt_on_data_quality", True)) and not bool(flags.get("data_quality_ok", True)):
-            return []
-
-        if in_no_trade_window(
-            no_trade_first=no_trade_first,
-            no_trade_last=no_trade_last,
-            session_minutes_from_open=ctx.get("session_minutes_from_open"),
-        ):
-            return []
 
         snap = ledger.mark_to_market(trading_day=ctx["trading_day"], daily_bars=ctx["daily_bars"])
         sb = snap.get("short_bucket") or {}
-        if float(sb.get("monthly_drawdown", 0.0)) <= kill_dd:
-            return []
-        if max_daily_short < 0.0 and float(sb.get("daily_return", 0.0)) < max_daily_short:
-            return []
+        risk_config = {
+            "kill_dd": kill_dd,
+            "max_daily_short": max_daily_short,
+            "no_trade_first": no_trade_first,
+            "no_trade_last": no_trade_last,
+        }
+        guardrail = check_short_risk(sb, flags, risk_config, ctx.get("session_minutes_from_open"))
 
-        approved: list[dict[str, str | float]] = []
-        for order in broker_orders:
-            sym = str(order["symbol"]).strip().upper()
-            if sym not in merged:
-                continue
-            if merged[sym] != str(order.get("market", "")):
-                continue
-            approved.append(order)
+        approved: list[dict[str, str | float]] = list(stop_loss_orders)
+        if guardrail.allowed:
+            for order in normal_orders:
+                sym = str(order["symbol"]).strip().upper()
+                if sym not in merged:
+                    continue
+                if merged[sym] != str(order.get("market", "")):
+                    continue
+                approved.append(order)
         return approved
 
     return {

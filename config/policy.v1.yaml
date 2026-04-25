@@ -48,6 +48,11 @@ risk:
   halt_on_data_quality: true
   adv_min_shares_day: 500000
   short_kill_switch_until: manual_reset  # alternativa documentada: month_end
+  stop_loss:
+    atr_multiplier: 2.0
+    atr_lookback: 14
+    fallback_pct_us: -0.05
+    fallback_pct_ar: -0.08
 
 # Motor largo (sleeve 70%): core pasivo US + satélite acotado; pesos del bloque suman 1.0
 long_term_engine:

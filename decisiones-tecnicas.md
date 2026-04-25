@@ -382,6 +382,34 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-020 — Stop Loss ATR vs Porcentaje Fijo
+
+- **Fecha**: 2026-04-24
+- **Estado**: aceptada
+- **Contexto**: El motor corto operaba con protecciones a nivel de drawdown mensual y límite diario, pero faltaba mecanismo de stop loss por posición individual (per-ticker) para salidas rápidas en movimientos adversos. Paper trading con barras diarias requiere aproximación robusta a volatilidad.
+- **Decisión**:
+  - Implementar stop loss **individual por ticker** en motor corto usando **ATR(14)** con fallback a porcentaje fijo.
+  - El multiplicador ATR (ej. 1.5x) y porcentaje fallback (ej. -5% US / -8% AR) viven en `config/policy.v1.yaml` bajo `risk.stop_loss`.
+  - Stop loss es un **guardrail especial** en `risk_guardrails.check_stop_loss()`: retorna `GuardrailDecision` indicando si la posición debe cerrarse.
+  - En modo **auto**, la orden de stop loss **bypasea otros guardrails** (ventana no-trade, kill switch) — siempre sale; no entra.
+  - En modo **semi_auto**, la orden de stop loss se ejecuta directamente sin pasar a `PendingOrderQueue`.
+- **Por qué**:
+  - ATR captura volatilidad local y se adapta dinámicamente, mejor que porcentaje fijo para múltiples régimenes de mercado.
+  - El stop por ticker es **quirúrgico**: cierramos solo la posición problemática, no el bucket completo ni el portfolio.
+  - Bypass de otros guardrails refleja realidad operativa: un stop loss debe ejecutarse aunque esté fuera de ventana no-trade (protección > horario).
+- **Consecuencias**:
+  - Requiere **15+ barras previas** para calcular ATR; si faltan, se cae a porcentaje fallback sin error fatal.
+  - Las órdenes de stop loss **no respetan ventana no-trade**, lo cual está auditado y es intencional.
+  - En semi_auto, el operador ve la recomendación de stop pero NO puede rechazarla vía `PendingOrderQueue` — se ejecuta directa.
+  - Caída del ATR a fallback queda logeada en JSON estructurado para auditoría.
+- **Alternativas consideradas**:
+  - **Porcentaje fijo para todos (-5% US/-8% AR)**: simple pero insensible a volatilidad creciente; rechazada.
+  - **Stop por bucket completo**: menos precisa, impacta posiciones sanas; rechazada.
+  - **Stop por low intradiario**: requiere datos intradía; rechazada en v1 paper-first con barras diarias.
+  - **Integrar stop loss dentro del risk_guardrails.check_short_risk()**: descartada para separar concerns (guardrail fail-fast vs protección por posición).
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
