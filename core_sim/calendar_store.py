@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -32,6 +33,31 @@ class TradingCalendarStore:
 
         us_sessions = frozenset(_to_date(day) for day in payload["us"]["sessions"])
         ar_business_days = frozenset(_to_date(day) for day in payload["ar"]["business_days"])
+        return cls(us_sessions=us_sessions, ar_business_days=ar_business_days)
+
+    @classmethod
+    def from_db(cls, db_path: str) -> "TradingCalendarStore":
+        """Load calendar data from a MarketDB SQLite file.
+
+        Args:
+            db_path: Path to the SQLite database created by MarketDB.
+        """
+        conn = sqlite3.connect(db_path)
+        try:
+            cursor = conn.execute(
+                "SELECT ts FROM calendars WHERE venue = ?", ("XNYS",)
+            )
+            us_sessions = frozenset(
+                date.fromisoformat(row[0]) for row in cursor.fetchall()
+            )
+            cursor = conn.execute(
+                "SELECT ts FROM calendars WHERE venue = ?", ("XBUE",)
+            )
+            ar_business_days = frozenset(
+                date.fromisoformat(row[0]) for row in cursor.fetchall()
+            )
+        finally:
+            conn.close()
         return cls(us_sessions=us_sessions, ar_business_days=ar_business_days)
 
     def is_us_session(self, trading_day: date) -> bool:

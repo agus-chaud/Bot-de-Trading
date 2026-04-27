@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: core-paper-sim
     content: Implementar paper_broker_sim + ledger + modelo de costos + tests unitarios de fills y comisiones
-    status: pending
+    status: completed
   - id: data-layer
     content: Definir esquema de datos común + conectores US/AR (paper con datos reales) + calendario y corporate actions mínimos US
     status: pending
@@ -28,7 +28,7 @@ todos:
     status: completed
   - id: engine-short
     content: Implementar short_term_engine diario + filtros liquidez/vol + integración allocator
-    status: pending
+    status: completed
   - id: risk-kill-switch
     content: Implementar risk_guardrails + drawdown mensual corto + pausa motor y logging
     status: pending
