@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -89,6 +90,38 @@ class CorporateActionsStore:
             )
             grouped.setdefault(event.action_date, []).append(event)
 
+        frozen = {day: tuple(events) for day, events in grouped.items()}
+        return cls(actions_by_day=frozen)
+
+    @classmethod
+    def from_db(cls, db_path: str) -> "CorporateActionsStore":
+        """Load corporate actions from a MarketDB SQLite file.
+
+        The DB schema for corporate_actions is:
+            symbol TEXT, ts TEXT, type TEXT, factor REAL
+        where *type* maps to action_type and *factor* maps to value.
+
+        Args:
+            db_path: Path to the SQLite database created by MarketDB.
+        """
+        conn = sqlite3.connect(db_path)
+        try:
+            cursor = conn.execute(
+                "SELECT symbol, ts, type, factor FROM corporate_actions"
+            )
+            grouped: dict[date, list[CorporateAction]] = {}
+            for row in cursor.fetchall():
+                symbol, ts_str, action_type, factor = row
+                action_date = date.fromisoformat(ts_str)
+                event = CorporateAction(
+                    action_date=action_date,
+                    symbol=symbol,
+                    action_type=action_type,
+                    value=float(factor),
+                )
+                grouped.setdefault(action_date, []).append(event)
+        finally:
+            conn.close()
         frozen = {day: tuple(events) for day, events in grouped.items()}
         return cls(actions_by_day=frozen)
 
