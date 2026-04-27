@@ -1,6 +1,7 @@
 """Centralized risk guardrail checks for short and long buckets.
 
 Pure functions — no side effects except logging in log_risk_cycle.
+check_and_persist_kill_switch is the exception: it has DB side effects by design.
 """
 
 from __future__ import annotations
@@ -8,7 +9,12 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from data.storage import MarketDB
 
 
 @dataclass
@@ -170,6 +176,70 @@ def check_stop_loss(
             triggered.append(symbol)
 
     return triggered
+
+
+def check_and_persist_kill_switch(
+    sb: dict,
+    config: dict,
+    db: "MarketDB",
+    engine: str,
+    today: date,
+) -> GuardrailResult:
+    """Check monthly kill switch with DB persistence and auto-reset on month boundary.
+
+    Side effects: may write to kill_switch_log and create an alert file under alerts/.
+    """
+    _log = logging.getLogger("risk_guardrails")
+
+    # Step 1: auto-reset when the activation belongs to a prior month
+    state = db.get_kill_switch_state(engine)
+    if state.active and state.activated_at is not None:
+        if (state.activated_at.year, state.activated_at.month) < (today.year, today.month):
+            db.reset_kill_switch(today, category="auto_month_reset", reason="new month started", auto=True, engine=engine)
+            _log.info(json.dumps({"event": "kill_switch_auto_reset", "engine": engine, "date": today.isoformat()}))
+
+    # Step 2: read state after potential auto-reset
+    state = db.get_kill_switch_state(engine)
+
+    # Step 3: already active this month — block without re-activating
+    if state.active:
+        return GuardrailResult(
+            allowed=False,
+            reason="short_monthly_kill_switch",
+            meta={"monthly_drawdown": state.monthly_dd, "kill_dd": config.get("kill_dd", -0.08), "persisted": True},
+        )
+
+    # Step 4: check current DD
+    monthly_dd = float(sb.get("monthly_drawdown", 0.0))
+    kill_dd = float(config.get("kill_dd", -0.08))
+    if monthly_dd <= kill_dd:
+        db.activate_kill_switch(today, monthly_dd, engine)
+
+        alert_dir = Path("alerts")
+        alert_dir.mkdir(parents=True, exist_ok=True)
+        alert_path = alert_dir / f"kill_switch_{today.isoformat()}.json"
+        alert_payload = {
+            "ts": datetime.now(tz=timezone.utc).isoformat(),
+            "engine": engine,
+            "monthly_dd": monthly_dd,
+            "kill_dd": kill_dd,
+            "date": today.isoformat(),
+        }
+        alert_path.write_text(json.dumps(alert_payload))
+
+        _log.error(json.dumps({"event": "kill_switch_activated", "engine": engine, "monthly_dd": monthly_dd, "kill_dd": kill_dd, "date": today.isoformat()}))
+        return GuardrailResult(
+            allowed=False,
+            reason="short_monthly_kill_switch",
+            meta={"monthly_drawdown": monthly_dd, "kill_dd": kill_dd, "persisted": False},
+        )
+
+    # Step 5: all clear
+    return GuardrailResult(
+        allowed=True,
+        reason="ok",
+        meta={"monthly_drawdown": monthly_dd},
+    )
 
 
 def log_risk_cycle(

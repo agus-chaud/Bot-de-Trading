@@ -5,10 +5,23 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any
 
 from data.schema import CorporateActionRow, OHLCVRow
+
+
+@dataclass(frozen=True)
+class KillSwitchState:
+    active: bool
+    engine: str
+    activated_at: date | None
+    monthly_dd: float | None
+    reset_at: date | None
+    reset_category: str | None
+    reset_reason: str | None
+    auto_reset: bool
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +72,20 @@ CREATE TABLE IF NOT EXISTS fetch_log (
 );
 """
 
+_CREATE_KILL_SWITCH_LOG = """
+CREATE TABLE IF NOT EXISTS kill_switch_log (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    engine         TEXT NOT NULL,
+    event          TEXT NOT NULL,
+    event_date     TEXT NOT NULL,
+    monthly_dd     REAL,
+    reset_category TEXT,
+    reset_reason   TEXT,
+    auto_reset     INTEGER DEFAULT 0,
+    created_at     TEXT NOT NULL
+);
+"""
+
 
 class MarketDB:
     """Local SQLite store for OHLCV bars, corporate actions, and fetch audit logs."""
@@ -92,6 +119,7 @@ class MarketDB:
                 + _CREATE_CORPORATE_ACTIONS
                 + _CREATE_CALENDARS
                 + _CREATE_FETCH_LOG
+                + _CREATE_KILL_SWITCH_LOG
             )
 
     # ------------------------------------------------------------------
@@ -254,6 +282,90 @@ class MarketDB:
                     entry.get("extra"),
                 ),
             )
+
+    # ------------------------------------------------------------------
+    # Kill switch log
+    # ------------------------------------------------------------------
+
+    def activate_kill_switch(self, event_date: date, monthly_dd: float, engine: str = "short") -> None:
+        """Inserta un evento 'activated'. No verifica estado previo — eso lo hace el caller."""
+        created_at = datetime.now(tz=timezone.utc).isoformat()
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO kill_switch_log (engine, event, event_date, monthly_dd, created_at)
+                VALUES (?, 'activated', ?, ?, ?)
+                """,
+                (engine, event_date.isoformat(), monthly_dd, created_at),
+            )
+
+    def reset_kill_switch(
+        self,
+        event_date: date,
+        category: str,
+        reason: str,
+        auto: bool = False,
+        engine: str = "short",
+    ) -> None:
+        """Inserta un evento 'reset'."""
+        created_at = datetime.now(tz=timezone.utc).isoformat()
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO kill_switch_log
+                    (engine, event, event_date, reset_category, reset_reason, auto_reset, created_at)
+                VALUES (?, 'reset', ?, ?, ?, ?, ?)
+                """,
+                (engine, event_date.isoformat(), category, reason, int(auto), created_at),
+            )
+
+    def get_kill_switch_state(self, engine: str = "short") -> KillSwitchState:
+        """Retorna el estado actual del kill switch leyendo el último evento para el engine dado."""
+        _inactive = KillSwitchState(
+            active=False,
+            engine=engine,
+            activated_at=None,
+            monthly_dd=None,
+            reset_at=None,
+            reset_category=None,
+            reset_reason=None,
+            auto_reset=False,
+        )
+        cursor = self._conn.execute(
+            """
+            SELECT event, event_date, monthly_dd, reset_category, reset_reason, auto_reset
+            FROM kill_switch_log
+            WHERE engine = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (engine,),
+        )
+        row = cursor.fetchone()
+        if row is None or row["event"] == "reset":
+            if row is None:
+                return _inactive
+            return KillSwitchState(
+                active=False,
+                engine=engine,
+                activated_at=None,
+                monthly_dd=None,
+                reset_at=date.fromisoformat(row["event_date"]),
+                reset_category=row["reset_category"],
+                reset_reason=row["reset_reason"],
+                auto_reset=bool(row["auto_reset"]),
+            )
+        # last event is 'activated'
+        return KillSwitchState(
+            active=True,
+            engine=engine,
+            activated_at=date.fromisoformat(row["event_date"]),
+            monthly_dd=row["monthly_dd"],
+            reset_at=None,
+            reset_category=None,
+            reset_reason=None,
+            auto_reset=False,
+        )
 
     # ------------------------------------------------------------------
     # Supabase sync (private, non-blocking)
