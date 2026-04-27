@@ -40,6 +40,25 @@ La transición a real está planteada como gate, no como salto de fe:
 
 ### Implementado
 
+- **Data layer completo** (Fases A-G):
+  - `data/schema.py` — `OHLCVRow` + `CorporateActionRow` (frozen dataclasses)
+  - `data/storage.py` — `MarketDB` con SQLite local + sync Supabase lazy-init
+  - `data/calendar_builder.py` — calendario US (NYSE/XNYS) y AR (XBUE) via `pandas_market_calendars`
+  - `data/connectors/us_connector.py` — YFinance con retry exponencial, NetworkError/DataError
+  - `data/connectors/ar_connector.py` — IOL REST API primario + fallback Byma (yfinance `.BA`)
+  - `data/normalizer.py` — outlier detection (rolling 5d median), forward-fill ≤3 días, `imputed=True`
+  - `data/fetcher.py` — pipeline connector→normalize→upsert, FetchReport
+  - `scripts/fetch_daily.py` — CLI diario con `--lookback`, `--db`, whitelist desde policy.v1.yaml
+  - 202 tests (unitarios + integración end-to-end)
+
+- **Risk kill switch persistente**:
+  - `data/storage.py` — `KillSwitchState` + tabla `kill_switch_log` en MarketDB
+  - `core_sim/risk_guardrails.py` — `check_and_persist_kill_switch()` con auto-reset mensual
+  - `scripts/reset_kill_switch.py` — CLI reset manual con `--category` obligatorio + `--reason`
+  - Alert files en `alerts/kill_switch_YYYY-MM-DD.json`
+  - `core_sim/short_term_day_runner.py` — cableado con `db` opcional, backward compatible
+  - 25 tests (unitarios + integración)
+
 - Política de riesgo y operativa:
   - `POLICY.md`
   - `config/policy.v1.yaml`
@@ -58,7 +77,7 @@ La transición a real está planteada como gate, no como salto de fe:
   - tests unitarios en `tests/test_short_term_engine.py`
 - Pipeline corto integrado (Fase C, v1):
   - `core_sim/short_term_day_runner.py` — Data (snapshot + whitelist) → Engines → Risk → órdenes listas para `PaperBrokerSim`
-  - **Riesgo en el mismo runner**: kill switch por DD mensual del bucket corto; límite de **pérdida diaria** del corto (`risk.max_daily_loss_short_pct` + `short_bucket.daily_return` en `PortfolioLedger`); **ventanas no-trade** intradía US (`no_trade_*_minutes` + `session_minutes_from_open` opcional en `pipeline_context`); **`halt_on_data_quality`** con señal `risk_flags` (universo parcial en `daily_bars` permitido; fallan barras vacías o campos inválidos en símbolos presentes).
+  - **Riesgo en el mismo runner**: kill switch persistente por DD mensual del bucket corto; límite de **pérdida diaria** del corto (`risk.max_daily_loss_short_pct` + `short_bucket.daily_return` en `PortfolioLedger`); **ventanas no-trade** intradía US (`no_trade_*_minutes` + `session_minutes_from_open` opcional en `pipeline_context`); **`halt_on_data_quality`** con señal `risk_flags` (universo parcial en `daily_bars` permitido; fallan barras vacías o campos inválidos en símbolos presentes).
   - **Allocator 30/70 + 20/80** en el sizing de `build_orders_intent`: tope de tranche corto vs equity total y headroom AR/US por mercado sobre el total, antes de lotes y cash.
   - `create_short_term_daily_backtester(...)` arma un `DailyEventBacktester` cableado al broker y al ledger
   - `DailyEventBacktester.run_day(..., pipeline_context={"history_by_symbol": ...})` admite también `session_minutes_from_open` cuando se quiera simular no-trade intradía

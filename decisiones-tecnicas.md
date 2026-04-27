@@ -410,6 +410,66 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-021 — Data layer modular con conectores reales + normalización robusta
+
+- **Fecha**: 2026-04-27
+- **Estado**: aceptada
+- **Contexto**: El paper-first exigía datos reales (no sintéticos), pero el pipeline de ingestión no existía. Se necesitaba separar schema → storage → conectores → normalización sin acoplamiento, permitiendo evolucionar cada capa sin reescribir las otras.
+- **Decisión**:
+  - Implementar `data/` con 7 capas desacopladas:
+    1. **schema.py** — `OHLCVRow` y `CorporateActionRow` como frozen dataclasses (contrato único)
+    2. **storage.py** — `MarketDB` con SQLite local + sync Supabase lazy-init (sin crash si faltan credenciales)
+    3. **calendar_builder.py** — `build_calendar()` via `pandas_market_calendars` (NYSE/XNYS, XBUE)
+    4. **connectors/us_connector.py** — YFinance + retry exponencial (1s/2s/4s), distinción NetworkError/DataError
+    5. **connectors/ar_connector.py** — IOL REST API (no existe `iol-client` en PyPI) + fallback Byma
+    6. **normalizer.py** — outlier detection (rolling 5d median), forward-fill ≤3 días, `imputed=True`
+    7. **fetcher.py** — orquestador isolando errores por símbolo
+  - Conectores retornan `list[OHLCVRow] | None`, **nunca lanzan** al caller. El engine no se puede romper por un dato faltante.
+  - Storage idempotente (upsert); repetir fetch mismo símbolo no genera duplicados.
+  - Normalización excluye outliers del gap-fill (comportamiento quirúrgico).
+- **Por qué**:
+  - Sin datos confiables, todo lo demás es teatro.
+  - Separación por capas permite testear cada una independientemente (mocks en conectores, SQLite `:memory:` en storage).
+  - La distinción NetworkError/DataError en conectores clarifica reintentos (red: reintentar; datos: fallar rápido).
+- **Consecuencias**:
+  - Cualquier nueva fuente de datos (Bloomberg, otro broker) se agrega en `connectors/` sin tocar las otras capas.
+  - Si `iol-client` existiera en PyPI mañana, se reemplaza la implementación HTTP sin cambiar interfaz pública.
+  - El normalizer es opinado: outliers se excluyen, no se "corrigen". Si se necesita otra semántica, versionar policy + normalizer juntos.
+- **Alternativas consideradas**:
+  - **Archivos CSV estáticos**: rechazada por no permitir evolucionar a fuentes reales sin reescribir.
+  - **Todo en SQL sin abstracción de conectores**: rechazada por acoplamiento y dificultad de testeo.
+
+---
+
+## ADR-022 — Kill switch persistente con reset manual categorizado
+
+- **Fecha**: 2026-04-27
+- **Estado**: aceptada
+- **Contexto**: El guardrail de DD mensual -8% existía, pero era stateless: si el equity se recuperaba intradía, se desbloqueaba solo. Faltaba capacidad de auditoría del bloqueo y control manual sobre reseteo.
+- **Decisión**:
+  - Persistir **estado del kill switch en SQLite** bajo `kill_switch_log` (no en memoria, no en YAML).
+  - Bloqueo hasta **reset manual explícito** con `--category` obligatorio (volatility_spike | data_error | strategy_review | other) + `--reason` libre.
+  - **Auto-reset único** al inicio de cada mes nuevo, con log de trazabilidad.
+  - Posiciones abiertas se **mantienen** cuando el kill switch dispara (no liquidar automáticamente).
+  - **Notificación dual**: log JSON nivel ERROR + archivo en `alerts/kill_switch_YYYY-MM-DD.json`.
+  - `scripts/reset_kill_switch.py` CLI para reset manual con validación de categoría.
+  - `check_and_persist_kill_switch()` reemplaza check stateless; auto-reset por mes nuevo comparando tuples `(year, month)`.
+- **Por qué**:
+  - El -8% no es ruido. Si dispara, algo salió mal ese mes — recuperaciones intradía pueden ser falsas señales.
+  - Reset manual **categorizado** crea evidencia auditable: "revisé y fue volatility_spike puntual" deja rastro.
+  - El auto-reset mensual es lógica limpia: cada mes es una hoja en blanco.
+  - Mantener posiciones vivas es precisión quirúrgica: solo bloqueamos *entradas nuevas*, permitiendo que posiciones existentes se recuperen o cerrar manualmente.
+- **Consecuencias**:
+  - Si el proceso se cae con kill switch activo y se reinicia, **sigue bloqueado** (safety by default). El operador debe resetear explícitamente.
+  - El reset script abre su propia conexión SQLite — post-reset, hay que instanciar nuevo `MarketDB(db_path)` para verificar estado.
+  - Auto-reset genera evento en DB; no es silencioso (auditable).
+- **Alternativas consideradas**:
+  - **Auto-unlock si DD > -8%**: rechazada por riesgo de oscilaciones intradía.
+  - **Reset solo manual, sin auto-reset mensual**: rechazada porque fuerza overhead operativo innecesario en mes nuevo.
+  - **Liquidar todo al activar**: rechazada por ser sobreactuar; precisión > potencia.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
