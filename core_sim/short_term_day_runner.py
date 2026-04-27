@@ -14,12 +14,15 @@ from __future__ import annotations
 import statistics
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import yaml
 
+if TYPE_CHECKING:
+    from data.storage import MarketDB
+
 from .allocator import AllocationGeo, AllocationWeights, compute_allocation
-from .risk_guardrails import check_short_risk, check_stop_loss, log_risk_cycle
+from .risk_guardrails import check_and_persist_kill_switch, check_short_risk, check_stop_loss, log_risk_cycle
 from .short_term_engine import (
     RiskCaps,
     ShortEngineConfig,
@@ -266,6 +269,7 @@ def create_short_term_pipeline_handlers(
     policy_doc: dict[str, Any],
     repo_root: Path,
     ledger: Any,
+    db: "MarketDB | None" = None,
 ) -> dict[str, Callable[..., Any]]:
     """Handlers listos para inyectar en `DailyEventBacktester` (signals/propose/risk)."""
     merged = load_merged_whitelist(repo_root, policy_doc)
@@ -311,6 +315,67 @@ def create_short_term_pipeline_handlers(
                 "halt_reason": halt_reason,
             },
         }
+
+    from .risk_guardrails import GuardrailResult
+
+    def _check_risk_with_optional_db(
+        sb: dict,
+        flags: dict,
+        risk_config: dict,
+        now_minutes_from_open: int | None,
+        trading_day: date,
+    ) -> "GuardrailResult":
+        """When db is available, replace the stateless kill switch check with the persisted one.
+
+        Checks run in the same order as check_short_risk:
+        data_quality → no_trade_window → kill_switch → daily_loss.
+        The only difference is that kill_switch uses check_and_persist_kill_switch when db is set.
+        """
+        if db is None:
+            return check_short_risk(sb, flags, risk_config, now_minutes_from_open)
+
+        # data_quality
+        halt_on_dq = bool(flags.get("halt_on_data_quality", True))
+        data_ok = bool(flags.get("data_quality_ok", True))
+        if halt_on_dq and not data_ok:
+            return GuardrailResult(
+                allowed=False,
+                reason="halt_data_quality",
+                meta={"halt_on_data_quality": halt_on_dq, "data_quality_ok": data_ok},
+            )
+
+        # no_trade_window
+        no_trade_first = int(risk_config.get("no_trade_first", 0))
+        no_trade_last = int(risk_config.get("no_trade_last", 0))
+        if now_minutes_from_open is not None and in_no_trade_window(
+            no_trade_first=no_trade_first,
+            no_trade_last=no_trade_last,
+            session_minutes_from_open=now_minutes_from_open,
+            session_length_minutes=us_regular_session_length_minutes(),
+        ):
+            return GuardrailResult(
+                allowed=False,
+                reason="no_trade_window",
+                meta={"now_minutes_from_open": now_minutes_from_open},
+            )
+
+        # kill_switch — persisted path
+        ks_result = check_and_persist_kill_switch(sb, risk_config, db, engine="short", today=trading_day)
+        if not ks_result.allowed:
+            return ks_result
+
+        # daily_loss
+        max_daily_short = float(risk_config.get("max_daily_short", -0.02))
+        daily_ret = float(sb.get("daily_return", 0.0))
+        if max_daily_short < 0.0 and daily_ret < max_daily_short:
+            return GuardrailResult(
+                allowed=False,
+                reason="short_daily_loss_limit",
+                meta={"daily_return": daily_ret, "limit": max_daily_short},
+            )
+
+        monthly_dd = float(sb.get("monthly_drawdown", 0.0))
+        return GuardrailResult(allowed=True, reason="ok", meta={"monthly_drawdown": monthly_dd, "daily_return": daily_ret})
 
     def generate_signals(**ctx: Any) -> dict[str, Any]:
         history_by_symbol = ctx.get("history_by_symbol") or {}
@@ -370,7 +435,7 @@ def create_short_term_pipeline_handlers(
             "no_trade_first": no_trade_first,
             "no_trade_last": no_trade_last,
         }
-        guardrail = check_short_risk(sb, flags, risk_config, ctx.get("session_minutes_from_open"))
+        guardrail = _check_risk_with_optional_db(sb, flags, risk_config, ctx.get("session_minutes_from_open"), ctx["trading_day"])
         if not guardrail.allowed:
             log_risk_cycle(
                 engine="short",
@@ -482,7 +547,7 @@ def create_short_term_pipeline_handlers(
             "no_trade_first": no_trade_first,
             "no_trade_last": no_trade_last,
         }
-        guardrail = check_short_risk(sb, flags, risk_config, ctx.get("session_minutes_from_open"))
+        guardrail = _check_risk_with_optional_db(sb, flags, risk_config, ctx.get("session_minutes_from_open"), ctx["trading_day"])
 
         approved: list[dict[str, str | float]] = list(stop_loss_orders)
         if guardrail.allowed:
@@ -509,11 +574,12 @@ def create_short_term_daily_backtester(
     broker: Any,
     calendar_store: Any | None = None,
     corporate_actions_store: Any | None = None,
+    db: "MarketDB | None" = None,
 ) -> Any:
     """Ensambla `DailyEventBacktester` con pipeline corto + broker + ledger."""
     from .event_engine import DailyEventBacktester
 
-    h = create_short_term_pipeline_handlers(policy_doc, repo_root, ledger)
+    h = create_short_term_pipeline_handlers(policy_doc, repo_root, ledger, db=db)
 
     def update_ledger(**kwargs: Any) -> dict[str, Any]:
         return ledger.mark_to_market(trading_day=kwargs["trading_day"], daily_bars=kwargs["daily_bars"])
