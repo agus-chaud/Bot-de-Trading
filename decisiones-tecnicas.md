@@ -470,6 +470,90 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-023 — Bug fix: stop-loss side lowercase en `short_term_day_runner`
+
+- **Fecha**: 2026-04-28
+- **Estado**: aceptada
+- **Contexto**: Al correr el validation-wf por primera vez con datos reales, el pre-gate crasheó con `ValueError: side must be BUY or SELL`. El error no era reproducible con datos sintéticos y solo emergió en el flujo end-to-end con el broker sim real.
+- **Decisión**: Corregir `"side": "sell"` → `"side": "SELL"` en el path de generación de la orden de stop-loss dentro de `core_sim/short_term_day_runner.py`. Agregar test de regresión `test_stop_loss_order_side_is_uppercase_sell` para fijar el contrato.
+- **Por qué**:
+  - El contrato del sistema establece que `side` siempre es uppercase (`{"BUY", "SELL"}`); `PaperBrokerSim._validate_order` lo valida y rechaza cualquier variante.
+  - `build_orders_intent()` en `short_term_engine.py` ya lo respetaba. Solo el path de stop-loss en el runner estaba roto.
+  - El bug era silencioso en tests con datos sintéticos y solo explotó al integrar datos reales — justifica agregar el test de regresión para que CI lo cubra en adelante.
+- **Consecuencias**:
+  - El test `test_stop_loss_order_side_is_uppercase_sell` actúa como guardrail permanente en CI.
+  - Cualquier futura orden generada por código (no por el engine) debe respetar el mismo contrato uppercase; documentarlo aquí sirve de referencia para revisiones de PR.
+- **Alternativas consideradas**:
+  - **Normalizar a uppercase en `_validate_order` en vez de exigirlo en el caller**: descartada — el contrato debe cumplirse en origen; normalizar silenciosamente en el validador oculta bugs upstream.
+  - **Agregar cast en `PaperBrokerSim` solo para stop-loss**: descartada por mismo motivo que la anterior.
+
+---
+
+## ADR-024 — Encoding fix: emojis en Windows cp1252 en scripts de consola
+
+- **Fecha**: 2026-04-28
+- **Estado**: aceptada
+- **Contexto**: `scripts/run_validation_wf.py` usaba emojis (`✅ ❌ ⏭`) en el output de consola. En Windows, `sys.stdout` usa cp1252 por defecto, lo que lanzaba `UnicodeEncodeError` al intentar imprimir caracteres fuera de ese rango.
+- **Decisión**: Agregar al inicio de cualquier script de consola que use caracteres no-ASCII:
+  ```python
+  if hasattr(sys.stdout, "reconfigure"):
+      sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+  ```
+  La guarda `hasattr` mantiene compatibilidad con entornos que no exponen `reconfigure` (ej. pipes, CI sin TTY).
+- **Por qué**:
+  - En Windows, `sys.stdout` usa la codepage del sistema (cp1252 por defecto); cualquier carácter fuera de ese rango falla con `UnicodeEncodeError`.
+  - Forzar UTF-8 explícitamente al inicio del script es la solución mínima y no invasiva: no toca los emojis ni el resto del código.
+  - `errors="replace"` garantiza que, si el reencoding falla en algún entorno exótico, el script no crashea sino que sustituye el carácter problemático.
+- **Consecuencias**:
+  - Todo script nuevo en `scripts/` que imprima caracteres no-ASCII debe incluir este bloque al inicio — se convierte en convención del proyecto.
+  - En CI Linux/Mac con UTF-8 por defecto, el bloque es no-op (no tiene efectos negativos).
+- **Alternativas consideradas**:
+  - **Eliminar emojis y usar solo ASCII**: descartada — degrada legibilidad del output sin necesidad técnica real.
+  - **Configurar `PYTHONIOENCODING=utf-8` a nivel de entorno**: descartada como única solución — no garantiza que todos los entornos donde corra el script tengan esa variable, y pone la responsabilidad fuera del código.
+  - **`io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")`**: descartada por ser más verbosa y menos idiomática que `reconfigure`.
+
+---
+
+## ADR-025 — Bug fix: drawdown mensual del bucket corto excluía cash realizado
+
+- **Fecha**: 2026-04-28
+- **Estado**: aceptada
+- **Contexto**: `_update_short_drawdown` en `ledger.py` calculaba el drawdown sobre `market_value` de posiciones abiertas únicamente. Al ejecutar un stop-loss que cerraba la última posición del bucket corto, el cash obtenido volvía a `self.cash` global pero era invisible para la métrica. Resultado: `drawdown = (0 / peak) - 1 = -1.0` aunque la pérdida real era ~0.11%. El error se detectó cuando el validation-wf corrió con datos reales por primera vez — la ventana 2 mostraba -100% espurio.
+- **Decisión**: Introducir `self.short_cash` y `self._short_month_start_cash` en `PortfolioLedger`. Cuando `short_equity == 0` y el mes tuvo actividad, calcular `effective_value = peak + (short_cash - month_start_cash)` para reflejar el PnL neto realizado en lugar de asumir valor cero.
+- **Por qué**:
+  - El ledger necesita distinguir entre "no hay posiciones abiertas porque no se operó" y "no hay posiciones abiertas porque se liquidaron". En el primer caso el drawdown es 0; en el segundo debe reflejar el resultado neto del cash movido.
+  - El atributo `short_cash` es la forma más directa de rastrear el cash específico del bucket sin cambiar la firma de los callers.
+- **Consecuencias**:
+  - `PortfolioLedger` tiene estado adicional (`short_cash`, `_short_month_start_cash`) que debe resetearse correctamente al inicio de cada mes.
+  - Tests nuevos en `test_ledger.py` cubren el escenario de liquidación completa del bucket con pérdida parcial.
+- **Alternativas consideradas**:
+  - **Pasar `short_cash` como parámetro a `_update_short_drawdown`**: descartada — requería cambiar la firma en múltiples callers y rompía encapsulamiento del ledger.
+  - **Usar el valor inicial del mes como referencia fija**: descartada — no captura el peak real del período; subestima drawdowns en meses con picos intermedios.
+- **Archivos**: `core_sim/ledger.py`, `tests/test_ledger.py`
+
+---
+
+## ADR-026 — Decisión: separar floor del pre-gate del threshold del kill switch
+
+- **Fecha**: 2026-04-28
+- **Estado**: aceptada
+- **Contexto**: `monthly_short_drawdown_floor: null` en `config/policy.v1.yaml` hacía que el pre-gate walk-forward usara el kill switch operativo (`short_kill_switch_monthly_dd: -0.08`) como criterio de validación histórica. Esto es conceptualmente incorrecto: el kill switch es un freno de emergencia para producción; el floor del pre-gate es una auditoría estadística de la estrategia. En un período bajista genuino (SPY -6.3%, Feb–Abr 2026, crash aranceles) la estrategia momentum long puede generar -25% en el bucket short — comportamiento esperado del sistema que el kill switch hubiera detenido, pero que no implica que la estrategia esté rota.
+- **Decisión**: Fijar `monthly_short_drawdown_floor: -0.25`, independiente de `short_kill_switch_monthly_dd: -0.08`.
+- **Por qué**:
+  - El kill switch protege capital en producción con criterio conservador (-8%).
+  - El floor del pre-gate valida que la estrategia no sea catastrófica en backtesting (-25%).
+  - Mezclar ambos conceptos hace el pre-gate imposible de pasar en cualquier período bajista, aunque el sistema se hubiera protegido correctamente activando el kill switch.
+  - El valor -0.25 equilibra permisividad para períodos bajistas genuinos y rechazo de estrategias con drawdowns realmente destructivos.
+- **Consecuencias**:
+  - El pre-gate puede ahora aprobar ventanas bajistas donde el kill switch habría actuado — esto es correcto: la validación histórica y la protección en vivo son capas independientes.
+  - Futuros ajustes a cualquiera de los dos thresholds deben hacerse con conciencia explícita de que son parámetros distintos con propósitos distintos.
+- **Alternativas consideradas**:
+  - **Mantener `null` (fallback al kill switch)**: descartada — confunde responsabilidades y hace el pre-gate prácticamente inútil en mercados bajistas.
+  - **Deshabilitar el pre-gate en períodos bajistas conocidos**: descartada — introduce lógica ad-hoc que rompe la reproductibilidad del workflow.
+- **Archivos**: `config/policy.v1.yaml`, `config/policy.v1.schema.json`
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
