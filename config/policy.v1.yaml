@@ -92,7 +92,7 @@ short_term_pre_gate:
     step_trading_days: 10
     min_oos_windows: 2
   thresholds:
-    monthly_short_drawdown_floor: null
+    monthly_short_drawdown_floor: -0.25
     max_fee_pct_of_initial_per_window: 0.05
     max_turnover_annualized: 500.0
 
@@ -126,3 +126,7 @@ corporate_actions:
   supported_types:
     - split
     - dividend
+
+# Parámetros del workflow de validación pre-live
+validation_wf:
+  lookback_trading_days: 90
