@@ -25,12 +25,14 @@ class PortfolioLedger:
             raise ValueError("starting_cash must be >= 0")
 
         self.cash = float(starting_cash)
+        self.short_cash = 0.0  # cash asignado al bucket corto (aumenta con SELLs, disminuye con BUYs)
         self.positions: dict[str, PositionState] = {}
         self.realized_pnl_total = 0.0
         self.equity_curve_points: list[dict[str, float | str]] = []
         self._current_short_month: tuple[int, int] | None = None
         self._short_monthly_peak = 0.0
         self._short_monthly_drawdown = 0.0
+        self._short_month_start_cash = 0.0  # short_cash al inicio del mes en curso
         # short MV por fecha (última escritura gana) para `daily_return` con varias MTM en un día
         self._short_eod_by_trading_date: dict[date, float] = {}
 
@@ -83,6 +85,7 @@ class PortfolioLedger:
         short_bucket = self._update_short_drawdown(
             trading_day=trading_day,
             short_equity=short_equity,
+            short_cash=self.short_cash,
         )
         _, short_bucket = self._attach_short_daily_return(
             trading_day=trading_day,
@@ -138,6 +141,8 @@ class PortfolioLedger:
             existing.qty = total_qty
 
         self.cash -= (qty * price) + fee
+        if bucket == "short":
+            self.short_cash -= (qty * price) + fee
 
     def _apply_sell(self, fill: dict[str, str | float]) -> None:
         symbol = fill["symbol"]
@@ -160,6 +165,8 @@ class PortfolioLedger:
         realized = (price - position.avg_cost) * qty - fee
         self.realized_pnl_total += realized
         self.cash += (qty * price) - fee
+        if bucket == "short":
+            self.short_cash += (qty * price) - fee
 
         remaining_qty = position.qty - qty
         if remaining_qty == 0:
@@ -215,17 +222,41 @@ class PortfolioLedger:
             raise ValueError(f"close must be > 0 for symbol {symbol}")
         return close
 
-    def _update_short_drawdown(self, trading_day: date, short_equity: float) -> dict[str, float]:
+    def _update_short_drawdown(
+        self,
+        trading_day: date,
+        short_equity: float,
+        short_cash: float = 0.0,
+    ) -> dict[str, float]:
+        """Calcula el drawdown mensual del bucket corto.
+
+        Usa `short_equity` (MV de posiciones abiertas) como métrica principal.
+        Cuando todas las posiciones están cerradas (`short_equity == 0`) y el peak
+        del mes fue positivo, la pérdida real ya está realizada: se calcula como
+        `(peak + short_cash_net) / peak - 1`, donde `short_cash_net` acumula el
+        cash neto de los fills del bucket corto en el mes.  Esto evita el drawdown
+        espurio de -1.0 que ocurría cuando el stop-loss cerraba la última posición.
+        """
         month_key = (trading_day.year, trading_day.month)
         if self._current_short_month != month_key:
             self._current_short_month = month_key
             self._short_monthly_peak = short_equity
             self._short_monthly_drawdown = 0.0
+            self._short_month_start_cash = short_cash  # cash neto al inicio del mes
         else:
             self._short_monthly_peak = max(self._short_monthly_peak, short_equity)
 
         if self._short_monthly_peak > 0:
-            self._short_monthly_drawdown = (short_equity / self._short_monthly_peak) - 1.0
+            if short_equity == 0.0:
+                # Todas las posiciones cerradas: la pérdida real es el cambio en cash
+                # respecto al inicio del mes más el peak implícito de posiciones.
+                # Aproximación: (short_cash - short_month_start_cash) es el PnL neto
+                # realizado en el mes. El drawdown es ese PnL relativo al peak.
+                month_cash_delta = short_cash - self._short_month_start_cash
+                effective_value = self._short_monthly_peak + month_cash_delta
+                self._short_monthly_drawdown = (effective_value / self._short_monthly_peak) - 1.0
+            else:
+                self._short_monthly_drawdown = (short_equity / self._short_monthly_peak) - 1.0
         else:
             self._short_monthly_drawdown = 0.0
 

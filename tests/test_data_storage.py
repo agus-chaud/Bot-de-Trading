@@ -7,7 +7,7 @@ from datetime import date
 import pytest
 
 from data.schema import CorporateActionRow, OHLCVRow
-from data.storage import MarketDB
+from data.storage import KillSwitchState, MarketDB
 
 
 @pytest.fixture
@@ -130,3 +130,56 @@ class TestCalendarsUpsert:
         db.upsert_calendars("XNYS", days)
         cursor = db._conn.execute("SELECT COUNT(*) FROM calendars WHERE venue='XNYS'")
         assert cursor.fetchone()[0] == 1
+
+
+class TestKillSwitch:
+    _D = date(2024, 3, 15)
+
+    def test_should_return_inactive_when_no_history(self, db):
+        state = db.get_kill_switch_state("short")
+        assert state.active is False
+        assert state.activated_at is None
+        assert state.monthly_dd is None
+        assert state.reset_at is None
+        assert state.reset_category is None
+        assert state.reset_reason is None
+        assert state.auto_reset is False
+
+    def test_should_be_active_after_activation(self, db):
+        db.activate_kill_switch(self._D, monthly_dd=-0.12, engine="short")
+        state = db.get_kill_switch_state("short")
+        assert state.active is True
+        assert state.activated_at == self._D
+        assert state.monthly_dd == pytest.approx(-0.12)
+
+    def test_should_be_inactive_after_manual_reset(self, db):
+        db.activate_kill_switch(self._D, monthly_dd=-0.15, engine="short")
+        db.reset_kill_switch(self._D, category="manual", reason="trader override", auto=False, engine="short")
+        state = db.get_kill_switch_state("short")
+        assert state.active is False
+        assert state.reset_category == "manual"
+        assert state.reset_reason == "trader override"
+        assert state.auto_reset is False
+
+    def test_should_flag_auto_reset_correctly(self, db):
+        db.activate_kill_switch(self._D, monthly_dd=-0.15, engine="short")
+        db.reset_kill_switch(date(2024, 4, 1), category="month_change", reason="new month", auto=True, engine="short")
+        state = db.get_kill_switch_state("short")
+        assert state.active is False
+        assert state.auto_reset is True
+
+    def test_should_reflect_last_event_wins(self, db):
+        # activate → reset → activate again: last event is 'activated'
+        db.activate_kill_switch(self._D, monthly_dd=-0.10, engine="short")
+        db.reset_kill_switch(date(2024, 4, 1), category="manual", reason="ok", engine="short")
+        db.activate_kill_switch(date(2024, 4, 10), monthly_dd=-0.20, engine="short")
+        state = db.get_kill_switch_state("short")
+        assert state.active is True
+        assert state.activated_at == date(2024, 4, 10)
+
+    def test_should_isolate_engines(self, db):
+        db.activate_kill_switch(self._D, monthly_dd=-0.18, engine="short")
+        long_state = db.get_kill_switch_state("long")
+        short_state = db.get_kill_switch_state("short")
+        assert long_state.active is False
+        assert short_state.active is True

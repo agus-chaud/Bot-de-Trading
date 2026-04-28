@@ -21,7 +21,8 @@
     "logging",
     "data_providers",
     "calendar",
-    "corporate_actions"
+    "corporate_actions",
+    "validation_wf"
   ],
   "properties": {
     "schema_version": {
@@ -296,6 +297,19 @@
             "type": "string",
             "enum": ["split", "dividend"]
           }
+        }
+      }
+    },
+    "validation_wf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lookback_trading_days"],
+      "properties": {
+        "lookback_trading_days": {
+          "type": "integer",
+          "minimum": 20,
+          "maximum": 500,
+          "description": "Ventana histórica en días hábiles para el workflow de validación pre-live."
         }
       }
     },

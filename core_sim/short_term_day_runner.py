@@ -501,7 +501,7 @@ def create_short_term_pipeline_handlers(
             broker_orders.append(
                 {
                     "symbol": sym,
-                    "side": "sell",
+                    "side": "SELL",
                     "qty": float(pos_info["qty"]),
                     "price": float(bar.get("close", 0.0)),
                     "market": pos_info["market"],

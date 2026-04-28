@@ -289,3 +289,86 @@ def test_short_daily_loss_limit_stops_proposals():
     )
     assert events[2].payload.get("sizing_metrics", {}).get("halt_reason") == "short_daily_loss_limit"
     assert events[2].payload["broker_orders"] == []
+
+
+def test_stop_loss_order_side_is_uppercase_sell():
+    """Regression: stop-loss orders must use 'SELL' (uppercase) so PaperBrokerSim accepts them.
+
+    Before the fix, propose_orders appended side='sell' (lowercase) which caused
+    ValueError('side must be BUY or SELL') inside PaperBrokerSim._validate_order.
+
+    Strategy: seed a SPY short position at the SAME price as the current bar so the
+    monthly drawdown stays at 0 (no kill-switch). Then force check_stop_loss to return
+    {'SPY'} and verify (a) the broker_orders list contains a stop-loss entry with
+    side='SELL' and (b) run_day completes without raising ValueError.
+    """
+    from unittest.mock import patch
+
+    policy = _load_policy()
+    ledger = PortfolioLedger(starting_cash=100_000.0)
+    broker = PaperBrokerSim(
+        ledger=ledger,
+        cost_model=CostModel(
+            market_configs={
+                "US": MarketCostConfig(
+                    commission_bps_per_side=1.0,
+                    slippage_bps=2.0,
+                    min_spread_bps=0.5,
+                )
+            }
+        ),
+    )
+    calendar_store = TradingCalendarStore.from_yaml(str(REPO_ROOT / "config" / "calendars" / "trading_days.v1.yaml"))
+    actions_store = CorporateActionsStore.from_yaml(str(REPO_ROOT / "config" / "corporate_actions" / "us_actions.v1.yaml"))
+
+    trading_day = date(2026, 4, 15)
+    entry_price = 130.0  # same as bar close → no MTM loss → no kill-switch
+    daily_bars = {
+        "SPY": {"open": 129.0, "high": 131.0, "low": 128.0, "close": entry_price, "volume": 80_000_000.0},
+    }
+
+    # Seed position at entry_price so the current bar shows 0 P&L (kill-switch not triggered)
+    ledger.update_day(
+        trading_day=date(2026, 4, 14),
+        fills=[
+            {
+                "symbol": "SPY",
+                "side": "BUY",
+                "qty": 10,
+                "price": entry_price,
+                "market": "US",
+                "bucket": "short",
+            }
+        ],
+        daily_bars={"SPY": {"close": entry_price}},
+    )
+
+    backtester = create_short_term_daily_backtester(
+        policy_doc=policy,
+        repo_root=REPO_ROOT,
+        ledger=ledger,
+        broker=broker,
+        calendar_store=calendar_store,
+        corporate_actions_store=actions_store,
+    )
+
+    history = {"SPY": _build_spy_history()}
+
+    # Force stop-loss to trigger for SPY regardless of ATR calculation
+    with patch("core_sim.short_term_day_runner.check_stop_loss", return_value={"SPY"}):
+        # Must NOT raise ValueError — that was the bug
+        events = backtester.run_day(
+            trading_day=trading_day,
+            daily_bars=daily_bars,
+            pipeline_context={"history_by_symbol": history},
+        )
+
+    proposed = events[2].payload
+    stop_loss_orders = [o for o in proposed["broker_orders"] if o.get("reason") == "stop_loss"]
+    assert len(stop_loss_orders) == 1, (
+        f"expected 1 stop-loss order, got {len(stop_loss_orders)}; "
+        f"halt_reason={proposed.get('sizing_metrics', {}).get('halt_reason')}"
+    )
+    assert stop_loss_orders[0]["side"] == "SELL", (
+        "stop-loss side must be 'SELL' (uppercase) — PaperBrokerSim rejects any other value"
+    )
