@@ -44,6 +44,17 @@ secrets/
 *.key
 *.p12
 
+# Local market DB + SQLite sidecars (regenerable con fetch / pipeline)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Reportes generados (run_validation_wf, run_long_engine_wf, etc.)
+validation_reports/*.json
+
+# Alertas runtime (kill switch; ver README / risk_guardrails)
+alerts/kill_switch_*.json
+
 # Cursor/local agent state
 .cursor/sessions/
 .cursor/logs/
