@@ -94,13 +94,20 @@ La transición a real está planteada como gate, no como salto de fe:
   - `docs/kpi_report_spec.v1.md` — definiciones operativas (fecha de congelación 2026-05-05).
   - `reporting/kpi_v0.py` — CSV diario §2.1 + fills/trades §2.2 (opcional si el equity trae `costs_day_short`/`costs_day_long`): retorno neto anualizado total §5, max drawdown §7, **Sharpe/Sortino** por segmento (equity total/corto/largo) §6, **hit rate y profit factor** por motor FIFO §8, **drift 30/70 y 20/80** §11, y v3 en bloque largo (**MDD_12m rolling**, **Calmar_12m**, **turnover_long_monthly**) + **alpha vs benchmark** §12.
   - `scripts/report_kpis.py` — `--equity`, `--trades`, `--metadata`, `--benchmark-returns` → `--out-json` y `--out-md`.
+  - **Walk-forward OOS del KPI v3 (Fase 5, tabla maestra + gate opcional)**:
+    - Bloque **`kpi_oos_gate`** en `config/policy.v1.yaml` (schema en `policy.v1.schema.json`): rejilla **`burn_in` / OOS / step**, agregación **`all`** o **`k_of_last_q`**, umbrales opcionales por métrica; **`enabled: false`** hasta fijarlos en anexo político.
+    - `reporting/kpi_walk_forward.py` — por cada ventana: slice CSV → mismo informe que v3 (`build_kpi_v0_report_from_tables`) → **`master_table`** + pass/fail por ventana si el gate está activo.
+    - `core_sim/short_term_pre_gate.py` — **`walk_forward_oos_windows`** (API pública de rejilla de ventanas).
+    - `scripts/report_kpis_walk_forward.py` — export JSON consolidado (exit ≠ 0 si falla gate agregado o hay fallos globales).
+    - `tests/test_kpi_walk_forward.py`.
+    - Detalle normativo en `decisiones-tecnicas.md` (**ADR-034**).
   - `tests/test_kpi_v0.py` — comportamiento + series sintéticas.
-  - Decisiones registradas en `decisiones-tecnicas.md` (**ADR-030**, **ADR-031**, **ADR-032**, **ADR-033**).
+  - Decisiones registradas en `decisiones-tecnicas.md` (**ADR-030**, **ADR-031**, **ADR-032**, **ADR-033**, **ADR-034**).
 
 ### Pendiente principal
 
 - Integración completa del `long_term_monthly_runner` en `event_engine` operativo diario.
-- Completar restantes del informe KPI respecto del spec (p. ej. cobertura de turnover por otros segmentos además de largo, pipeline/golden tests de benchmark + gates explícitos de aprobación) — ver `docs/kpi_report_spec.v1.md`.
+- Completar restantes del informe KPI respecto del spec (p. ej. cobertura de turnover por otros segmentos además de largo, golden CI fijo sobre KPIs según fixtures) — ver `docs/kpi_report_spec.v1.md`.
 - Conectar fuentes de datos reales (feeds, APIs broker) con `PaperBrokerSim` como adaptador, manteniendo interfaces estables.
 
 
@@ -118,6 +125,7 @@ La transición a real está planteada como gate, no como salto de fe:
 - `long_term_engine` + `long_term_monthly_runner`: motor mensual del sleeve largo (pesos objetivo, bandas de drift, intents de rebalanceo); integra `check_long_risk()`.
 - `validation/wf_windows` + `validation/wf_runner` + `validation/wf_long_report`: pipeline WF del bloque largo (ventanas rolling -> stage por ventana -> agregados globales + JSON).
 - `reporting/kpi_v0` + `scripts/report_kpis.py`: informe JSON/Markdown según `docs/kpi_report_spec.v1.md` (lectura post-corrida del export equity + fills).
+- `kpi_oos_gate` + `reporting/kpi_walk_forward` + `scripts/report_kpis_walk_forward.py`: varias ventanas OOS sobre la misma serie, mismo informe v3 por tramo, tabla maestra y gate reproducible opcional (**ADR-034**).
 - `event_engine`: orquestador diario con soporte para `execution_mode` (auto/semi_auto) y bypass de stop loss en semi_auto.
 - Flujo completo: Data -> Engines -> `risk_guardrails` -> Allocator -> `paper_broker_sim` -> `ledger`; ambos motores convergen en el mismo núcleo para mantener consistencia y auditoría.
 
@@ -139,6 +147,7 @@ python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
 python scripts/run_short_term_pre_gate.py
 python scripts/run_long_engine_wf.py --window-months 6 --step-months 1
 python scripts/report_kpis.py --equity path/to/equity.csv --trades path/to/fills.csv --benchmark-returns path/to/benchmark_returns.csv --out-json kpi.json --out-md kpi.md
+python scripts/report_kpis_walk_forward.py --equity path/to/equity.csv --trades path/to/fills.csv --out-json wf_kpi_oos.json
 ```
 
 Por módulo (desarrollo acotado):

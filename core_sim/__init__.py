@@ -33,7 +33,7 @@ from .short_term_day_runner import (
     us_regular_session_length_minutes,
 )
 from .short_term_engine import RiskCaps, ShortEngineConfig, build_orders_intent, compute_signal_candidates, rank_top_k_by_market
-from .short_term_pre_gate import PreGateReport, PreGateWindowResult, run_short_term_pre_gate
+from .short_term_pre_gate import PreGateReport, PreGateWindowResult, run_short_term_pre_gate, walk_forward_oos_windows
 from .risk_guardrails import GuardrailResult, check_short_risk, check_long_risk, log_risk_cycle
 from .pending_order_queue import PendingOrder, PendingOrderQueue
 
@@ -82,6 +82,7 @@ __all__ = [
     "compute_signal_candidates",
     "rank_top_k_by_market",
     "run_short_term_pre_gate",
+    "walk_forward_oos_windows",
     "GuardrailResult",
     "check_short_risk",
     "check_long_risk",

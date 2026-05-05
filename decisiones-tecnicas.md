@@ -699,6 +699,30 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-034 — Walk-forward OOS del informe KPI v3 + tabla maestra y gate opcional (`kpi_oos_gate`)
+
+- **Fecha**: 2026-05-06
+- **Estado**: aceptada
+- **Contexto**: El plan Fase 5 — tras cerrar **`rpt_kpi.v1`**, el smoke `report_kpis` y la capa **v3** (**ADR-030**–**033**) — pide una **serie de tramos out-of-sample** donde se ejecute ese mismo informe por ventana, se **consolide una tabla única** y se pueda marcar **pass/fail frente a umbrales declarados antes** (spirit del “punto 3” del gate a producción), sin mezclar tuning de motor con KPI ad hoc en notebooks.
+- **Decisión**:
+  - Añadir en **`config/policy.v1.yaml`** el bloque **`kpi_oos_gate`**: shape de walk-forward (**`burn_in_trading_days`**, **`oos_trading_days`**, **`step_trading_days`**, **`min_oos_windows`**), **`aggregate`** (`rule: all | k_of_last_q` con **`k_pass`** / **`last_q_windows`** si aplica) y **`thresholds`** opcionales (solo claves informadas aplican chequeo): por ejemplo **`min_sharpe_annualized_total`**, **`max_drawdown_total_floor`** (drawdown negativo — pasa si el real no es “peor” que el floor), **`min_calmar_12m_long`**, **`max_mdd_12m_rolling_long_floor`**, **`max_turnover_long_monthly_last`**, **`min_alpha_simple_return_total`**. Por defecto **`enabled: false`** para no forzar CI hasta que los umbrales estén fichados en anexo político/POLICY según proceso del plan.
+  - Implementar **`reporting/kpi_walk_forward.py`**: recorre ventanas públicas **`core_sim.short_term_pre_gate.walk_forward_oos_windows`**, corta equity/trades/benchmark por fechas del tramo, llama **`build_kpi_v0_report_from_tables`**, arma **`master_table`** y evalúa gate por ventana si está habilitado.
+  - Exponer **`build_kpi_v0_report_from_tables`** en **`reporting/kpi_v0.py`** (el CLI **`report_kpis`** sigue leyendo paths y delegando).
+  - CLI **`scripts/report_kpis_walk_forward.py`** escribe JSON agregado; exit code ≠ 0 si **`global_failures`** o **`aggregate_passed`** es false.
+  - Contrato schema **`config/policy.v1.schema.json`** alineado al bloque.
+- **Por qué**:
+  - Reutiliza **las mismas definiciones numéricas** que el informe v3 (**sin duplicar fórmulas**); el walk-forward aquí es “cortá la serie como te diga política → corré el mismo reporte → juzgá”.
+  - **`walk_forward`** se lee **siempre** desde `kpi_oos_gate` (aun con gate desactivado), evitando caer por error en **`burn_in` 252 por defecto** sobre series cortas cuando solo se quería tabular ventanas sin umbral.
+- **Consecuencias**:
+  - Los umbrales numéricos congelados para gate “de verdad” siguen viviendo en **POLICY / anexo fechado**; el YAML es solo el **hook ejecutable**.
+  - Tramos muy cortos dejan KPI v3 como **NA** (p. ej. rolling 12m); si un threshold exige ese número, la ventaña **falla** con violación explícita.
+- **Alternativas consideradas**:
+  - **Ventanas igual al `short_term_pre_gate` corto**: descartada como única opción — el burn-in corto (`momentum` + margen) no es el mismo problema que tener 252 puntos para MDD rolling del largo; se prefirieron parámetros explícitos bajo **`kpi_oos_gate.walk_forward`**.
+  - **Solo tabla sin gate**: descartada para el entregable del plan — el agregador **`all` / `k_of_last_q`** cierra la narrativa operativa tipo “no dependemos de una sola ventana”.
+- **Referencias**: `.cursor/plans/bot_trading_paper-first_155d6f04.plan.md` (Fase 5, punto 8), `reporting/kpi_walk_forward.py`, `scripts/report_kpis_walk_forward.py`, `tests/test_kpi_walk_forward.py`.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

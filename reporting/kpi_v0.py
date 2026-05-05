@@ -287,6 +287,12 @@ def load_equity_csv(path: str | Path) -> tuple[list[dict[str, str]], list[str]]:
     return rows, fieldnames
 
 
+def _validate_equity_fieldnames(fieldnames: list[str]) -> None:
+    missing = [c for c in REQUIRED_EQUITY_COLS if c not in fieldnames]
+    if missing:
+        raise ValueError(f"equity rows missing columns: {missing}")
+
+
 def load_trades_csv(path: str | Path) -> list[dict[str, str]]:
     """Read trades / fills CSV (string dicts per row)."""
     p = Path(path)
@@ -775,27 +781,23 @@ def load_metadata(path: str | Path) -> dict[str, Any]:
     return data
 
 
-def build_kpi_v0_report(
-    equity_path: str | Path,
-    trades_path: str | Path | None,
+def build_kpi_v0_report_from_tables(
+    rows: list[dict[str, str]],
+    fieldnames: list[str],
+    trade_rows: list[dict[str, str]] | None,
     *,
-    metadata_path: str | Path | None = None,
+    metadata: dict[str, Any] | None = None,
     policy_path: str | Path | None = None,
-    benchmark_returns_path: str | Path | None = None,
+    benchmark_rows: list[dict[str, str]] | None = None,
 ) -> KpiV0Report:
-    """Assemble report from CSV paths (§2.1 equity + §2.2 trades or split cost columns).
-
-    ``policy_path`` suministra targets ``weights``/``geo`` para drift (spec sec. 11); si es ``None``,
-    se usan claves anidadas en metadata o valores por defecto 30/70 y 20/80.
-    """
-    rows, fieldnames = load_equity_csv(equity_path)
+    """Igual que ``build_kpi_v0_report`` pero con filas ya cargadas (p. ej. slice OOS)."""
+    _validate_equity_fieldnames(fieldnames)
+    rows = sorted(rows, key=lambda r: _parse_ts(r["ts"]))
     equities = [_f(r, "equity_total") for r in rows]
     eq_short = [_f(r, "equity_short") for r in rows]
     eq_long = [_f(r, "equity_long") for r in rows]
 
-    meta: dict[str, Any] = {}
-    if metadata_path is not None:
-        meta = load_metadata(metadata_path)
+    meta: dict[str, Any] = dict(metadata) if metadata else {}
 
     if policy_path is not None:
         mandate_targets = load_mandate_targets_from_policy_yaml(policy_path)
@@ -821,16 +823,12 @@ def build_kpi_v0_report(
 
     costs: dict[str, float] | None = None
     costs_na: str | None = None
-    tr_rows: list[dict[str, str]] = []
-    if trades_path is not None:
-        tr_rows = load_trades_csv(trades_path)
-    br_rows: list[dict[str, str]] = []
-    if benchmark_returns_path is not None:
-        br_rows = load_benchmark_returns_csv(benchmark_returns_path)
+    tr_rows: list[dict[str, str]] = [] if trade_rows is None else list(trade_rows)
+    br_rows: list[dict[str, str]] = [] if benchmark_rows is None else list(benchmark_rows)
 
     if equity_has_motor_cost_columns(fieldnames):
         costs = sum_costs_by_motor_from_equity(rows)
-    elif trades_path is not None:
+    elif trade_rows is not None:
         costs = sum_costs_by_motor_from_trades(tr_rows) if tr_rows else {"short": 0.0, "long": 0.0}
     else:
         costs_na = "missing_trades_and_no_costs_day_short_long_in_equity_csv"
@@ -902,6 +900,35 @@ def build_kpi_v0_report(
         alpha_vs_benchmark=alpha_block,
     )
     return rep
+
+
+def build_kpi_v0_report(
+    equity_path: str | Path,
+    trades_path: str | Path | None,
+    *,
+    metadata_path: str | Path | None = None,
+    policy_path: str | Path | None = None,
+    benchmark_returns_path: str | Path | None = None,
+) -> KpiV0Report:
+    """Assemble report from CSV paths (§2.1 equity + §2.2 trades or split cost columns).
+
+    ``policy_path`` suministra targets ``weights``/``geo`` para drift (spec sec. 11); si es ``None``,
+    se usan claves anidadas en metadata o valores por defecto 30/70 y 20/80.
+    """
+    rows, fieldnames = load_equity_csv(equity_path)
+    meta: dict[str, Any] = load_metadata(metadata_path) if metadata_path is not None else {}
+    tr: list[dict[str, str]] | None = load_trades_csv(trades_path) if trades_path is not None else None
+    br: list[dict[str, str]] | None = (
+        load_benchmark_returns_csv(benchmark_returns_path) if benchmark_returns_path is not None else None
+    )
+    return build_kpi_v0_report_from_tables(
+        rows,
+        fieldnames,
+        tr,
+        metadata=meta,
+        policy_path=policy_path,
+        benchmark_rows=br,
+    )
 
 
 def _sanitize_json_values(obj: Any) -> Any:

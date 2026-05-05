@@ -354,6 +354,66 @@
           }
         }
       }
+    },
+    "kpi_oos_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "walk_forward", "aggregate", "thresholds"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "walk_forward": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "burn_in_trading_days",
+            "oos_trading_days",
+            "step_trading_days",
+            "min_oos_windows"
+          ],
+          "properties": {
+            "burn_in_trading_days": { "type": "integer", "minimum": 0 },
+            "oos_trading_days": { "type": "integer", "minimum": 5 },
+            "step_trading_days": { "type": "integer", "minimum": 1 },
+            "min_oos_windows": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "aggregate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rule"],
+          "properties": {
+            "rule": { "type": "string", "enum": ["all", "k_of_last_q"] },
+            "k_pass": { "type": "integer", "minimum": 1 },
+            "last_q_windows": { "type": "integer", "minimum": 1 }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "rule": { "const": "k_of_last_q" } }
+              },
+              "then": {
+                "required": ["k_pass", "last_q_windows"]
+              }
+            }
+          ]
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "min_sharpe_annualized_total": { "type": ["number", "null"] },
+            "min_sortino_annualized_total": { "type": ["number", "null"] },
+            "max_drawdown_total_floor": { "type": ["number", "null"], "maximum": 0 },
+            "max_drawdown_short_floor": { "type": ["number", "null"], "maximum": 0 },
+            "max_drawdown_long_floor": { "type": ["number", "null"], "maximum": 0 },
+            "min_calmar_12m_long": { "type": ["number", "null"] },
+            "max_mdd_12m_rolling_long_floor": { "type": ["number", "null"], "maximum": 0 },
+            "max_turnover_long_monthly_last": { "type": ["number", "null"], "minimum": 0 },
+            "min_alpha_simple_return_total": { "type": ["number", "null"] }
+          }
+        }
+      }
     }
   },
   "$defs": {

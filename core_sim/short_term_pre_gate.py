@@ -77,6 +77,22 @@ def _walk_forward_windows(
     return windows
 
 
+def walk_forward_oos_windows(
+    sorted_dates: list[date],
+    *,
+    burn_in_trading_days: int,
+    oos_trading_days: int,
+    step_trading_days: int,
+) -> list[list[date]]:
+    """API pública: mismas ventanas OOS que el pre-gate corto, con burn-in configurable (p. ej. KPI 12m = 252)."""
+    return _walk_forward_windows(
+        sorted_dates,
+        burn_in_trading_days=burn_in_trading_days,
+        oos_trading_days=oos_trading_days,
+        step_trading_days=step_trading_days,
+    )
+
+
 def _simulate_oos_window(
     *,
     window_days: list[date],

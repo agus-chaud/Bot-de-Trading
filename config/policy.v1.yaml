@@ -130,3 +130,24 @@ corporate_actions:
 # Parámetros del workflow de validación pre-live
 validation_wf:
   lookback_trading_days: 90
+
+# Gate KPI OOS (Fase 5): walk-forward del informe v3 por tramo + tabla maestra + pass/fail (umbrales opcionales por métrica)
+kpi_oos_gate:
+  enabled: false
+  walk_forward:
+    burn_in_trading_days: 252
+    oos_trading_days: 60
+    step_trading_days: 30
+    min_oos_windows: 1
+  aggregate:
+    rule: all
+  thresholds:
+    min_sharpe_annualized_total: null
+    min_sortino_annualized_total: null
+    max_drawdown_total_floor: null
+    max_drawdown_short_floor: null
+    max_drawdown_long_floor: null
+    min_calmar_12m_long: null
+    max_mdd_12m_rolling_long_floor: null
+    max_turnover_long_monthly_last: null
+    min_alpha_simple_return_total: null
