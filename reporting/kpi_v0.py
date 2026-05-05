@@ -206,7 +206,7 @@ class KpiV0Report:
     """Serializable report payload (JSON + Markdown views)."""
 
     spec_id: str = "rpt_kpi.v1"
-    report_version: str = "report_kpis_v2"
+    report_version: str = "report_kpis_v3"
     run_id: str | None = None
     reporting_ccy: str = "USD"
     trading_days_per_year: int = 252
@@ -218,6 +218,7 @@ class KpiV0Report:
     costs_by_motor: dict[str, float] | None = None
     costs_na_reason: str | None = None
     mandate_drift: dict[str, Any] | None = None
+    alpha_vs_benchmark: dict[str, Any] | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
         root = {
@@ -238,6 +239,8 @@ class KpiV0Report:
         }
         if self.mandate_drift is not None:
             root["mandate_drift"] = self.mandate_drift
+        if self.alpha_vs_benchmark is not None:
+            root["alpha_vs_benchmark"] = self.alpha_vs_benchmark
         return root
 
 
@@ -294,6 +297,21 @@ def load_trades_csv(path: str | Path) -> list[dict[str, str]]:
         return [dict(r) for r in reader]
 
 
+def load_benchmark_returns_csv(path: str | Path) -> list[dict[str, str]]:
+    """CSV de benchmark con columnas mínimas: ``ts``, ``benchmark_return``."""
+    p = Path(path)
+    with p.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise ValueError("benchmark returns CSV: missing header")
+        required = {"ts", "benchmark_return"}
+        if not required.issubset(set(reader.fieldnames)):
+            raise ValueError("benchmark returns CSV must include ts and benchmark_return")
+        rows = [dict(r) for r in reader]
+    rows.sort(key=lambda r: _parse_ts(str(r["ts"])))
+    return rows
+
+
 def compute_net_return_annualized(
     equity_total_series: list[float],
     *,
@@ -323,6 +341,57 @@ def compute_max_drawdown(equity_series: list[float]) -> float:
         if peak > 0:
             worst = min(worst, e / peak - 1.0)
     return worst
+
+
+def compute_rolling_mdd_calmar_12m(
+    equity_series: list[float],
+    *,
+    trading_days_per_year: int = 252,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """sec. 7: MDD_12m y Calmar_12m rolling sobre una serie de equity."""
+    window_returns = trading_days_per_year
+    window_points = window_returns + 1
+    out: list[dict[str, Any]] = []
+    if len(equity_series) < window_points:
+        return out, {
+            "mdd_12m_rolling_last": None,
+            "mdd_12m_rolling_na_reason": "insufficient_history",
+            "calmar_12m_last": None,
+            "calmar_12m_na_reason": "insufficient_history",
+        }
+
+    for end_idx in range(window_points - 1, len(equity_series)):
+        start_idx = end_idx - (window_points - 1)
+        win = equity_series[start_idx : end_idx + 1]
+        mdd = compute_max_drawdown(win)
+        e0 = win[0]
+        e1 = win[-1]
+        calmar: float | None = None
+        calmar_na: str | None = None
+        if e0 <= 0 or e1 <= 0:
+            calmar_na = "non_positive_equity"
+        elif abs(mdd) < 1e-8:
+            calmar_na = "mdd_near_zero"
+        else:
+            ann = (e1 / e0) ** (trading_days_per_year / float(window_returns)) - 1.0
+            calmar = ann / abs(mdd)
+
+        out.append(
+            {
+                "end_index": end_idx,
+                "mdd_12m": mdd,
+                "calmar_12m": calmar,
+                "calmar_12m_na_reason": calmar_na,
+            }
+        )
+
+    last = out[-1]
+    return out, {
+        "mdd_12m_rolling_last": last["mdd_12m"],
+        "mdd_12m_rolling_na_reason": None,
+        "calmar_12m_last": last["calmar_12m"],
+        "calmar_12m_na_reason": last["calmar_12m_na_reason"],
+    }
 
 
 def compute_daily_simple_returns(equity_series: list[float]) -> tuple[list[float] | None, str | None]:
@@ -582,6 +651,114 @@ def sum_costs_by_motor_from_trades(rows: list[dict[str, str]]) -> dict[str, floa
     return totals
 
 
+def compute_turnover_long_monthly(
+    equity_rows: list[dict[str, str]],
+    trade_rows: list[dict[str, str]],
+) -> dict[str, Any]:
+    """sec. 9.1: turnover mensual del largo = sum(|notional|)/(2*avg(equity_long))."""
+    eq_by_month: dict[str, list[float]] = {}
+    for r in equity_rows:
+        ts = _parse_ts(str(r["ts"]))
+        m = f"{ts.year:04d}-{ts.month:02d}"
+        eq_by_month.setdefault(m, []).append(_f(r, "equity_long"))
+
+    notional_by_month: dict[str, float] = {}
+    for r in trade_rows:
+        if _motor_fill_key(r) != "long":
+            continue
+        if str(r.get("qty") or "").strip() == "" or str(r.get("price") or "").strip() == "":
+            continue
+        ts = _parse_ts(str(r["ts"]))
+        m = f"{ts.year:04d}-{ts.month:02d}"
+        qty = abs(float(r["qty"]))
+        price = abs(float(r["price"]))
+        notional_by_month[m] = notional_by_month.get(m, 0.0) + qty * price
+
+    months = sorted(set(eq_by_month) | set(notional_by_month))
+    monthly: dict[str, dict[str, Any]] = {}
+    for m in months:
+        eq_list = eq_by_month.get(m, [])
+        avg_eq = (sum(eq_list) / len(eq_list)) if eq_list else 0.0
+        notional = notional_by_month.get(m, 0.0)
+        if avg_eq == 0.0:
+            monthly[m] = {
+                "turnover_long_monthly": None,
+                "turnover_long_monthly_na_reason": "zero_avg_equity_long",
+                "sum_abs_notional_long": notional,
+                "avg_equity_long": avg_eq,
+            }
+        else:
+            monthly[m] = {
+                "turnover_long_monthly": notional / (2.0 * avg_eq),
+                "turnover_long_monthly_na_reason": None,
+                "sum_abs_notional_long": notional,
+                "avg_equity_long": avg_eq,
+            }
+
+    last_month = months[-1] if months else None
+    return {
+        "monthly": monthly,
+        "last_month": last_month,
+        "turnover_long_monthly_last": (
+            None if last_month is None else monthly[last_month]["turnover_long_monthly"]
+        ),
+        "turnover_long_monthly_last_na_reason": (
+            "no_months" if last_month is None else monthly[last_month]["turnover_long_monthly_na_reason"]
+        ),
+    }
+
+
+def compute_alpha_vs_benchmark_aligned(
+    rows: list[dict[str, str]],
+    benchmark_rows: list[dict[str, str]],
+    *,
+    equity_key: str,
+) -> dict[str, Any]:
+    """sec. 12: alpha = retorno simple compuesto bot - benchmark (inner join por fecha)."""
+    if len(rows) < 2:
+        return {
+            "alpha_simple_return": None,
+            "alpha_na_reason": "insufficient_history",
+            "n_obs": 0,
+        }
+    bench_by_day: dict[date, float] = {}
+    for r in benchmark_rows:
+        d = _parse_ts(str(r["ts"]))
+        bench_by_day[d] = float(r["benchmark_return"])
+
+    bot_by_day: dict[date, float] = {}
+    for i in range(1, len(rows)):
+        d = _parse_ts(str(rows[i]["ts"]))
+        prev = _f(rows[i - 1], equity_key)
+        cur = _f(rows[i], equity_key)
+        if prev <= 0:
+            continue
+        bot_by_day[d] = cur / prev - 1.0
+
+    common_days = sorted(set(bot_by_day) & set(bench_by_day))
+    if not common_days:
+        return {
+            "alpha_simple_return": None,
+            "alpha_na_reason": "no_inner_join_observations",
+            "n_obs": 0,
+        }
+
+    bot_comp = 1.0
+    bench_comp = 1.0
+    for d in common_days:
+        bot_comp *= 1.0 + bot_by_day[d]
+        bench_comp *= 1.0 + bench_by_day[d]
+    r_bot = bot_comp - 1.0
+    r_bench = bench_comp - 1.0
+    return {
+        "alpha_simple_return": r_bot - r_bench,
+        "alpha_na_reason": None,
+        "n_obs": len(common_days),
+        "bot_simple_return_aligned": r_bot,
+        "benchmark_simple_return_aligned": r_bench,
+    }
+
+
 def load_metadata(path: str | Path) -> dict[str, Any]:
     """Load YAML or JSON run metadata."""
     p = Path(path)
@@ -604,6 +781,7 @@ def build_kpi_v0_report(
     *,
     metadata_path: str | Path | None = None,
     policy_path: str | Path | None = None,
+    benchmark_returns_path: str | Path | None = None,
 ) -> KpiV0Report:
     """Assemble report from CSV paths (§2.1 equity + §2.2 trades or split cost columns).
 
@@ -646,6 +824,9 @@ def build_kpi_v0_report(
     tr_rows: list[dict[str, str]] = []
     if trades_path is not None:
         tr_rows = load_trades_csv(trades_path)
+    br_rows: list[dict[str, str]] = []
+    if benchmark_returns_path is not None:
+        br_rows = load_benchmark_returns_csv(benchmark_returns_path)
 
     if equity_has_motor_cost_columns(fieldnames):
         costs = sum_costs_by_motor_from_equity(rows)
@@ -686,6 +867,24 @@ def build_kpi_v0_report(
         fills_field="long",
         trading_days_per_year=tdy,
     )
+    rolling_series, rolling_last = compute_rolling_mdd_calmar_12m(eq_long, trading_days_per_year=tdy)
+    segment_long_only.update(rolling_last)
+    segment_long_only["mdd_12m_rolling_series"] = rolling_series
+
+    to_long = compute_turnover_long_monthly(rows, tr_rows)
+    segment_long_only["turnover_long_monthly"] = to_long["monthly"]
+    segment_long_only["turnover_long_monthly_last"] = to_long["turnover_long_monthly_last"]
+    segment_long_only["turnover_long_monthly_last_na_reason"] = to_long[
+        "turnover_long_monthly_last_na_reason"
+    ]
+    segment_long_only["turnover_long_monthly_last_month"] = to_long["last_month"]
+
+    alpha_block: dict[str, Any] | None = None
+    if br_rows:
+        alpha_block = {
+            "total": compute_alpha_vs_benchmark_aligned(rows, br_rows, equity_key="equity_total"),
+            "long": compute_alpha_vs_benchmark_aligned(rows, br_rows, equity_key="equity_long"),
+        }
 
     rep = KpiV0Report(
         spec_id=str(meta.get("spec_id", "rpt_kpi.v1")),
@@ -700,6 +899,7 @@ def build_kpi_v0_report(
         costs_by_motor=costs,
         costs_na_reason=costs_na,
         mandate_drift=mandate_drift,
+        alpha_vs_benchmark=alpha_block,
     )
     return rep
 
@@ -834,6 +1034,40 @@ def write_report_markdown(report: KpiV0Report, path: str | Path) -> None:
                 f"- **Objetivos usados**: corto {tgt.get('weight_short')}, largo {tgt.get('weight_long')}; "
                 f"AR {tgt.get('weight_ar')}, US {tgt.get('weight_us')} (fracciones sobre `equity_total`).",
                 "- **Serie diaria**: campo `mandate_drift.series` en el JSON de salida.",
+                "",
+            ]
+        )
+
+    seg_l = report.segment_long
+    mdd12 = seg_l.get("mdd_12m_rolling_last")
+    mdd12_na = seg_l.get("mdd_12m_rolling_na_reason")
+    cal12 = seg_l.get("calmar_12m_last")
+    cal12_na = seg_l.get("calmar_12m_na_reason")
+    to_last = seg_l.get("turnover_long_monthly_last")
+    to_last_na = seg_l.get("turnover_long_monthly_last_na_reason")
+    to_last_month = seg_l.get("turnover_long_monthly_last_month")
+    lines.extend(
+        [
+            "## Bloque largo (v3)",
+            "",
+            f"- **MDD_12m rolling (último)**: {pct(mdd12, mdd12_na)}",
+            f"- **Calmar_12m (último)**: {num_or_na(cal12, na_reason=cal12_na)}",
+            f"- **turnover_long_monthly (último mes `{to_last_month}`)**: {num_or_na(to_last, na_reason=to_last_na)}",
+            "",
+        ]
+    )
+
+    if report.alpha_vs_benchmark is not None:
+        a_tot = report.alpha_vs_benchmark.get("total", {})
+        a_long = report.alpha_vs_benchmark.get("long", {})
+        lines.extend(
+            [
+                "## Alpha vs benchmark mixto (alineado)",
+                "",
+                "| Segmento | Alpha simple | Obs. inner join |",
+                "|----------|--------------|-----------------|",
+                f"| Total | {num_or_na(a_tot.get('alpha_simple_return'), na_reason=a_tot.get('alpha_na_reason'))} | {a_tot.get('n_obs')} |",
+                f"| Largo | {num_or_na(a_long.get('alpha_simple_return'), na_reason=a_long.get('alpha_na_reason'))} | {a_long.get('n_obs')} |",
                 "",
             ]
         )

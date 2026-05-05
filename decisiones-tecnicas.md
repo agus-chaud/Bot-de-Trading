@@ -625,7 +625,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - Módulo **`reporting/kpi_v0.py`**: carga CSV de equity (columnas mínimas §2.1), ordena por `ts`; **retorno neto anualizado** total según §5 \((E_T/E_0)^{252/N}-1\); **max drawdown** total según §7; **costos por motor** vía **`costs_day_short`/`costs_day_long`** en equity **o** CSV de trades con **`motor`/`bucket`** y **`fee`** *o* **`fees`** (no ambos) + `slippage` opcional.
   - CLI **`scripts/report_kpis.py`**: `--equity` obligatorio; `--trades` opcional si equity trae columnas de costo por motor; **`--metadata`** YAML/JSON opcional (`run_id`, `trading_days_per_year`, etc.); salidas obligatorias **`--out-json`** y **`--out-md`** para diff humano + consumo automático.
 - **Por qué**: Separa **cálculo puro** (testeable) de **CLI**; alinea números al spec para que dos corridas comparables usen las mismas definiciones; el ledger hoy exporta `costs_day` agregado — el desglose corto/largo sigue siendo **trades** hasta extender el export.
-- **Consecuencias**: Extender el ledger con `costs_day_short`/`costs_day_long` en el CSV diario eliminaría la necesidad de CSV de fills solo para costos. Las métricas de riesgo y ejecución adicionales alineadas a **`rpt_kpi.v1`** (Sharpe/Sortino, hit rate, profit factor) quedan registradas en **ADR-031**; el drift de mandato 70/30·20/80 en informe queda registrado en **ADR-032**; siguen pendientes otras filas del spec (p. ej. Calmar 12m largo, MDD 12m rolling, turnover mensual, alpha vs benchmark §12).
+- **Consecuencias**: Extender el ledger con `costs_day_short`/`costs_day_long` en el CSV diario eliminaría la necesidad de CSV de fills solo para costos. Las métricas de riesgo y ejecución adicionales alineadas a **`rpt_kpi.v1`** (Sharpe/Sortino, hit rate, profit factor) quedan registradas en **ADR-031**; el drift de mandato 70/30·20/80 en informe queda registrado en **ADR-032**; la ampliación v3 (MDD/Calmar/turnover/alpha) queda en **ADR-033**.
 - **Alternativas consideradas**:
   - **Solo notebook o script ad-hoc sin spec**: descartada por riesgo de definiciones divergentes entre corridas.
   - **Inferir motor solo desde símbolo**: descartada en v0; el spec pide tag explícito en fills o columnas de costo por motor.
@@ -644,7 +644,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - Filas **sin** `qty`/`price` válidos siguen contribuyendo a **costos por motor** pero **no** entran al cómputo FIFO (compatibilidad con CSV mínimos de solo comisión).
   - Salida JSON con **`segment.total`**, **`segment.short`**, **`segment.long`**, cada uno con `sharpe_annualized`, `sortino_annualized`, motivos de NA, `hit_rate`, `profit_factor`, `n_round_trips` (además de los campos previos en `total` como retorno anualizado y MDD).
 - **Por qué**: Respeta el spec: los ratios de riesgo-rendimiento se definen sobre la curva de patrimonio; las estadísticas de acierto y factor de beneficio requieren el log de ejecución. Separar fuentes evita redefinir Sharpe “desde PnL de trades”, que no está en `rpt_kpi.v1`.
-- **Consecuencias**: Para KPIs §8 hace falta export de fills con detalle de ejecución; benchmark/alpha y Calmar rolling siguen fuera de este incremento. El drift mandato 70/30·20/80 se incorpora en **ADR-032**. Tests de regresión en `tests/test_kpi_v0.py` fijan series sintéticas conocidas.
+- **Consecuencias**: Para KPIs §8 hace falta export de fills con detalle de ejecución. El drift mandato 70/30·20/80 se incorpora en **ADR-032** y la capa v3 (benchmark/alpha + métricas rolling del largo) en **ADR-033**. Tests de regresión en `tests/test_kpi_v0.py` fijan series sintéticas conocidas.
 - **Alternativas consideradas**:
   - **Sharpe solo desde PnL agregado de trades**: descartada por desalinear con **`docs/kpi_report_spec.v1.md`** §6.
   - **LIFO o promedio en vez de FIFO para round-trips**: descartada; el spec exige FIFO §8.
@@ -666,13 +666,36 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - Actualizar CLI **`scripts/report_kpis.py`**: flags `--policy` (default `config/policy.v1.yaml`) y `--no-policy`.
 - **Por qué**: Hace auditable el cumplimiento de mandato por fecha con un contrato estable y reproducible; separa observabilidad (drift) de ejecución/riesgo para evitar acoplar decisiones automáticas en la etapa de reporte.
 - **Consecuencias**:
-  - El informe pasa a `report_version: report_kpis_v2` y mantiene compatibilidad con corridas sin geo (declarando NA explícito).
+  - El informe v2 pasa a `report_version: report_kpis_v2` y mantiene compatibilidad con corridas sin geo (declarando NA explícito).
   - Para drift geo completo, el export de equity debe incluir `equity_ar` y `equity_us` en moneda de reporte.
   - Se reduce ambigüedad en revisiones OOS: snapshot final y serie diaria quedan normalizados en el mismo payload.
 - **Alternativas consideradas**:
   - **Calcular drift geo solo desde fills**: descartada por ser más frágil para MTM diario y más costosa de reconstruir.
   - **Aplicar bandas con acción automática en el script de reporte**: descartada; viola separación de responsabilidades (reporting vs allocator/engines/risk).
 - **Referencias**: `.cursor/plans/bot_trading_paper-first_155d6f04.plan.md` (Fase 5, v2), `docs/kpi_report_spec.v1.md` §11, `reporting/kpi_v0.py`, `scripts/report_kpis.py`, `tests/test_kpi_v0.py`.
+
+---
+
+## ADR-033 — KPI informe v3: MDD_12m, Calmar_12m, turnover mensual largo y alpha benchmark
+
+- **Fecha**: 2026-05-05
+- **Estado**: aceptada
+- **Contexto**: El plan Fase 5 (v3) pide completar el bloque largo del informe con métricas rolling de calidad y fricción, más alpha contra benchmark mixto alineado temporalmente.
+- **Decisión**:
+  - Subir `reporting/kpi_v0.py` a `report_version: report_kpis_v3`.
+  - Agregar en `segment.long`: `mdd_12m_rolling_last`, `calmar_12m_last`, y `mdd_12m_rolling_series` (rolling de 252 retornos / 253 puntos).
+  - Agregar `turnover_long_monthly` (serie por mes) y resumen último mes: `turnover_long_monthly_last` + `turnover_long_monthly_last_month`.
+  - Agregar bloque `alpha_vs_benchmark` (total y largo), calculado con retornos simples compuestos sobre fechas en común (`inner join` por `ts`) usando CSV explícito de benchmark (`ts`, `benchmark_return`).
+  - Extender CLI `scripts/report_kpis.py` con flag `--benchmark-returns`.
+- **Por qué**: Cierra la trazabilidad de mandato + calidad del largo en un único reporte reproducible, evitando comparar corridas con definiciones incompletas y evitando leakage temporal en alpha.
+- **Consecuencias**:
+  - El reporte JSON ahora soporta lectura directa de KPI v3 sin post-procesos externos.
+  - Alpha queda desacoplada de la descarga de mercado en runtime: el script consume retornos benchmark precomputados/alineables y mantiene contrato simple.
+  - Se incrementa la exigencia del pipeline de datos para producir benchmark returns consistentes por `ts`.
+- **Alternativas consideradas**:
+  - **Calcular alpha con forward-fill de benchmark en el reporte**: descartada por riesgo de sesgo y conflicto con criterio de inner join del spec.
+  - **Turnover largo solo agregado total (sin serie mensual)**: descartada por perder capacidad de auditoría temporal y de diagnóstico de picos de rotación.
+- **Referencias**: `.cursor/plans/bot_trading_paper-first_155d6f04.plan.md` (Fase 5, v3), `docs/kpi_report_spec.v1.md` §7, §9, §12, `reporting/kpi_v0.py`, `scripts/report_kpis.py`, `tests/test_kpi_v0.py`.
 
 ---
 

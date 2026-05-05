@@ -2,7 +2,8 @@
 """Informe KPI: lee CSV de equity (+ trades o columnas de costo) -> JSON + Markdown.
 
 Alineado con ``docs/kpi_report_spec.v1.md``: retorno anualizado, max DD, costos,
-Sharpe/Sortino, hit rate / profit factor, drift mandato 30/70 y 20/80 (serie + snapshot).
+Sharpe/Sortino, hit rate / profit factor, drift mandato 30/70 y 20/80 (serie + snapshot),
+MDD_12m + Calmar_12m rolling y turnover_long_monthly, alpha vs benchmark alineado.
 
 Ejemplo::
 
@@ -52,6 +53,13 @@ def main(argv: list[str] | None = None) -> int:
         "mandate_drift_bands_pp.",
     )
     parser.add_argument(
+        "--benchmark-returns",
+        type=Path,
+        default=None,
+        help="CSV opcional con retornos benchmark ya alineables por ts "
+        "(columnas: ts, benchmark_return).",
+    )
+    parser.add_argument(
         "--policy",
         type=Path,
         default=REPO_ROOT / "config" / "policy.v1.yaml",
@@ -75,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         args.trades,
         metadata_path=args.metadata,
         policy_path=policy_arg,
+        benchmark_returns_path=args.benchmark_returns,
     )
 
     if report.costs_na_reason:

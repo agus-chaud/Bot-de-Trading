@@ -92,15 +92,15 @@ La transición a real está planteada como gate, no como salto de fe:
   - tests en `tests/test_wf_windows.py`, `tests/test_wf_runner.py`, `tests/test_wf_long_report.py`
 - **Informe KPI (smoke, `rpt_kpi.v1`)**:
   - `docs/kpi_report_spec.v1.md` — definiciones operativas (fecha de congelación 2026-05-05).
-  - `reporting/kpi_v0.py` — CSV diario §2.1 + fills/trades §2.2 (opcional si el equity trae `costs_day_short`/`costs_day_long`): retorno neto anualizado total §5, max drawdown §7, **Sharpe/Sortino** por segmento (equity total/corto/largo) §6, **hit rate y profit factor** por motor FIFO §8 (agregado en `segment.total`).
-  - `scripts/report_kpis.py` — `--equity`, `--trades`, `--metadata` → `--out-json` y `--out-md`.
+  - `reporting/kpi_v0.py` — CSV diario §2.1 + fills/trades §2.2 (opcional si el equity trae `costs_day_short`/`costs_day_long`): retorno neto anualizado total §5, max drawdown §7, **Sharpe/Sortino** por segmento (equity total/corto/largo) §6, **hit rate y profit factor** por motor FIFO §8, **drift 30/70 y 20/80** §11, y v3 en bloque largo (**MDD_12m rolling**, **Calmar_12m**, **turnover_long_monthly**) + **alpha vs benchmark** §12.
+  - `scripts/report_kpis.py` — `--equity`, `--trades`, `--metadata`, `--benchmark-returns` → `--out-json` y `--out-md`.
   - `tests/test_kpi_v0.py` — comportamiento + series sintéticas.
-  - Decisión registrada en `decisiones-tecnicas.md` (**ADR-030**, **ADR-031**).
+  - Decisiones registradas en `decisiones-tecnicas.md` (**ADR-030**, **ADR-031**, **ADR-032**, **ADR-033**).
 
 ### Pendiente principal
 
 - Integración completa del `long_term_monthly_runner` en `event_engine` operativo diario.
-- Ampliar el informe KPI respecto del spec (Calmar 12m solo largo, MDD 12m rolling largo, turnover mensual por motor, drift 70/30·20/80 materializado en tabla, alpha vs benchmark mixto §12, golden tests/gates explícitos) — ver `docs/kpi_report_spec.v1.md`.
+- Completar restantes del informe KPI respecto del spec (p. ej. cobertura de turnover por otros segmentos además de largo, pipeline/golden tests de benchmark + gates explícitos de aprobación) — ver `docs/kpi_report_spec.v1.md`.
 - Conectar fuentes de datos reales (feeds, APIs broker) con `PaperBrokerSim` como adaptador, manteniendo interfaces estables.
 
 
@@ -138,7 +138,7 @@ python -m pytest tests/ -v
 python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
 python scripts/run_short_term_pre_gate.py
 python scripts/run_long_engine_wf.py --window-months 6 --step-months 1
-python scripts/report_kpis.py --equity path/to/equity.csv --trades path/to/fills.csv --out-json kpi.json --out-md kpi.md
+python scripts/report_kpis.py --equity path/to/equity.csv --trades path/to/fills.csv --benchmark-returns path/to/benchmark_returns.csv --out-json kpi.json --out-md kpi.md
 ```
 
 Por módulo (desarrollo acotado):

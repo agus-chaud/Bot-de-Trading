@@ -9,11 +9,14 @@ import pytest
 
 from reporting.kpi_v0 import (
     build_kpi_v0_report,
+    compute_alpha_vs_benchmark_aligned,
     compute_daily_simple_returns,
     compute_max_drawdown,
     compute_net_return_annualized,
+    compute_rolling_mdd_calmar_12m,
     compute_sharpe_annualized,
     compute_sortino_annualized,
+    compute_turnover_long_monthly,
     fifo_kpis_from_trade_rows,
     fifo_roundtrip_pnls_for_motor,
     filter_rows_for_fifo_kpis,
@@ -186,7 +189,7 @@ def test_build_report_writes_json_and_md(tmp_path: Path) -> None:
     write_report_markdown(rep, m)
 
     txt = j.read_text(encoding="utf-8")
-    assert "report_kpis_v2" in txt
+    assert "report_kpis_v3" in txt
     assert '"costs_by_motor"' in txt
     md = m.read_text(encoding="utf-8")
     assert "# KPI report" in md
@@ -293,3 +296,61 @@ def test_mandate_drift_bands_informational_outside(tmp_path: Path) -> None:
     rep = build_kpi_v0_report(eq, trades_path=None, metadata_path=meta, policy_path=None)
     snap = rep.mandate_drift["snapshot_last_ts"]
     assert snap["outside_band_axes"] == ["short", "long", "AR", "US"]
+
+
+def test_compute_rolling_mdd_calmar_12m_insufficient_history() -> None:
+    series = [100.0] * 200
+    rolling, last = compute_rolling_mdd_calmar_12m(series, trading_days_per_year=252)
+    assert rolling == []
+    assert last["mdd_12m_rolling_last"] is None
+    assert last["mdd_12m_rolling_na_reason"] == "insufficient_history"
+
+
+def test_compute_turnover_long_monthly_basic_case() -> None:
+    eq_rows = [
+        {"ts": "2024-01-02", "equity_total": "100", "equity_short": "30", "equity_long": "70"},
+        {"ts": "2024-01-03", "equity_total": "100", "equity_short": "30", "equity_long": "70"},
+    ]
+    tr_rows = [
+        {"ts": "2024-01-03", "motor": "long", "qty": "1", "price": "14"},
+        {"ts": "2024-01-03", "motor": "long", "qty": "2", "price": "7"},
+    ]
+    out = compute_turnover_long_monthly(eq_rows, tr_rows)
+    assert out["turnover_long_monthly_last"] == pytest.approx((14 + 14) / (2 * 70))
+    assert out["last_month"] == "2024-01"
+
+
+def test_compute_alpha_vs_benchmark_aligned_inner_join() -> None:
+    eq_rows = [
+        {"ts": "2024-01-02", "equity_total": "100", "equity_short": "30", "equity_long": "70"},
+        {"ts": "2024-01-03", "equity_total": "110", "equity_short": "33", "equity_long": "77"},
+        {"ts": "2024-01-04", "equity_total": "121", "equity_short": "36.3", "equity_long": "84.7"},
+    ]
+    benchmark_rows = [
+        {"ts": "2024-01-03", "benchmark_return": "0.05"},
+        {"ts": "2024-01-04", "benchmark_return": "0.05"},
+    ]
+    out = compute_alpha_vs_benchmark_aligned(eq_rows, benchmark_rows, equity_key="equity_total")
+    # bot: +10%, +10% => 21%; benchmark: +5%, +5% => 10.25%; alpha=10.75%
+    assert out["n_obs"] == 2
+    assert out["alpha_simple_return"] == pytest.approx(0.21 - 0.1025)
+
+
+def test_build_report_v3_long_and_alpha_blocks(tmp_path: Path) -> None:
+    from datetime import date, timedelta
+
+    eq = tmp_path / "eq.csv"
+    lines = ["ts,equity_total,equity_short,equity_long,cash,costs_day_short,costs_day_long"]
+    d0 = date(2024, 1, 2)
+    for i in range(253):
+        d = d0 + timedelta(days=i)
+        lines.append(f"{d.isoformat()},10000,3000,{7000 + i},0,0,0")
+    eq.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tr = tmp_path / "tr.csv"
+    tr.write_text("ts,symbol,side,qty,price,motor,fee\n2024-01-15,X,BUY,1,100,long,0\n", encoding="utf-8")
+    br = tmp_path / "br.csv"
+    br.write_text("ts,benchmark_return\n2024-01-03,0.0\n2024-01-04,0.0\n", encoding="utf-8")
+    rep = build_kpi_v0_report(eq, tr, policy_path=None, benchmark_returns_path=br)
+    assert rep.segment_long["mdd_12m_rolling_last"] is not None
+    assert "turnover_long_monthly" in rep.segment_long
+    assert rep.alpha_vs_benchmark is not None
