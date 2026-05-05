@@ -1,0 +1,19 @@
+# Benchmark estático mixto 20/80 (geo AR/US sobre el total del mandato).
+# Congelar para informes KPI / alpha — no reoptimizar mirando equity del bot (rpt_kpi.v1 §12).
+# Moneda de componentes: USD (coherente con reporting_ccy del informe).
+
+schema_version: 1
+id: benchmark_mix_20_80_v1
+
+lines:
+  - symbol: ARGT
+    geo: AR
+    weight: 0.20
+    venue: XNYS
+    description: "iShares MSCI Argentina ETF (listado US, exposición AR, USD)"
+
+  - symbol: SPY
+    geo: US
+    weight: 0.80
+    venue: XNYS
+    description: "SPDR S&P 500 ETF (broad US, USD)"
