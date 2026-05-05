@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Informe KPI v0: lee CSV de equity (+ trades o columnas de costo) → JSON + Markdown.
+"""Informe KPI: lee CSV de equity (+ trades o columnas de costo) -> JSON + Markdown.
 
-Smoke test alineado con ``docs/kpi_report_spec.v1.md``: retorno neto anualizado (total),
-max drawdown (total), costos por motor.
+Alineado con ``docs/kpi_report_spec.v1.md``: retorno anualizado, max DD, costos,
+Sharpe/Sortino, hit rate / profit factor, drift mandato 30/70 y 20/80 (serie + snapshot).
 
 Ejemplo::
 
     python scripts/report_kpis.py --equity equity.csv --trades fills.csv --out-json kpi.json --out-md kpi.md
 
 Si el CSV de equity incluye ``costs_day_short`` y ``costs_day_long``, ``--trades`` es opcional.
+Targets de drift por defecto desde ``config/policy.v1.yaml`` (flag ``--policy``).
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from reporting.kpi_v0 import (  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="KPI report v0 (smoke).")
+    parser = argparse.ArgumentParser(description="KPI report (equity + fills -> JSON/Markdown).")
     parser.add_argument(
         "--equity",
         required=True,
@@ -47,17 +48,33 @@ def main(argv: list[str] | None = None) -> int:
         "--metadata",
         type=Path,
         default=None,
-        help="YAML/JSON opcional: run_id, spec_id, trading_days_per_year, reporting_ccy.",
+        help="YAML/JSON opcional: run_id, spec_id, trading_days_per_year, weights/geo, "
+        "mandate_drift_bands_pp.",
+    )
+    parser.add_argument(
+        "--policy",
+        type=Path,
+        default=REPO_ROOT / "config" / "policy.v1.yaml",
+        help="YAML de política para targets weights/geo del drift (sec. 11). "
+        "Use --no-policy para tomar solo metadata o defaults 30/70, 20/80.",
+    )
+    parser.add_argument(
+        "--no-policy",
+        action="store_true",
+        help="No leer archivo de política; usar weights/geo del metadata o valores por defecto.",
     )
     parser.add_argument("--out-json", type=Path, required=True, help="Salida JSON.")
     parser.add_argument("--out-md", type=Path, required=True, help="Salida Markdown.")
 
     args = parser.parse_args(argv)
 
+    policy_arg: Path | None = None if args.no_policy else args.policy
+
     report = build_kpi_v0_report(
         args.equity,
         args.trades,
         metadata_path=args.metadata,
+        policy_path=policy_arg,
     )
 
     if report.costs_na_reason:

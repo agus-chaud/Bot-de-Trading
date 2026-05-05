@@ -1,7 +1,8 @@
-"""KPI report v0 — smoke metrics aligned with docs/kpi_report_spec.v1.md.
+"""KPI report — métricas alineadas con docs/kpi_report_spec.v1.md.
 
-Retorno neto anualizado (§5), max drawdown (§7), Sharpe/Sortino (§6),
-hit rate / profit factor desde fills FIFO (§8), costos por motor (§10).
+Retorno neto anualizado (sec. 5), max drawdown (sec. 7), Sharpe/Sortino (sec. 6),
+hit rate / profit factor desde fills FIFO (sec. 8), costos por motor (sec. 10),
+drift mandato 30/70 y 20/80 (sec. 11, serie + snapshot último día).
 """
 
 from __future__ import annotations
@@ -19,13 +20,193 @@ import yaml
 
 REQUIRED_EQUITY_COLS = ("ts", "equity_total", "equity_short", "equity_long")
 
+@dataclass(frozen=True)
+class MandateTargets:
+    """Targets corto/largo y geo sobre equity_total (fracciones que suman 1 por eje)."""
+
+    weight_short: float
+    weight_long: float
+    weight_ar: float
+    weight_us: float
+
+
+@dataclass(frozen=True)
+class MandateDriftBands:
+    """Media anchura ±X pp sobre drift (= desviación vs objetivo); solo comparación en informe."""
+
+    short_pp: float | None = None
+    long_pp: float | None = None
+    ar_pp: float | None = None
+    us_pp: float | None = None
+
+
+def load_mandate_targets_from_policy_yaml(path: str | Path) -> MandateTargets:
+    """Lee ``weights.*`` y ``geo.*`` desde YAML de política (p. ej. ``config/policy.v1.yaml``)."""
+    data = load_metadata(path)
+    w = data.get("weights") or {}
+    g = data.get("geo") or {}
+    return MandateTargets(
+        weight_short=float(w["short"]),
+        weight_long=float(w["long"]),
+        weight_ar=float(g["AR"]),
+        weight_us=float(g["US"]),
+    )
+
+
+def targets_from_metadata(meta: dict[str, Any]) -> MandateTargets | None:
+    """Si ``meta`` incluye ``weights`` y ``geo`` anidados, devuelve targets; si no, None."""
+    w, g = meta.get("weights"), meta.get("geo")
+    if not isinstance(w, dict) or not isinstance(g, dict):
+        return None
+    try:
+        return MandateTargets(
+            weight_short=float(w["short"]),
+            weight_long=float(w["long"]),
+            weight_ar=float(g["AR"]),
+            weight_us=float(g["US"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def bands_from_metadata(meta: dict[str, Any]) -> MandateDriftBands | None:
+    """Opcional: ``mandate_drift_bands_pp: {short, long, AR, US}`` (medio ancho ± en pp)."""
+    raw = meta.get("mandate_drift_bands_pp")
+    if not isinstance(raw, dict):
+        return None
+    try:
+
+        def f(k: str) -> float | None:
+            v = raw.get(k)
+            return None if v is None else float(v)
+
+        return MandateDriftBands(
+            short_pp=f("short"),
+            long_pp=f("long"),
+            ar_pp=f("AR"),
+            us_pp=f("US"),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def equity_csv_has_geo_columns(fieldnames: list[str]) -> bool:
+    return "equity_ar" in fieldnames and "equity_us" in fieldnames
+
+
+def mandate_drift_for_equity_rows(
+    rows: list[dict[str, str]],
+    *,
+    fieldnames: list[str],
+    targets: MandateTargets,
+    bands: MandateDriftBands | None = None,
+) -> dict[str, Any]:
+    """sec. 11: serie diaria de drift vs targets + snapshot último ``ts``; geo NA si faltan columnas."""
+    has_geo = equity_csv_has_geo_columns(fieldnames)
+    geo_na = None if has_geo else "missing_equity_ar_equity_us_columns"
+
+    series_out: list[dict[str, Any]] = []
+    for r in rows:
+        ts = (r.get("ts") or "").strip()
+        try:
+            et = _f(r, "equity_total")
+            es = _f(r, "equity_short")
+            el = _f(r, "equity_long")
+        except ValueError:
+            continue
+
+        row_payload: dict[str, Any] = {"ts": ts}
+        if et <= 0:
+            row_payload["na_reason"] = "non_positive_equity_total"
+            series_out.append(row_payload)
+            continue
+
+        ws = es / et
+        wl = el / et
+        row_payload["weight_short"] = ws
+        row_payload["weight_long"] = wl
+        row_payload["drift_short_pp"] = (ws - targets.weight_short) * 100.0
+        row_payload["drift_long_pp"] = (wl - targets.weight_long) * 100.0
+
+        if has_geo:
+            ear = _f(r, "equity_ar")
+            eus = _f(r, "equity_us")
+            wa = ear / et
+            wu = eus / et
+            row_payload["weight_ar"] = wa
+            row_payload["weight_us"] = wu
+            row_payload["drift_ar_pp"] = (wa - targets.weight_ar) * 100.0
+            row_payload["drift_us_pp"] = (wu - targets.weight_us) * 100.0
+        else:
+            row_payload["weight_ar"] = None
+            row_payload["weight_us"] = None
+            row_payload["drift_ar_pp"] = None
+            row_payload["drift_us_pp"] = None
+            row_payload["geo_na_reason"] = geo_na
+
+        series_out.append(row_payload)
+
+    snapshot: dict[str, Any]
+    if not series_out:
+        snapshot = {"na_reason": "empty_series"}
+    else:
+        last = series_out[-1]
+        snap_ts = last.get("ts")
+        snapshot = {"ts": snap_ts}
+        if last.get("na_reason"):
+            snapshot["na_reason"] = last["na_reason"]
+        else:
+            snapshot["weight_short"] = last["weight_short"]
+            snapshot["weight_long"] = last["weight_long"]
+            snapshot["drift_short_pp"] = last["drift_short_pp"]
+            snapshot["drift_long_pp"] = last["drift_long_pp"]
+            snapshot["weight_ar"] = last.get("weight_ar")
+            snapshot["weight_us"] = last.get("weight_us")
+            snapshot["drift_ar_pp"] = last.get("drift_ar_pp")
+            snapshot["drift_us_pp"] = last.get("drift_us_pp")
+            snapshot["geo_na_reason"] = last.get("geo_na_reason")
+
+            if bands is not None:
+                violations: list[str] = []
+
+                def check(axis: str, drift: float | None, half_w: float | None) -> None:
+                    if half_w is None or drift is None:
+                        return
+                    if abs(drift) > half_w:
+                        violations.append(axis)
+
+                check("short", snapshot["drift_short_pp"], bands.short_pp)
+                check("long", snapshot["drift_long_pp"], bands.long_pp)
+                check("AR", snapshot.get("drift_ar_pp"), bands.ar_pp)
+                check("US", snapshot.get("drift_us_pp"), bands.us_pp)
+                snapshot["bands_half_width_pp"] = {
+                    "short": bands.short_pp,
+                    "long": bands.long_pp,
+                    "AR": bands.ar_pp,
+                    "US": bands.us_pp,
+                }
+                snapshot["outside_band_axes"] = violations if violations else None
+
+    out: dict[str, Any] = {
+        "targets": {
+            "weight_short": targets.weight_short,
+            "weight_long": targets.weight_long,
+            "weight_ar": targets.weight_ar,
+            "weight_us": targets.weight_us,
+        },
+        "geo_series_na_reason": geo_na,
+        "series": series_out,
+        "snapshot_last_ts": snapshot,
+    }
+    return out
+
 
 @dataclass
 class KpiV0Report:
     """Serializable report payload (JSON + Markdown views)."""
 
     spec_id: str = "rpt_kpi.v1"
-    report_version: str = "report_kpis_v0"
+    report_version: str = "report_kpis_v2"
     run_id: str | None = None
     reporting_ccy: str = "USD"
     trading_days_per_year: int = 252
@@ -36,9 +217,10 @@ class KpiV0Report:
     segment_long: dict[str, Any] = field(default_factory=dict)
     costs_by_motor: dict[str, float] | None = None
     costs_na_reason: str | None = None
+    mandate_drift: dict[str, Any] | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
-        return {
+        root = {
             "spec_id": self.spec_id,
             "report_version": self.report_version,
             "run_id": self.run_id,
@@ -54,6 +236,9 @@ class KpiV0Report:
             "costs_by_motor": self.costs_by_motor,
             "costs_na_reason": self.costs_na_reason,
         }
+        if self.mandate_drift is not None:
+            root["mandate_drift"] = self.mandate_drift
+        return root
 
 
 def _parse_ts(raw: str) -> date:
@@ -418,8 +603,13 @@ def build_kpi_v0_report(
     trades_path: str | Path | None,
     *,
     metadata_path: str | Path | None = None,
+    policy_path: str | Path | None = None,
 ) -> KpiV0Report:
-    """Assemble report from CSV paths (§2.1 equity + §2.2 trades or split cost columns)."""
+    """Assemble report from CSV paths (§2.1 equity + §2.2 trades or split cost columns).
+
+    ``policy_path`` suministra targets ``weights``/``geo`` para drift (spec sec. 11); si es ``None``,
+    se usan claves anidadas en metadata o valores por defecto 30/70 y 20/80.
+    """
     rows, fieldnames = load_equity_csv(equity_path)
     equities = [_f(r, "equity_total") for r in rows]
     eq_short = [_f(r, "equity_short") for r in rows]
@@ -428,6 +618,23 @@ def build_kpi_v0_report(
     meta: dict[str, Any] = {}
     if metadata_path is not None:
         meta = load_metadata(metadata_path)
+
+    if policy_path is not None:
+        mandate_targets = load_mandate_targets_from_policy_yaml(policy_path)
+    else:
+        mandate_targets = targets_from_metadata(meta) or MandateTargets(
+            0.30,
+            0.70,
+            0.20,
+            0.80,
+        )
+    mandate_bands = bands_from_metadata(meta)
+    mandate_drift = mandate_drift_for_equity_rows(
+        rows,
+        fieldnames=fieldnames,
+        targets=mandate_targets,
+        bands=mandate_bands,
+    )
 
     tdy = int(meta.get("trading_days_per_year", 252))
 
@@ -492,6 +699,7 @@ def build_kpi_v0_report(
         segment_long=segment_long_only,
         costs_by_motor=costs,
         costs_na_reason=costs_na,
+        mandate_drift=mandate_drift,
     )
     return rep
 
@@ -552,7 +760,7 @@ def write_report_markdown(report: KpiV0Report, path: str | Path) -> None:
     pf_na = seg.get("profit_factor_na_reason")
 
     lines = [
-        "# KPI report v0 (`report_kpis_v0`)",
+        f"# KPI report (`{report.report_version}`)",
         "",
         f"- **spec_id**: {report.spec_id}",
         f"- **run_id**: {report.run_id or '—'}",
@@ -565,10 +773,10 @@ def write_report_markdown(report: KpiV0Report, path: str | Path) -> None:
         "|--------|-------|",
         f"| Retorno neto anualizado | {pct(ann, ann_na)} |",
         f"| Max drawdown | {pct(mdd)} |",
-        f"| Sharpe (anual, §6) | {num_or_na(sh, na_reason=sh_na)} |",
-        f"| Sortino (anual, §6) | {num_or_na(so, na_reason=so_na)} |",
-        f"| Hit rate (round-trips, §8) | {num_or_na(hr, na_reason=hr_na)} |",
-        f"| Profit factor (§8) | {num_or_na(pf, na_reason=pf_na)} |",
+        f"| Sharpe (anual) | {num_or_na(sh, na_reason=sh_na)} |",
+        f"| Sortino (anual) | {num_or_na(so, na_reason=so_na)} |",
+        f"| Hit rate (round-trips) | {num_or_na(hr, na_reason=hr_na)} |",
+        f"| Profit factor | {num_or_na(pf, na_reason=pf_na)} |",
         f"| Round-trips (`n_round_trips`) | {seg.get('n_round_trips')} |",
         f"| Sesiones (`n_trading_days`) | {seg.get('n_trading_days')} |",
         "",
@@ -582,4 +790,52 @@ def write_report_markdown(report: KpiV0Report, path: str | Path) -> None:
     else:
         lines.append(f"*NA — {report.costs_na_reason}*")
     lines.append("")
+
+    md = report.mandate_drift
+    if md is not None:
+        snap = md.get("snapshot_last_ts") or {}
+        lines.extend(
+            [
+                "## Mandato: drift 30/70 y 20/80 (último día de la ventana)",
+                "",
+                f"- **snapshot `ts`**: {snap.get('ts', '—')}",
+            ]
+        )
+        if snap.get("na_reason"):
+            lines.append(f"- **NA**: {snap['na_reason']}")
+        else:
+            lines.extend(
+                [
+                    "| Eje | Drift (pp) |",
+                    "|-----|------------|",
+                    f"| Corto vs objetivo | {num_or_na(snap.get('drift_short_pp'), nd=4)} |",
+                    f"| Largo vs objetivo | {num_or_na(snap.get('drift_long_pp'), nd=4)} |",
+                ]
+            )
+            gna = snap.get("geo_na_reason")
+            if gna:
+                lines.append(f"| Geo AR/US | NA ({gna}) |")
+            else:
+                lines.extend(
+                    [
+                        f"| AR vs objetivo | {num_or_na(snap.get('drift_ar_pp'), nd=4)} |",
+                        f"| US vs objetivo | {num_or_na(snap.get('drift_us_pp'), nd=4)} |",
+                    ]
+                )
+            ob = snap.get("outside_band_axes")
+            if ob:
+                lines.append(f"- **Fuera de banda declarada (solo informe)**: {', '.join(ob)}")
+            elif snap.get("bands_half_width_pp"):
+                lines.append("- **Bandas (± medio ancho pp, metadata)**: declaradas; snapshot dentro de umbral en todos los ejes con banda.")
+        tgt = md.get("targets") or {}
+        lines.extend(
+            [
+                "",
+                f"- **Objetivos usados**: corto {tgt.get('weight_short')}, largo {tgt.get('weight_long')}; "
+                f"AR {tgt.get('weight_ar')}, US {tgt.get('weight_us')} (fracciones sobre `equity_total`).",
+                "- **Serie diaria**: campo `mandate_drift.series` en el JSON de salida.",
+                "",
+            ]
+        )
+
     p.write_text("\n".join(lines), encoding="utf-8")

@@ -186,10 +186,10 @@ def test_build_report_writes_json_and_md(tmp_path: Path) -> None:
     write_report_markdown(rep, m)
 
     txt = j.read_text(encoding="utf-8")
-    assert "report_kpis_v0" in txt
+    assert "report_kpis_v2" in txt
     assert '"costs_by_motor"' in txt
     md = m.read_text(encoding="utf-8")
-    assert "# KPI report v0" in md
+    assert "# KPI report" in md
     assert "Retorno neto anualizado" in md
 
 
@@ -243,3 +243,53 @@ def test_cli_script_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     )
     assert r.returncode == 0, r.stderr
     assert j.is_file()
+
+
+def test_mandate_drift_zero_on_exact_30_70_and_geo(tmp_path: Path) -> None:
+    eq = tmp_path / "eq.csv"
+    eq.write_text(
+        "ts,equity_total,equity_short,equity_long,cash,costs_day_short,costs_day_long,"
+        "equity_ar,equity_us\n"
+        "2024-01-02,10000,3000,7000,0,0,0,2000,8000\n"
+        "2024-01-03,10000,3000,7000,0,0,0,2000,8000\n",
+        encoding="utf-8",
+    )
+    rep = build_kpi_v0_report(eq, trades_path=None, policy_path=None)
+    assert rep.mandate_drift is not None
+    snap = rep.mandate_drift["snapshot_last_ts"]
+    assert snap["drift_short_pp"] == pytest.approx(0.0)
+    assert snap["drift_long_pp"] == pytest.approx(0.0)
+    assert snap["drift_ar_pp"] == pytest.approx(0.0)
+    assert snap["drift_us_pp"] == pytest.approx(0.0)
+
+
+def test_mandate_drift_geo_na_when_missing_columns(tmp_path: Path) -> None:
+    eq = tmp_path / "eq.csv"
+    eq.write_text(
+        "ts,equity_total,equity_short,equity_long,cash,costs_day_short,costs_day_long\n"
+        "2024-01-02,10000,3500,6500,0,0,0\n",
+        encoding="utf-8",
+    )
+    rep = build_kpi_v0_report(eq, trades_path=None, policy_path=None)
+    snap = rep.mandate_drift["snapshot_last_ts"]
+    assert snap["drift_short_pp"] == pytest.approx(5.0)
+    assert snap["drift_long_pp"] == pytest.approx(-5.0)
+    assert snap.get("geo_na_reason") == "missing_equity_ar_equity_us_columns"
+
+
+def test_mandate_drift_bands_informational_outside(tmp_path: Path) -> None:
+    meta = tmp_path / "meta.yaml"
+    meta.write_text(
+        "mandate_drift_bands_pp:\n  short: 3\n  long: 3\n  AR: 2\n  US: 2\n",
+        encoding="utf-8",
+    )
+    eq = tmp_path / "eq.csv"
+    eq.write_text(
+        "ts,equity_total,equity_short,equity_long,equity_ar,equity_us,"
+        "cash,costs_day_short,costs_day_long\n"
+        "2024-01-04,10000,4000,6000,2500,7500,0,0,0\n",
+        encoding="utf-8",
+    )
+    rep = build_kpi_v0_report(eq, trades_path=None, metadata_path=meta, policy_path=None)
+    snap = rep.mandate_drift["snapshot_last_ts"]
+    assert snap["outside_band_axes"] == ["short", "long", "AR", "US"]
