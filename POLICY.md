@@ -241,4 +241,30 @@ Métricas mínimas por ventana: **costos totales** (fees del broker sim) respect
 
 ---
 
-*Fin del documento — Fase 1 (especificación paper).*
+## 12. Informe KPI — spec `rpt_kpi.v1` (Fase 5 / validación)
+
+La **fuente de verdad parseable** para fórmulas, columnas de export, segmentación (total / corto / largo), benchmark mixto 20/80, y reglas de NA del informe automático es el archivo **`docs/kpi_report_spec.v1.md`**. Este `POLICY.md` **no duplica** cada ecuación: solo fija que **toda corrida comparable** debe declarar `spec_id: rpt_kpi.v1` (o una versión mayor explícita) y cumplir el contrato de salida descrito en ese documento.
+
+**Gobernanza:** cambiar definiciones de KPIs (Sharpe, turnover, drift, alpha, etc.) implica **nueva versión** del spec (`rpt_kpi.v2`, …) y entrada en changelog del repo con fecha y motivo. Los **umbrales numéricos de gate** (p. ej. “Sharpe OOS ≥ …”) siguen siendo **anexo separado** fechado, según plan Fase 5 — no se graban improvisados en código sin registro.
+
+### 12.1 Decisiones técnicas (para no olvidar qué está acordado)
+
+Resumen ejecutivo; el detalle autoritativo sigue en `docs/kpi_report_spec.v1.md`:
+
+| Área | Decisión |
+|------|----------|
+| Moneda del informe | **USD**; conversión AR en el **export del ledger**, no en el script de informe. |
+| Días de trading / annualización | **252**; retornos diarios simples sobre curvas de equity por segmento. |
+| Tasa libre `r_f` (paper) | **0 %** para Sharpe y MAR de Sortino en `rpt_kpi.v1`. |
+| Hit rate / profit factor | Por **round-trip** cerrado, emparejamiento **FIFO** por (`motor`, `symbol`). |
+| Turnover mensual (largo) | \(\sum \|notional\|\) del motor largo en el mes / \((2 \times \text{media equity largo en el mes})\). |
+| Drift mandato 30/70 y 20/80 | Objetivos alineados a `weights` y `geo` del YAML; drift en **puntos porcentuales** vs `equity_total`. |
+| MDD\(_{12m}\) / Calmar | Ventana **252** sesiones sobre equity **solo del largo**; reglas de histórico corto y MDD≈0 en spec. |
+| Alpha vs benchmark | Retorno simple del segmento menos benchmark **misma ventana**, fechas en **inner join** (sin forward-fill del benchmark). |
+| Costos en informe | Desglose **`costs_day` por motor** en el export (evita reparto ambiguo). |
+
+**Regla de memoria:** si alguien pregunta “cómo calculamos el Sharpe del informe”, la respuesta es: **`docs/kpi_report_spec.v1.md` + §12 de `POLICY.md`**.
+
+---
+
+*Fin del documento — Fase 1 (especificación paper) + referencias Fase 5 (informe KPI).*

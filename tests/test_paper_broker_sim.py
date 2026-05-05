@@ -1,5 +1,7 @@
 """Behavior tests for paper broker simulator interface."""
 
+from datetime import date
+
 import pytest
 
 from core_sim import CostModel, MarketCostConfig, PaperBrokerSim, PortfolioLedger
@@ -30,7 +32,8 @@ def test_should_place_order_and_update_positions_and_cash():
             "price": 50.0,
             "market": "US",
             "bucket": "long",
-        }
+        },
+        trading_day=date(2026, 4, 15),
     )
 
     assert fill["cost_breakdown"]["total"] == pytest.approx(1.75)
@@ -41,6 +44,7 @@ def test_should_place_order_and_update_positions_and_cash():
 
 def test_should_support_sell_and_track_fill_history():
     broker = _build_broker()
+    d = date(2026, 4, 10)
     broker.place_order(
         {
             "symbol": "QQQ",
@@ -49,7 +53,8 @@ def test_should_support_sell_and_track_fill_history():
             "price": 100.0,
             "market": "US",
             "bucket": "short",
-        }
+        },
+        trading_day=d,
     )
     sell_fill = broker.place_order(
         {
@@ -59,7 +64,8 @@ def test_should_support_sell_and_track_fill_history():
             "price": 110.0,
             "market": "US",
             "bucket": "short",
-        }
+        },
+        trading_day=d,
     )
 
     fills = broker.get_fills()
@@ -72,7 +78,7 @@ def test_should_reject_invalid_order_payloads():
     broker = _build_broker()
 
     with pytest.raises(ValueError, match="order missing required keys"):
-        broker.place_order({"symbol": "SPY"})
+        broker.place_order({"symbol": "SPY"}, trading_day=date(2026, 1, 1))
 
     with pytest.raises(ValueError, match="side must be BUY or SELL"):
         broker.place_order(
@@ -83,7 +89,8 @@ def test_should_reject_invalid_order_payloads():
                 "price": 100.0,
                 "market": "US",
                 "bucket": "long",
-            }
+            },
+            trading_day=date(2026, 1, 1),
         )
 
 

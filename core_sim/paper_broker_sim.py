@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import asdict, dataclass
+from datetime import date, datetime
 
 from .cost_model import CostModel
 from .ledger import PortfolioLedger
@@ -31,7 +32,12 @@ class PaperBrokerSim:
         self._cost_model = cost_model
         self._fills: list[FillReport] = []
 
-    def place_order(self, order: dict[str, str | float]) -> dict[str, float | str | dict[str, float | str]]:
+    def place_order(
+        self,
+        order: dict[str, str | float],
+        *,
+        trading_day: date,
+    ) -> dict[str, float | str | dict[str, float | str]]:
         """Simulate immediate fill and return execution details."""
         normalized = self._validate_order(order)
         cost = self._cost_model.compute_fill_cost(
@@ -51,7 +57,7 @@ class PaperBrokerSim:
             "bucket": normalized["bucket"],
             "fee": fee,
         }
-        self._ledger.apply_fills([fill_payload])
+        self._ledger.apply_fills(trading_day, [fill_payload])
 
         report = FillReport(
             symbol=normalized["symbol"],
@@ -102,17 +108,17 @@ class PaperBrokerSim:
     ) -> list[dict[str, str | float]]:
         """Backtester adapter: execute approved orders as daily fills.
 
-        The trading day is accepted for signature compatibility with the
-        event engine. It is currently unused because this simulator executes
-        orders immediately at the provided bar close (or explicit order price).
+        Rolls fees into ``PortfolioLedger`` for the given ``trading_day`` (date,
+        ISO string, or timezone-aware datetime) so end-of-session MTM can emit
+        ``costs_day`` on the equity curve.
         """
-        del trading_day
+        session_day = self._coerce_trading_day(trading_day)
         fills: list[dict[str, str | float]] = []
         for order in approved_orders:
             fill_price = self._resolve_order_price(order=order, daily_bars=daily_bars)
             payload = dict(order)
             payload["price"] = fill_price
-            report = self.place_order(payload)
+            report = self.place_order(payload, trading_day=session_day)
             fills.append(
                 {
                     "symbol": str(report["symbol"]),
@@ -186,3 +192,13 @@ class PaperBrokerSim:
         if close <= 0:
             raise ValueError(f"close must be > 0 for symbol {symbol}")
         return close
+
+    @staticmethod
+    def _coerce_trading_day(trading_day: object) -> date:
+        if isinstance(trading_day, date):
+            return trading_day
+        if isinstance(trading_day, datetime):
+            return trading_day.date()
+        if isinstance(trading_day, str):
+            return date.fromisoformat(trading_day[:10])
+        raise TypeError(f"unsupported trading_day type: {type(trading_day)!r}")

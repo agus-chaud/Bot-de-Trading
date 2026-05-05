@@ -5,6 +5,7 @@ from datetime import date
 import pytest
 
 from core_sim import PortfolioLedger
+from core_sim.ledger import DAILY_EQUITY_KPI_COLUMNS
 
 
 def test_should_apply_buy_and_mark_to_market():
@@ -134,6 +135,68 @@ def test_mark_to_market_same_day_updates_single_equity_curve_point():
     ledger.mark_to_market(trading_day=day, daily_bars={})
     assert len(ledger.equity_curve_points) == 1
     assert ledger.equity_curve_points[0]["trading_day"] == day.isoformat()
+    assert ledger.equity_curve_points[0]["ts"] == day.isoformat()
+
+
+def test_daily_equity_curve_includes_kpi_columns_and_bucket_splits():
+    """Contrato rpt_kpi.v1 §2.1: ts, equity_*, cash, costs_day; equity_short + equity_long ≈ total."""
+    ledger = PortfolioLedger(starting_cash=10_000)
+    ledger.update_day(
+        trading_day=date(2026, 6, 11),
+        fills=[
+            {
+                "symbol": "SPY",
+                "side": "BUY",
+                "qty": 10,
+                "price": 100.0,
+                "market": "US",
+                "bucket": "long",
+                "fee": 2.0,
+            }
+        ],
+        daily_bars={"SPY": {"close": 105.0}},
+    )
+    pt = ledger.equity_curve_points[-1]
+    assert pt["costs_day"] == pytest.approx(2.0)
+    assert pt["equity_total"] == pytest.approx(10_048.0)
+    assert pt["equity_short"] == pytest.approx(0.0)
+    assert pt["equity_long"] == pytest.approx(10_048.0)
+    assert pt["cash"] == pytest.approx(8_998.0)
+    assert pt["mv_us"] == pytest.approx(1_050.0)
+    assert pt["mv_ar"] == pytest.approx(0.0)
+    exported = ledger.daily_equity_series_for_kpi_export()
+    assert tuple(exported[-1].keys()) == DAILY_EQUITY_KPI_COLUMNS
+    assert exported[-1]["costs_day"] == pytest.approx(2.0)
+
+
+def test_mixed_short_long_buckets_sum_to_total_equity():
+    ledger = PortfolioLedger(starting_cash=20_000)
+    ledger.update_day(
+        trading_day=date(2026, 6, 12),
+        fills=[
+            {
+                "symbol": "QQQ",
+                "side": "BUY",
+                "qty": 5,
+                "price": 200.0,
+                "market": "US",
+                "bucket": "short",
+                "fee": 0.0,
+            },
+            {
+                "symbol": "SPY",
+                "side": "BUY",
+                "qty": 10,
+                "price": 100.0,
+                "market": "US",
+                "bucket": "long",
+                "fee": 0.0,
+            },
+        ],
+        daily_bars={"QQQ": {"close": 200.0}, "SPY": {"close": 100.0}},
+    )
+    pt = ledger.equity_curve_points[-1]
+    assert pt["equity_total"] == pytest.approx(pt["equity_short"] + pt["equity_long"])
 
 
 def test_should_update_short_drawdown_and_reset_by_calendar_month():

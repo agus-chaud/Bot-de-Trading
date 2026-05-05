@@ -4,6 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
+
+
+# Columnas mínimas de serie diaria para informes KPI (`docs/kpi_report_spec.v1.md` §2.1).
+DAILY_EQUITY_KPI_COLUMNS = (
+    "ts",
+    "trading_day",
+    "equity_total",
+    "equity_short",
+    "equity_long",
+    "cash",
+    "costs_day",
+    "mv_us",
+    "mv_ar",
+)
 
 
 @dataclass
@@ -29,6 +44,7 @@ class PortfolioLedger:
         self.positions: dict[str, PositionState] = {}
         self.realized_pnl_total = 0.0
         self.equity_curve_points: list[dict[str, float | str]] = []
+        self._costs_by_trading_day: dict[date, float] = {}
         self._current_short_month: tuple[int, int] | None = None
         self._short_monthly_peak = 0.0
         self._short_monthly_drawdown = 0.0
@@ -36,15 +52,25 @@ class PortfolioLedger:
         # short MV por fecha (última escritura gana) para `daily_return` con varias MTM en un día
         self._short_eod_by_trading_date: dict[date, float] = {}
 
-    def apply_fills(self, fills: list[dict[str, str | float]]) -> None:
-        """Apply one day of fills in order."""
+    def apply_fills(
+        self,
+        trading_day: date,
+        fills: list[dict[str, str | float]],
+    ) -> None:
+        """Apply one session's fills in order and roll up execution costs for that day."""
+        day_total = 0.0
         for fill in fills:
             normalized_fill = self._validate_fill(fill)
+            day_total += float(normalized_fill["fee"])
             side = normalized_fill["side"]
             if side == "BUY":
                 self._apply_buy(normalized_fill)
             else:
                 self._apply_sell(normalized_fill)
+        if day_total != 0.0:
+            self._costs_by_trading_day[trading_day] = (
+                self._costs_by_trading_day.get(trading_day, 0.0) + day_total
+            )
 
     def mark_to_market(
         self,
@@ -56,6 +82,9 @@ class PortfolioLedger:
         market_value_total = 0.0
         unrealized_pnl_total = 0.0
         short_equity = 0.0
+        long_equity_mv = 0.0
+        mv_us = 0.0
+        mv_ar = 0.0
 
         for symbol, position in self.positions.items():
             close_price = self._extract_close(symbol=symbol, daily_bars=daily_bars)
@@ -72,12 +101,33 @@ class PortfolioLedger:
             }
             market_value_total += market_value
             unrealized_pnl_total += unrealized
+            market_tag = position.market.upper()
+            if market_tag == "US":
+                mv_us += market_value
+            elif market_tag == "AR":
+                mv_ar += market_value
             if position.bucket == "short":
                 short_equity += market_value
+            else:
+                long_equity_mv += market_value
 
-        equity_total = self.cash + market_value_total
+        equity_short = float(self.short_cash) + short_equity
+        equity_long = float(self.cash - self.short_cash) + long_equity_mv
+        equity_total = float(self.cash + market_value_total)
+
+        costs_day = float(self._costs_by_trading_day.get(trading_day, 0.0))
         day_key = trading_day.isoformat()
-        curve_point = {"trading_day": day_key, "equity_total": equity_total}
+        curve_point: dict[str, Any] = {
+            "ts": day_key,
+            "trading_day": day_key,
+            "equity_total": equity_total,
+            "equity_short": equity_short,
+            "equity_long": equity_long,
+            "cash": float(self.cash),
+            "costs_day": costs_day,
+            "mv_us": mv_us,
+            "mv_ar": mv_ar,
+        }
         if self.equity_curve_points and self.equity_curve_points[-1]["trading_day"] == day_key:
             self.equity_curve_points[-1] = curve_point
         else:
@@ -100,6 +150,9 @@ class PortfolioLedger:
             "realized_pnl_total": self.realized_pnl_total,
             "unrealized_pnl_total": unrealized_pnl_total,
             "equity_total": equity_total,
+            "equity_short": equity_short,
+            "equity_long": equity_long,
+            "costs_day": costs_day,
             "equity_curve_points": list(self.equity_curve_points),
             "short_bucket": short_bucket,
         }
@@ -111,8 +164,15 @@ class PortfolioLedger:
         daily_bars: dict[str, dict[str, float]],
     ) -> dict[str, object]:
         """Apply fills and return the end-of-day snapshot."""
-        self.apply_fills(fills=fills)
+        self.apply_fills(trading_day=trading_day, fills=fills)
         return self.mark_to_market(trading_day=trading_day, daily_bars=daily_bars)
+
+    def daily_equity_series_for_kpi_export(self) -> list[dict[str, float | str]]:
+        """Serie diaria estable para CSV / `rpt_kpi.v1` §2.1 (copia superficial ordenada)."""
+        rows: list[dict[str, float | str]] = []
+        for pt in self.equity_curve_points:
+            rows.append({key: pt[key] for key in DAILY_EQUITY_KPI_COLUMNS})
+        return rows
 
     def _apply_buy(self, fill: dict[str, str | float]) -> None:
         symbol = fill["symbol"]

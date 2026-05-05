@@ -33,7 +33,7 @@ todos:
     content: Implementar risk_guardrails + drawdown mensual corto + pausa motor y logging
     status: pending
   - id: validation-wf
-    content: Walk-forward + informe KPI (Sharpe, Sortino, DD, Calmar, turnover, costos, drift 30/70 y 20/80)
+    content: Walk-forward + informe KPI segmentado + benchmark mixto reproducible + gate con umbrales pre-registrados
     status: pending
   - id: gate-ramp
     content: Documentar criterios de aprobación pre-registro y protocolo ramp 10→100% para capital real
@@ -146,8 +146,46 @@ flowchart LR
 ## Fase 5 — Validación estadística y gate a producción
 
 1. **Walk-forward**: entrenamiento de hiperparámetros solo en ventana in-sample; validación en tramos out-of-sample consecutivos.
-2. **KPIs mínimos** (tabla en informe automático): retorno neto anualizado, Sharpe, Sortino, max drawdown, Calmar, hit rate, profit factor, turnover, costo total por estrategia, alpha vs benchmark mixto (ponderado 20/80), drift vs objetivos 30/70 y 20/80.
-3. **Criterio de paso**: definir umbrales numéricos *antes* de mirar resultados (evita p-hacking); si no pasan, no se sube capital.
+2. **Informe KPI (tabla única automatizada)** — *misma corrida/resumen ejecutable reproducible*. Objetivo: evitar métricas “bonitas pero incomparables” y dejar cada número **definido antes** de mirar resultados.
+
+   **Segmentación obligatoria** (filas repetidas por KPI o multi-column): **total**, bucket **corto** (~30%), bucket **largo** (~70%). Donde aplique geo, opcional pero recomendado: sub-bloques **AR/US** para interpretar drift y alpha con la misma base contable que el allocator.
+
+   **Benchmark mixto** (para *alpha*, no para Sharpe obligatorio si no lo definís): cartera sintética con **los mismos pesos 20/80** acordados *antes del run*, componentes públicos reproducibles documentados en `POLICY`/anexo del informe (no reoptimizar el benchmark al ver el equity del bot). Retorno en moneda de consolidación del informe (una sola; documentar FX de referencia para AR).
+
+   **KPIs mínimos** (checklist; ampliar solo con versión de informe `rpt_kpi.v1` si rompe contrato):
+
+   | Bloque | KPI | Notas de definición (fijar en spec antes de correr) |
+   |--------|-----|-----------------------------------------------------|
+   | Retorno | Retorno neto anualizado | Sobre curva de **equity** del segmento; neto = después de costos simulados; annualizar con convención explícita (ej. 252 días hábiles). |
+   | Riesgo / retorno | Sharpe | Tasa libre de riesgo `r_f` y periodicidad (diaria) fijadas **antes**; si `r_f` = 0 en paper, declararlo. |
+   | Colas | Sortino | Umbral de retorno objetivo (típico 0 o `r_f`); desviación downside en la misma periodicidad que Sharpe. |
+   | Drawdown | Max drawdown (ventana OOS o tramo reportado) | Pico a valle sobre equity del segmento; declarar si incluye o no cash no asignado. |
+   | Calidad largo | `MDD_12m` **rolling** y `Calmar_12m` | Ventana 12 meses / 252 sesiones deslizante sobre equity **solo del largo**; Calmar = retorno anualizado del tramo / \|MDD del tramo\| con regla para MDD≈0. |
+   | Ejecución | Hit rate | Unidad fija: **por trade cerrado** *o* **por día** — elegir una y no mezclar entre runs. |
+   | Ejecución | Profit factor | Suma ganancias / suma pérdidas (valor absoluto) en la misma unidad que hit rate. |
+   | Fricción | Turnover | Convención única (ej. mitad del sumatorio de \|Δposición\| valorizada / patrimonio medio del segmento en el mes); reportar **mensual** para el largo (`turnover_long_monthly`) y agregado/total según política. |
+   | Costos | Costo total por motor | Comisiones + slippage (y otros del `cost_model`) atribuibles a **corto** vs **largo** según tag de orden o motor en ledger. |
+   | Mandato | Drift vs 30/70 y 20/80 | Diferencia en **puntos porcentuales** entre peso **real** MTM y target de política; bandas `±X pp` documentadas; no “optimizar” X mirando el historial del bot. |
+   | Benchmark | Alpha vs mix 20/80 | Retorno neto del segmento (o total) menos retorno del benchmark **misma ventana, misma moneda**; opcional: tracking error / beta vs benchmark si se desea segunda fila. |
+
+   **Tareas chicas (orden sugerido para implementar de a poco)**
+
+   1. **Spec de informe** (`docs/` o bloque en `POLICY.md`): tabla anterior con *una* decisión cerrada por fila ambigua (`r_f`, unidad hit rate, fórmula turnover, FX). Fecha de congelación (“válido hasta revisión”).
+   2. **Contrato de salida Ledger**: garantizar exportable **serie diaria** de equity (y opcional NAV por bucket/geo) desde el ledger o dump post-backtest; columnas `ts`, `equity_total`, `equity_short`, `equity_long`, `cash`, `costs_day`.
+   3. **Tabla benchmark estática**: YAML o CSV con símbolos y pesos 20/80 + función que descargue/lea retornos y alinee fechas al backtest (sin lookahead).
+   4. **`scripts/report_kpis.py` (v0)**: lee CSV de equity + trades → escribe JSON/Markdown con solo retorno neto anualizado, max DD y costos por motor (Smoke test).
+   5. **v1**: añadir Sharpe, Sortino, hit rate, profit factor desde log de fills (tests con serie sintética conocida).
+   6. **v2**: drift 30/70 y 20/80 en cada fecha de snapshot (último día del tramo OOS + serie si se desea gráfico); bandas comparadas sin acción automática en el script (solo informe).
+   7. **v3**: `MDD_12m` + `Calmar_12m` + `turnover_long_monthly` en el bloque largo; alpha vs benchmark mixto alineado.
+   8. **Walk-forward**: bucle que invoque v3 por tramo OOS y consolide tabla maestra + “pass/fail” contra umbrales del punto 3.
+   9. **CI mínimo**: test de regresión en KPIs con dataset de 60 días fijo en `tests/fixtures/` (golden values).
+
+3. **Criterio de paso (gate)** antes de más capital (paper-first → ramp real):
+
+   - Redactar **lista cerrada de umbrales** (ej. Sharpe OOS ≥ …, Sortino ≥ …, max DD corto/largo ≤ …, drift máximo medio ≤ … pp, turnover largo dentro de banda razonable predefinida, alpha vs benchmark ≥ … **o** “no inferior por más de Δ”, etc.) **antes** del primer resultado OOS aggregate.
+   - Registrarlos en `POLICY`/anexo numerado **con fecha**; cualquier cambio posterior exige nueva versión y motivo (“no tirar hasta acertar”).
+   - Regla práctica: un tramo puede fallar por shock; política opcional tipo “K de últimos Q tramos OOS pasan gate” para no depender de un solo mes.
+
 4. **Ramp-up a real**: 10% → 25% → 50% → 100% del capital asignado al bot, con revisión en cada escalón.
 
 ## Entregables por hito (orden sugerido)
@@ -158,7 +196,7 @@ flowchart LR
 | H2 | `paper_broker_sim` + ledger + métricas básicas + test de costos |
 | H3 | `long_term_engine` — policy/YAML largo, drift+bandas, intents mensuales, integración backtester, tests + mini-informe de drift/turnover del sleeve |
 | H4 | `short_term_engine` + kill switch -8% mensual + tests |
-| H5 | Notebooks o script de walk-forward + plantilla de informe KPI |
+| H5 | Script walk-forward + `report_kpis` (v0→v3) + fixtures de KPI en CI + anexo umbrales pre-registro |
 | H6 | (Opcional) capa IA solo lectura: resume riesgos y drift sin ejecutar |
 
 ## Riesgos y mitigaciones

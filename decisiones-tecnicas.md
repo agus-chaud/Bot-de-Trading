@@ -582,7 +582,19 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 - **Alternativas consideradas**:
   - **Incluir ventanas skipped como cero en agregados**: descartada por sesgo estadístico y pérdida de interpretabilidad.
   - **Recalcular métricas globales directamente desde barras concatenadas**: descartada en v1 por solape de ventanas y riesgo de doble conteo; se prioriza agregación por ventana.
-- **Archivos**: `validation/wf_windows.py`, `validation/wf_runner.py`, `validation/wf_long_report.py`, `scripts/run_long_engine_wf.py`, `tests/test_wf_windows.py`, `tests/test_wf_runner.py`, `tests/test_wf_long_report.py`
+  - **Archivos**: `validation/wf_windows.py`, `validation/wf_runner.py`, `validation/wf_long_report.py`, `scripts/run_long_engine_wf.py`, `tests/test_wf_windows.py`, `tests/test_wf_runner.py`, `tests/test_wf_long_report.py`
+
+---
+
+## ADR-028 — Spec de informe KPI `rpt_kpi.v1`
+
+- **Fecha**: 2026-05-05
+- **Estado**: aceptada
+- **Contexto**: Falta contrato único para cómputo de métricas del informe automático (Sharpe, turnover, drift, alpha, etc.), con riesgo de comparar corridas con definiciones distintas.
+- **Decisión**: La fuente de verdad de fórmulas y contratos de export es **`docs/kpi_report_spec.v1.md`** (`spec_id: rpt_kpi.v1`). Resumen y gobernanza en **`POLICY.md` §12** (incluye tabla de decisiones técnicas).
+- **Por qué**: Centralizar definiciones evita p-hacking informal y hace CI/golden tests posibles; política humana remite al spec sin duplicar ecuaciones.
+- **Consecuencias**: Cambiar una definición KPI implica nueva versión del spec + registro; umbrales de gate siguen en anexo fechado aparte (Fase 5 del plan).
+- **Referencias**: `docs/kpi_report_spec.v1.md`, `POLICY.md` §12, `.cursor/plans/bot_trading_paper-first_155d6f04.plan.md` (Fase 5).
 
 ---
 

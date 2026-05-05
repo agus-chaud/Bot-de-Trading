@@ -237,7 +237,8 @@ def test_end_to_end_backtester_runs_and_produces_fills():
         {"symbol": "IWM", "side": "BUY", "qty": 100.0, "price": 50.0, "market": "US", "bucket": "long", "fee": 0.0},
         {"symbol": "QQQ", "side": "BUY", "qty": 50.0, "price": 300.0, "market": "US", "bucket": "long", "fee": 0.0},
     ]
-    ledger.apply_fills(pre_fills)
+    # Fecha ficticia antes del rebalance: solo precarga ledger; sin MTM ese día no aparece costs en la corrida.
+    ledger.apply_fills(date(2020, 1, 1), pre_fills)
 
     backtester = create_long_term_monthly_backtester(
         policy_doc=policy,
