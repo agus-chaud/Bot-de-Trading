@@ -1,0 +1,124 @@
+{
+  "spec_id": "rpt_kpi.v1",
+  "report_version": "report_kpis_v3",
+  "reporting_ccy": "USD",
+  "trading_days_per_year": 252,
+  "ts_start": "2024-01-02",
+  "ts_end": "2024-03-25",
+  "segment": {
+    "total": {
+      "net_return_annualized": 0.357432490809523,
+      "net_return_annualized_na_reason": null,
+      "max_drawdown": -0.03815879394601096,
+      "n_trading_days": 60,
+      "n_return_steps": 59,
+      "sharpe_annualized": 2.299328987809783,
+      "sharpe_na_reason": null,
+      "sortino_annualized": 6.294258836302024,
+      "sortino_na_reason": null,
+      "hit_rate": 0.5,
+      "hit_rate_na_reason": null,
+      "profit_factor": 2.0826978074356535,
+      "profit_factor_na_reason": null,
+      "n_round_trips": 4
+    },
+    "short": {
+      "sharpe_annualized": 1.317343206283423,
+      "sharpe_na_reason": null,
+      "sortino_annualized": 4.119888008596445,
+      "sortino_na_reason": null,
+      "hit_rate": 0.5,
+      "hit_rate_na_reason": null,
+      "profit_factor": 1.8845043310875844,
+      "profit_factor_na_reason": null,
+      "n_round_trips": 2
+    },
+    "long": {
+      "sharpe_annualized": 3.4370913706898225,
+      "sharpe_na_reason": null,
+      "sortino_annualized": 8.674794903016451,
+      "sortino_na_reason": null,
+      "hit_rate": 0.5,
+      "hit_rate_na_reason": null,
+      "profit_factor": 2.4047544573037234,
+      "profit_factor_na_reason": null,
+      "n_round_trips": 2,
+      "mdd_12m_rolling_last": null,
+      "mdd_12m_rolling_na_reason": "insufficient_history",
+      "calmar_12m_last": null,
+      "calmar_12m_na_reason": "insufficient_history",
+      "turnover_long_monthly": {
+        "2024-01": {
+          "turnover_long_monthly": 0.1323676973768632,
+          "turnover_long_monthly_na_reason": null,
+          "sum_abs_notional_long": 1900.0,
+          "avg_equity_long": 7176.977607272726
+        },
+        "2024-02": {
+          "turnover_long_monthly": 0.07448571387820255,
+          "turnover_long_monthly_na_reason": null,
+          "sum_abs_notional_long": 1080.0,
+          "avg_equity_long": 7249.712352666667
+        },
+        "2024-03": {
+          "turnover_long_monthly": 0.058850417969952086,
+          "turnover_long_monthly_na_reason": null,
+          "sum_abs_notional_long": 870.0,
+          "avg_equity_long": 7391.621249352941
+        }
+      },
+      "turnover_long_monthly_last": 0.058850417969952086,
+      "turnover_long_monthly_last_na_reason": null,
+      "turnover_long_monthly_last_month": "2024-03"
+    }
+  },
+  "costs_by_motor": {
+    "short": 15.0,
+    "long": 7.649999999999999
+  },
+  "costs_na_reason": null,
+  "mandate_drift": {
+    "targets": {
+      "weight_short": 0.3,
+      "weight_long": 0.7,
+      "weight_ar": 0.2,
+      "weight_us": 0.8
+    },
+    "geo_series_na_reason": null,
+    "snapshot_last_ts": {
+      "ts": "2024-03-25",
+      "weight_short": 0.2960215262466862,
+      "weight_long": 0.6998657278247824,
+      "drift_short_pp": -0.39784737533137826,
+      "drift_long_pp": -0.013427217521755352,
+      "weight_ar": 0.20000000003723806,
+      "weight_us": 0.800000000055857,
+      "drift_ar_pp": 3.7238045980103607e-09,
+      "drift_us_pp": 5.585698570342856e-09,
+      "geo_na_reason": null,
+      "bands_half_width_pp": {
+        "short": 5.0,
+        "long": 5.0,
+        "AR": 3.0,
+        "US": 3.0
+      },
+      "outside_band_axes": null
+    }
+  },
+  "alpha_vs_benchmark": {
+    "total": {
+      "alpha_simple_return": 0.012408829262520404,
+      "alpha_na_reason": null,
+      "n_obs": 59,
+      "bot_simple_return_aligned": 0.07416975829999939,
+      "benchmark_simple_return_aligned": 0.061760929037478984
+    },
+    "long": {
+      "alpha_simple_return": 0.012202784819664414,
+      "alpha_na_reason": null,
+      "n_obs": 59,
+      "bot_simple_return_aligned": 0.0739637138571434,
+      "benchmark_simple_return_aligned": 0.061760929037478984
+    }
+  }
+}

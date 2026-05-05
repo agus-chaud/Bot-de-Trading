@@ -1,0 +1,15 @@
+spec_id: rpt_kpi.v1
+run_id: kpi_golden_60d
+reporting_ccy: USD
+trading_days_per_year: 252
+weights:
+  short: 0.3
+  long: 0.7
+geo:
+  AR: 0.2
+  US: 0.8
+mandate_drift_bands_pp:
+  short: 5.0
+  long: 5.0
+  AR: 3.0
+  US: 3.0

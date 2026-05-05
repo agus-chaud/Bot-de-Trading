@@ -723,6 +723,28 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-035 — CI mínimo: regresión KPI con dataset fijo de 60 días (golden values)
+
+- **Fecha**: 2026-05-06
+- **Estado**: aceptada
+- **Contexto**: El plan Fase 5 (ítem 9) pide un **test de regresión** sobre KPIs con un dataset **fijo de 60 días** en `tests/fixtures/` y valores **golden**, para que CI detecte cambios accidentales en fórmulas o en el pipeline del informe sin depender de corridas externas ni de datos mutables.
+- **Decisión**:
+  - Directorio **`tests/fixtures/kpi_golden/`**: `equity_60d.csv`, `trades_60d.csv`, `benchmark_returns_60d.csv`, `metadata.yaml` y **`expected_kpis.json`** (salida serializada de `build_kpi_v0_report`, sin series largas de rolling 12m ni serie diaria de drift — solo lo necesario para asserts estables).
+  - Script **`scripts/regenerate_kpi_golden_fixtures.py`**: regenera fixtures + golden de forma **100 % determinística** (sin RNG no controlado); uso **manual** cuando cambie el spec o se acepte un cambio de números con ADR/commit explícito.
+  - Tests **`tests/test_kpi_regression_golden.py`**: ejecutan el informe real sobre los CSV, comparan contra el JSON golden con **`pytest.approx(rel=1e-9)`** en floats y igualdad estricta en razones NA y conteos; nombres orientados a **comportamiento** (ventana de 60 días, Sharpe total, FIFO por motor, turnover mensual largo, drift dentro de bandas, alpha inner join, metadata de spec).
+- **Por qué**:
+  - Separa **contrato de salida** del informe de **detalles de implementación**: un refactor interno que preserve números no rompe CI; un cambio de definición en `rpt_kpi.v1` sí debe romper y forzar regeneración consciente.
+  - Evita sobre-mocking del propio `reporting/kpi_v0`: el test ejercita el mismo camino que producción (`build_kpi_v0_report` + CSV reales).
+- **Consecuencias**:
+  - Cualquier cambio legítimo en fórmulas KPI exige **`python scripts/regenerate_kpi_golden_fixtures.py`** + revisión de diff del JSON + mención en changelog/ADR según gravedad.
+  - Con 60 días, **MDD_12m / Calmar rolling** siguen en **NA** por diseño del spec; el golden no fija esos campos como números finitos en este tramo.
+- **Alternativas consideradas**:
+  - **Solo asserts “no es None” sin golden**: descartada — no detecta drift silencioso en magnitudes.
+  - **Golden generado en runtime del test**: descartada — rompe reproducibilidad entre máquinas y dificulta revisar el diff en PR.
+- **Referencias**: `.cursor/plans/bot_trading_paper-first_155d6f04.plan.md` (Fase 5, ítem 9), `docs/kpi_report_spec.v1.md`, `tests/test_kpi_regression_golden.py`.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
