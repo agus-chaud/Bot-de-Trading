@@ -1,16 +1,18 @@
 """KPI report v0 — smoke metrics aligned with docs/kpi_report_spec.v1.md.
 
-Retorno neto anualizado (§5), max drawdown (§7), costos por motor (§10).
+Retorno neto anualizado (§5), max drawdown (§7), Sharpe/Sortino (§6),
+hit rate / profit factor desde fills FIFO (§8), costos por motor (§10).
 """
 
 from __future__ import annotations
 
 import csv
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -30,6 +32,8 @@ class KpiV0Report:
     ts_start: str | None = None
     ts_end: str | None = None
     segment_total: dict[str, Any] = field(default_factory=dict)
+    segment_short: dict[str, Any] = field(default_factory=dict)
+    segment_long: dict[str, Any] = field(default_factory=dict)
     costs_by_motor: dict[str, float] | None = None
     costs_na_reason: str | None = None
 
@@ -42,7 +46,11 @@ class KpiV0Report:
             "trading_days_per_year": self.trading_days_per_year,
             "ts_start": self.ts_start,
             "ts_end": self.ts_end,
-            "segment": {"total": self.segment_total},
+            "segment": {
+                "total": self.segment_total,
+                "short": self.segment_short,
+                "long": self.segment_long,
+            },
             "costs_by_motor": self.costs_by_motor,
             "costs_na_reason": self.costs_na_reason,
         }
@@ -132,6 +140,229 @@ def compute_max_drawdown(equity_series: list[float]) -> float:
     return worst
 
 
+def compute_daily_simple_returns(equity_series: list[float]) -> tuple[list[float] | None, str | None]:
+    """§5: ``r_t = E_t / E_{t-1} - 1``."""
+    if len(equity_series) < 2:
+        return None, "insufficient_history"
+    returns: list[float] = []
+    for i in range(1, len(equity_series)):
+        prev, cur = equity_series[i - 1], equity_series[i]
+        if prev <= 0:
+            return None, "non_positive_equity"
+        returns.append(cur / prev - 1.0)
+    return returns, None
+
+
+def compute_sharpe_annualized(
+    daily_returns: list[float],
+    *,
+    trading_days_per_year: int = 252,
+) -> tuple[float | None, str | None]:
+    """§6: ``sqrt(252) * mean(r) / std(r)`` (muestral); NA si ``std`` = 0 o hay menos de 2 retornos."""
+    if len(daily_returns) < 2:
+        return None, "insufficient_history"
+    m = sum(daily_returns) / len(daily_returns)
+    var = sum((r - m) ** 2 for r in daily_returns) / (len(daily_returns) - 1)
+    s = math.sqrt(var)
+    if s == 0.0:
+        return None, "zero_std"
+    sharpe = math.sqrt(float(trading_days_per_year)) * (m / s)
+    return sharpe, None
+
+
+def compute_sortino_annualized(
+    daily_returns: list[float],
+    *,
+    trading_days_per_year: int = 252,
+    mar: float = 0.0,
+) -> tuple[float | None, str | None]:
+    """§6: ``dd`` = desv. muestral sólo de ``r_t < MAR``; NA si vacío o ``dd`` = 0."""
+    if len(daily_returns) < 2:
+        return None, "insufficient_history"
+    downside = [r for r in daily_returns if r < mar]
+    if not downside:
+        return None, "no_downside_returns"
+    if len(downside) < 2:
+        return None, "insufficient_downside_obs"
+    mean_r = sum(daily_returns) / len(daily_returns)
+    dm = sum(downside) / len(downside)
+    var_d = sum((x - dm) ** 2 for x in downside) / (len(downside) - 1)
+    dd = math.sqrt(var_d)
+    if dd == 0.0:
+        return None, "zero_downside_std"
+    sortino = math.sqrt(float(trading_days_per_year)) * (mean_r / dd)
+    return sortino, None
+
+
+def _motor_fill_key(row: dict[str, str]) -> str:
+    return (row.get("motor") or row.get("bucket") or "").strip().lower()
+
+
+@dataclass
+class _FifoLot:
+    qty_open: float
+    cost_basis_open: float
+    initial_cost: float
+    proceeds_closed: float = 0.0
+
+
+def fifo_roundtrip_pnls_for_motor(sorted_rows: list[dict[str, str]], motor: str) -> list[float]:
+    """§8: FIFO por (motor, símbolo); lista de PnL al cerrarse cada compra inicial (lote)."""
+    eps = 1e-12
+    key = motor.lower()
+    queues: dict[str, list[_FifoLot]] = {}
+    closed: list[float] = []
+
+    for i, r in enumerate(sorted_rows):
+        if _motor_fill_key(r) != key:
+            continue
+        symbol = str(r.get("symbol") or "").strip()
+        if not symbol:
+            raise ValueError(f"fills row {i}: missing symbol")
+        side = str(r.get("side") or "").strip().upper()
+        qty = float(r["qty"])  # validated by callers
+        price = float(r["price"])
+        if qty <= 0 or price <= 0:
+            raise ValueError(f"fills row {i}: qty and price must be > 0")
+        raw_fee = (r.get("fee") or "").strip()
+        raw_fees = (r.get("fees") or "").strip()
+        if raw_fee and raw_fees:
+            raise ValueError(f"fills row {i}: use either fee or fees, not both")
+        fee_base = float(raw_fee) if raw_fee else (float(raw_fees) if raw_fees else 0.0)
+        fee_total_exec = fee_base + _f_opt(r, "slippage")
+
+        sq = queues.setdefault(symbol, [])
+
+        if side == "BUY":
+            cost = qty * price + fee_total_exec
+            sq.append(_FifoLot(qty_open=qty, cost_basis_open=cost, initial_cost=cost))
+            continue
+        if side != "SELL":
+            raise ValueError(f"fills row {i}: side must be BUY or SELL")
+
+        remaining = qty
+        net_row = qty * price - fee_total_exec
+        while remaining > eps:
+            if not sq:
+                raise ValueError(f"fills row {i}: SELL exceeds open qty for {symbol!r} ({key})")
+            lot = sq[0]
+            take = min(remaining, lot.qty_open)
+            cost_piece = lot.cost_basis_open * (take / lot.qty_open)
+            proceeds_piece = net_row * (take / qty)
+            lot.proceeds_closed += proceeds_piece
+            lot.cost_basis_open -= cost_piece
+            lot.qty_open -= take
+            remaining -= take
+            if lot.qty_open <= eps:
+                closed.append(lot.proceeds_closed - lot.initial_cost)
+                sq.pop(0)
+
+    return closed
+
+
+def filter_rows_for_fifo_kpis(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Filas ejecutables FIFO: motor conocido + ``qty`` y ``price`` presentes."""
+    out: list[dict[str, str]] = []
+    for r in rows:
+        if str(r.get("qty") or "").strip() == "" or str(r.get("price") or "").strip() == "":
+            continue
+        if _motor_fill_key(r) not in ("short", "long"):
+            continue
+        if str(r.get("ts") or "").strip() == "":
+            continue
+        out.append(r)
+    return out
+
+
+def sort_fills_by_ts(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Estable por ``ts`` (ISO fecha/datetime) y orden de llegada."""
+    indexed = [(j, _parse_ts(r["ts"]), r) for j, r in enumerate(rows)]
+    indexed.sort(key=lambda t: (t[1], t[0]))
+    return [x[2] for x in indexed]
+
+
+def fifo_kpis_from_trade_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
+    """Pipeline §8: ordena y calcula stats de round-trip (sin tocar CSV de costos globales)."""
+    return roundtrip_trade_stats(sort_fills_by_ts(filter_rows_for_fifo_kpis(rows)))
+
+
+def roundtrip_trade_stats(sorted_fills: list[dict[str, str]]) -> dict[str, Any]:
+    """Hit rate / profit factor por motor (``short``, ``long``) y agregado (``total``)."""
+    short_pnls = fifo_roundtrip_pnls_for_motor(sorted_fills, "short")
+    long_pnls = fifo_roundtrip_pnls_for_motor(sorted_fills, "long")
+    all_pnls = short_pnls + long_pnls
+    return {
+        "short": _hit_rate_profit_factor_block(short_pnls),
+        "long": _hit_rate_profit_factor_block(long_pnls),
+        "total": _hit_rate_profit_factor_block(all_pnls),
+    }
+
+
+def _hit_rate_profit_factor_block(roundtrip_pnls: list[float]) -> dict[str, Any]:
+    if not roundtrip_pnls:
+        return {
+            "n_round_trips": 0,
+            "hit_rate": None,
+            "hit_rate_na_reason": "no_round_trips",
+            "profit_factor": None,
+            "profit_factor_na_reason": "no_round_trips",
+        }
+    n = len(roundtrip_pnls)
+    n_hits = sum(1 for p in roundtrip_pnls if p > 0)
+    gross_wins = sum(p for p in roundtrip_pnls if p > 0)
+    gross_losses_abs = sum(-p for p in roundtrip_pnls if p < 0)
+
+    block: dict[str, Any] = {
+        "n_round_trips": n,
+        "hit_rate": n_hits / n,
+        "hit_rate_na_reason": None,
+    }
+
+    tol = 1e-18
+    if gross_losses_abs > tol:
+        block["profit_factor"] = gross_wins / gross_losses_abs
+        block["profit_factor_na_reason"] = None
+    elif gross_wins > tol:
+        block["profit_factor"] = math.inf  # JSON: véase ``write_report_json`` (string ``inf``)
+        block["profit_factor_na_reason"] = None
+    else:
+        block["profit_factor"] = None
+        block["profit_factor_na_reason"] = "no_wins_or_losses"
+
+    return block
+
+
+def segment_risk_and_fills(
+    *,
+    equity_segment: list[float],
+    fills_block: dict[str, Any],
+    fills_field: Literal["short", "long", "total"],
+    trading_days_per_year: int,
+) -> dict[str, Any]:
+    """Empaqueta Sharpe/Sortino (§6) del segment de equity + métricas de fills del bloque §8."""
+    rets, rets_na = compute_daily_simple_returns(equity_segment)
+    sharpe: float | None = None
+    sharpe_na: str | None = rets_na
+    sortino: float | None = None
+    sortino_na: str | None = rets_na
+    if rets is not None:
+        sharpe, sharpe_na = compute_sharpe_annualized(rets, trading_days_per_year=trading_days_per_year)
+        sortino, sortino_na = compute_sortino_annualized(rets, trading_days_per_year=trading_days_per_year)
+
+    fb = fills_block[fills_field]
+    return {
+        "sharpe_annualized": sharpe,
+        "sharpe_na_reason": sharpe_na,
+        "sortino_annualized": sortino,
+        "sortino_na_reason": sortino_na,
+        "hit_rate": fb["hit_rate"],
+        "hit_rate_na_reason": fb["hit_rate_na_reason"],
+        "profit_factor": fb["profit_factor"],
+        "profit_factor_na_reason": fb["profit_factor_na_reason"],
+        "n_round_trips": fb["n_round_trips"],
+    }
+
+
 def equity_has_motor_cost_columns(fieldnames: list[str]) -> bool:
     return "costs_day_short" in fieldnames and "costs_day_long" in fieldnames
 
@@ -191,6 +422,8 @@ def build_kpi_v0_report(
     """Assemble report from CSV paths (§2.1 equity + §2.2 trades or split cost columns)."""
     rows, fieldnames = load_equity_csv(equity_path)
     equities = [_f(r, "equity_total") for r in rows]
+    eq_short = [_f(r, "equity_short") for r in rows]
+    eq_long = [_f(r, "equity_long") for r in rows]
 
     meta: dict[str, Any] = {}
     if metadata_path is not None:
@@ -203,24 +436,49 @@ def build_kpi_v0_report(
 
     costs: dict[str, float] | None = None
     costs_na: str | None = None
+    tr_rows: list[dict[str, str]] = []
+    if trades_path is not None:
+        tr_rows = load_trades_csv(trades_path)
+
     if equity_has_motor_cost_columns(fieldnames):
         costs = sum_costs_by_motor_from_equity(rows)
     elif trades_path is not None:
-        tr = load_trades_csv(trades_path)
-        costs = sum_costs_by_motor_from_trades(tr) if tr else {"short": 0.0, "long": 0.0}
+        costs = sum_costs_by_motor_from_trades(tr_rows) if tr_rows else {"short": 0.0, "long": 0.0}
     else:
         costs_na = "missing_trades_and_no_costs_day_short_long_in_equity_csv"
+
+    rt_block = fifo_kpis_from_trade_rows(tr_rows)
 
     ts_start = rows[0]["ts"].strip() if rows else None
     ts_end = rows[-1]["ts"].strip() if rows else None
 
+    risk_total = segment_risk_and_fills(
+        equity_segment=equities,
+        fills_block=rt_block,
+        fills_field="total",
+        trading_days_per_year=tdy,
+    )
     segment = {
         "net_return_annualized": ann,
         "net_return_annualized_na_reason": ann_na,
         "max_drawdown": mdd,
         "n_trading_days": len(rows),
         "n_return_steps": max(0, len(rows) - 1),
+        **risk_total,
     }
+
+    segment_short_only = segment_risk_and_fills(
+        equity_segment=eq_short,
+        fills_block=rt_block,
+        fills_field="short",
+        trading_days_per_year=tdy,
+    )
+    segment_long_only = segment_risk_and_fills(
+        equity_segment=eq_long,
+        fills_block=rt_block,
+        fills_field="long",
+        trading_days_per_year=tdy,
+    )
 
     rep = KpiV0Report(
         spec_id=str(meta.get("spec_id", "rpt_kpi.v1")),
@@ -230,15 +488,32 @@ def build_kpi_v0_report(
         ts_start=ts_start,
         ts_end=ts_end,
         segment_total=segment,
+        segment_short=segment_short_only,
+        segment_long=segment_long_only,
         costs_by_motor=costs,
         costs_na_reason=costs_na,
     )
     return rep
 
 
+def _sanitize_json_values(obj: Any) -> Any:
+    """Strict JSON-friendly: ``inf`` → ``\"inf\"`` (§8)."""
+    if isinstance(obj, dict):
+        return {k: _sanitize_json_values(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_json_values(v) for v in obj]
+    if isinstance(obj, float):
+        if math.isnan(obj):
+            return None
+        if math.isinf(obj):
+            return "inf"
+    return obj
+
+
 def write_report_json(report: KpiV0Report, path: str | Path) -> None:
     p = Path(path)
-    p.write_text(json.dumps(report.to_json_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    payload = _sanitize_json_values(report.to_json_dict())
+    p.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def write_report_markdown(report: KpiV0Report, path: str | Path) -> None:
@@ -252,6 +527,29 @@ def write_report_markdown(report: KpiV0Report, path: str | Path) -> None:
         if x is None:
             return f"NA ({na_reason})" if na_reason else "NA"
         return f"{100.0 * x:.4f}%"
+
+    def num_or_na(
+        x: float | str | None,
+        *,
+        na_reason: str | None = None,
+        nd: int = 4,
+    ) -> str:
+        if x is None:
+            return f"NA ({na_reason})" if na_reason else "NA"
+        if isinstance(x, str):
+            return x
+        if isinstance(x, float) and math.isinf(x) and x > 0:
+            return "inf"
+        return f"{x:.{nd}f}"
+
+    sh = seg.get("sharpe_annualized")
+    sh_na = seg.get("sharpe_na_reason")
+    so = seg.get("sortino_annualized")
+    so_na = seg.get("sortino_na_reason")
+    hr = seg.get("hit_rate")
+    hr_na = seg.get("hit_rate_na_reason")
+    pf = seg.get("profit_factor")
+    pf_na = seg.get("profit_factor_na_reason")
 
     lines = [
         "# KPI report v0 (`report_kpis_v0`)",
@@ -267,6 +565,11 @@ def write_report_markdown(report: KpiV0Report, path: str | Path) -> None:
         "|--------|-------|",
         f"| Retorno neto anualizado | {pct(ann, ann_na)} |",
         f"| Max drawdown | {pct(mdd)} |",
+        f"| Sharpe (anual, §6) | {num_or_na(sh, na_reason=sh_na)} |",
+        f"| Sortino (anual, §6) | {num_or_na(so, na_reason=so_na)} |",
+        f"| Hit rate (round-trips, §8) | {num_or_na(hr, na_reason=hr_na)} |",
+        f"| Profit factor (§8) | {num_or_na(pf, na_reason=pf_na)} |",
+        f"| Round-trips (`n_round_trips`) | {seg.get('n_round_trips')} |",
         f"| Sesiones (`n_trading_days`) | {seg.get('n_trading_days')} |",
         "",
         "## Costos por motor",

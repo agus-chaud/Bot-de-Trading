@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from reporting.kpi_v0 import (
     build_kpi_v0_report,
+    compute_daily_simple_returns,
     compute_max_drawdown,
     compute_net_return_annualized,
+    compute_sharpe_annualized,
+    compute_sortino_annualized,
+    fifo_kpis_from_trade_rows,
+    fifo_roundtrip_pnls_for_motor,
+    filter_rows_for_fifo_kpis,
     load_equity_csv,
+    sort_fills_by_ts,
     sum_costs_by_motor_from_trades,
     write_report_json,
     write_report_markdown,
@@ -29,6 +37,98 @@ def test_compute_net_return_annualized_na_on_short_series() -> None:
     r, na = compute_net_return_annualized([100.0], trading_days_per_year=252)
     assert r is None
     assert na == "insufficient_history"
+
+
+def test_compute_sharpe_matches_closed_form_three_returns() -> None:
+    equity = [100.0, 101.0, 99.5, 102.0]
+    rets, na = compute_daily_simple_returns(equity)
+    assert na is None and rets is not None
+    sharpe, sn = compute_sharpe_annualized(rets, trading_days_per_year=252)
+    assert sn is None and sharpe is not None
+    m = sum(rets) / len(rets)
+    var = sum((r - m) ** 2 for r in rets) / (len(rets) - 1)
+    expected = (252**0.5) * (m / (var**0.5))
+    assert sharpe == pytest.approx(expected, rel=1e-9)
+
+
+def test_compute_sortino_all_non_negative_na() -> None:
+    rets = [0.01, 0.02]
+    sortino, na = compute_sortino_annualized(rets, trading_days_per_year=252)
+    assert sortino is None and na == "no_downside_returns"
+
+
+def test_compute_sharpe_na_on_zero_variance_returns() -> None:
+    sharpe, na = compute_sharpe_annualized([0.0, 0.0, 0.0], trading_days_per_year=252)
+    assert sharpe is None and na == "zero_std"
+
+
+def test_fifo_one_roundtrip_profit_factor_infinite_hit_rate_unit() -> None:
+    fills = [
+        {"ts": "2024-01-02", "symbol": "SPY", "side": "BUY", "qty": "10", "price": "100", "motor": "short"},
+        {"ts": "2024-01-03", "symbol": "SPY", "side": "SELL", "qty": "10", "price": "110", "motor": "short"},
+    ]
+    blk = fifo_kpis_from_trade_rows(fills)
+    assert blk["short"]["hit_rate"] == pytest.approx(1.0)
+    assert blk["short"]["profit_factor"] == float("inf")
+    assert blk["short"]["n_round_trips"] == 1
+
+
+def test_fifo_hit_rate_and_profit_factor_two_round_trips() -> None:
+    fills = [
+        {"ts": "2024-01-02", "symbol": "X", "side": "BUY", "qty": "1", "price": "100", "motor": "long"},
+        {"ts": "2024-01-03", "symbol": "X", "side": "SELL", "qty": "1", "price": "120", "motor": "long"},
+        {"ts": "2024-01-04", "symbol": "X", "side": "BUY", "qty": "1", "price": "50", "motor": "long"},
+        {"ts": "2024-01-05", "symbol": "X", "side": "SELL", "qty": "1", "price": "45", "motor": "long"},
+    ]
+    blk = fifo_kpis_from_trade_rows(fills)
+    assert blk["long"]["hit_rate"] == pytest.approx(0.5)
+    assert blk["long"]["profit_factor"] == pytest.approx(20.0 / 5.0)
+    assert blk["long"]["n_round_trips"] == 2
+
+
+def test_filter_rows_fifo_ignores_cost_only_rows_without_qty() -> None:
+    fills = [{"ts": "2024-01-02", "symbol": "SPY", "side": "BUY", "motor": "short", "fee": "1.5"}]
+    assert filter_rows_for_fifo_kpis(fills) == []
+
+
+def test_fifo_partial_sell_then_close_one_roundtrip() -> None:
+    rows = [
+        {"ts": "2024-01-01", "symbol": "Z", "side": "BUY", "qty": "100", "price": "10", "motor": "long"},
+        {"ts": "2024-01-02", "symbol": "Z", "side": "SELL", "qty": "60", "price": "12", "motor": "long"},
+        {"ts": "2024-01-03", "symbol": "Z", "side": "SELL", "qty": "40", "price": "9", "motor": "long"},
+    ]
+    pnls = fifo_roundtrip_pnls_for_motor(sort_fills_by_ts(rows), "long")
+    assert len(pnls) == 1
+    expected = (60 * 12 + 40 * 9) - 100 * 10
+    assert pnls[0] == pytest.approx(expected)
+
+
+def test_build_report_segments_include_sharpe_and_fill_metrics(tmp_path: Path) -> None:
+    eq = tmp_path / "eq.csv"
+    eq.write_text(
+        "ts,equity_total,equity_short,equity_long,cash,costs_day\n"
+        "2024-01-02,10000,3000,7000,1000,0\n"
+        "2024-01-03,10100,3000,7100,1050,0\n"
+        "2024-01-04,10050,3050,7000,1000,0\n",
+        encoding="utf-8",
+    )
+    tr = tmp_path / "tr.csv"
+    tr.write_text(
+        "ts,symbol,side,qty,price,motor,fee\n"
+        "2024-01-02,X,BUY,1,100,long,0\n"
+        "2024-01-03,X,SELL,1,110,long,0\n",
+        encoding="utf-8",
+    )
+    rep = build_kpi_v0_report(eq, tr)
+    assert rep.segment_total["sharpe_annualized"] is not None
+    assert rep.segment_total["hit_rate"] == pytest.approx(1.0)
+    assert rep.segment_total["profit_factor"] == float("inf")
+    assert rep.segment_short["n_round_trips"] == 0
+    assert rep.segment_long["n_round_trips"] == 1
+    dj = tmp_path / "out.json"
+    write_report_json(rep, dj)
+    payload = json.loads(dj.read_text(encoding="utf-8"))
+    assert payload["segment"]["total"]["profit_factor"] == "inf"
 
 
 def test_compute_max_drawdown_negative_fraction() -> None:

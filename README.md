@@ -36,7 +36,7 @@ La transición a real está planteada como gate, no como salto de fe:
 - Ramp-up gradual de exposición (por etapas), manteniendo los mismos guardarraíles.
 
 
-## Estado actual (abril 2026)
+## Estado actual (mayo 2026)
 
 ### Implementado
 
@@ -90,11 +90,17 @@ La transición a real está planteada como gate, no como salto de fe:
   - `validation/wf_long_report.py` — agregación global y serialización JSON del reporte WF largo
   - `scripts/run_long_engine_wf.py` — CLI para producir `validation_reports/long_engine_wf_*.json`
   - tests en `tests/test_wf_windows.py`, `tests/test_wf_runner.py`, `tests/test_wf_long_report.py`
+- **Informe KPI (smoke, `rpt_kpi.v1`)**:
+  - `docs/kpi_report_spec.v1.md` — definiciones operativas (fecha de congelación 2026-05-05).
+  - `reporting/kpi_v0.py` — CSV diario §2.1 + fills/trades §2.2 (opcional si el equity trae `costs_day_short`/`costs_day_long`): retorno neto anualizado total §5, max drawdown §7, **Sharpe/Sortino** por segmento (equity total/corto/largo) §6, **hit rate y profit factor** por motor FIFO §8 (agregado en `segment.total`).
+  - `scripts/report_kpis.py` — `--equity`, `--trades`, `--metadata` → `--out-json` y `--out-md`.
+  - `tests/test_kpi_v0.py` — comportamiento + series sintéticas.
+  - Decisión registrada en `decisiones-tecnicas.md` (**ADR-030**, **ADR-031**).
 
 ### Pendiente principal
 
 - Integración completa del `long_term_monthly_runner` en `event_engine` operativo diario.
-- Informe KPI avanzado (Sharpe, Sortino, Calmar, alpha vs benchmark, etc.) y gate de ramp más allá del reporte base de validation/WF.
+- Ampliar el informe KPI respecto del spec (Calmar 12m solo largo, MDD 12m rolling largo, turnover mensual por motor, drift 70/30·20/80 materializado en tabla, alpha vs benchmark mixto §12, golden tests/gates explícitos) — ver `docs/kpi_report_spec.v1.md`.
 - Conectar fuentes de datos reales (feeds, APIs broker) con `PaperBrokerSim` como adaptador, manteniendo interfaces estables.
 
 
@@ -111,6 +117,7 @@ La transición a real está planteada como gate, no como salto de fe:
 - `short_term_pre_gate`: walk-forward OOS automático del bloque corto antes de habilitar más capital.
 - `long_term_engine` + `long_term_monthly_runner`: motor mensual del sleeve largo (pesos objetivo, bandas de drift, intents de rebalanceo); integra `check_long_risk()`.
 - `validation/wf_windows` + `validation/wf_runner` + `validation/wf_long_report`: pipeline WF del bloque largo (ventanas rolling -> stage por ventana -> agregados globales + JSON).
+- `reporting/kpi_v0` + `scripts/report_kpis.py`: informe JSON/Markdown según `docs/kpi_report_spec.v1.md` (lectura post-corrida del export equity + fills).
 - `event_engine`: orquestador diario con soporte para `execution_mode` (auto/semi_auto) y bypass de stop loss en semi_auto.
 - Flujo completo: Data -> Engines -> `risk_guardrails` -> Allocator -> `paper_broker_sim` -> `ledger`; ambos motores convergen en el mismo núcleo para mantener consistencia y auditoría.
 
@@ -118,6 +125,7 @@ La transición a real está planteada como gate, no como salto de fe:
 
 - Plan maestro: `.cursor/plans/bot_trading_paper-first_155d6f04.plan.md`
 - Política operativa: `POLICY.md`
+- Spec informe KPI: `docs/kpi_report_spec.v1.md`
 - Decisiones técnicas (ADR): `decisiones-tecnicas.md`
 - Config parseable v1: `config/policy.v1.yaml`
 - Schema de validación: `config/policy.v1.schema.json`
@@ -130,6 +138,7 @@ python -m pytest tests/ -v
 python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
 python scripts/run_short_term_pre_gate.py
 python scripts/run_long_engine_wf.py --window-months 6 --step-months 1
+python scripts/report_kpis.py --equity path/to/equity.csv --trades path/to/fills.csv --out-json kpi.json --out-md kpi.md
 ```
 
 Por módulo (desarrollo acotado):
