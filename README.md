@@ -84,11 +84,17 @@ La transición a real está planteada como gate, no como salto de fe:
   - tests de integración en `tests/test_short_term_day_runner.py` (E2E, kill switch, no-trade, calidad de datos, pérdida diaria)
 - **Pruebas y CI** (criterio *smart-testing*): suite en `tests/` con foco en comportamiento; `pytest-cov` en `requirements.txt`; GitHub Actions ejecuta `pytest` con cobertura mínima sobre `core_sim`.
 - **Pre-gate walk-forward (Fase 3)**: `core_sim/short_term_pre_gate.py` + `short_term_pre_gate` en `config/policy.v1.yaml`; script `scripts/run_short_term_pre_gate.py` (demo sintética); tests en `tests/test_short_term_pre_gate.py`.
+- **Walk-forward del motor largo (T4-T6)**:
+  - `validation/wf_windows.py` — generador de ventanas rolling por meses (`window_months`, `step_months`)
+  - `validation/wf_runner.py` — ejecución por ventana de `run_long_engine_stage` (corridas independientes)
+  - `validation/wf_long_report.py` — agregación global y serialización JSON del reporte WF largo
+  - `scripts/run_long_engine_wf.py` — CLI para producir `validation_reports/long_engine_wf_*.json`
+  - tests en `tests/test_wf_windows.py`, `tests/test_wf_runner.py`, `tests/test_wf_long_report.py`
 
 ### Pendiente principal
 
-- Integración completa del `long_term_monthly_runner` en `event_engine`.
-- Informe KPI agregado (Sharpe, Sortino, Calmar, alpha vs benchmark, etc.) y gate de ramp más allá del pre-gate mínimo del corto.
+- Integración completa del `long_term_monthly_runner` en `event_engine` operativo diario.
+- Informe KPI avanzado (Sharpe, Sortino, Calmar, alpha vs benchmark, etc.) y gate de ramp más allá del reporte base de validation/WF.
 - Conectar fuentes de datos reales (feeds, APIs broker) con `PaperBrokerSim` como adaptador, manteniendo interfaces estables.
 
 
@@ -104,6 +110,7 @@ La transición a real está planteada como gate, no como salto de fe:
 - `pending_order_queue`: cola para modo semi_auto, permite validación manual antes de ejecutar.
 - `short_term_pre_gate`: walk-forward OOS automático del bloque corto antes de habilitar más capital.
 - `long_term_engine` + `long_term_monthly_runner`: motor mensual del sleeve largo (pesos objetivo, bandas de drift, intents de rebalanceo); integra `check_long_risk()`.
+- `validation/wf_windows` + `validation/wf_runner` + `validation/wf_long_report`: pipeline WF del bloque largo (ventanas rolling -> stage por ventana -> agregados globales + JSON).
 - `event_engine`: orquestador diario con soporte para `execution_mode` (auto/semi_auto) y bypass de stop loss en semi_auto.
 - Flujo completo: Data -> Engines -> `risk_guardrails` -> Allocator -> `paper_broker_sim` -> `ledger`; ambos motores convergen en el mismo núcleo para mantener consistencia y auditoría.
 
@@ -122,6 +129,7 @@ pip install -r requirements.txt
 python -m pytest tests/ -v
 python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
 python scripts/run_short_term_pre_gate.py
+python scripts/run_long_engine_wf.py --window-months 6 --step-months 1
 ```
 
 Por módulo (desarrollo acotado):

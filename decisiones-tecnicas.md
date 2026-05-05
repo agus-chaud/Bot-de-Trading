@@ -554,6 +554,38 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-027 — Walk-forward del motor largo con agregación sobre ventanas válidas
+
+- **Fecha**: 2026-04-28
+- **Estado**: aceptada
+- **Contexto**: El `long_engine` ya tenía stage de validación por período (`run_long_engine_stage`), pero faltaba cerrar el flujo completo del plan para T4-T6: ejecutar varias ventanas rolling, consolidar métricas globales y emitir un JSON consumible en `validation_reports/`.
+- **Decisión**:
+  - Implementar `validation/wf_runner.py` para iterar ventanas de `validation/wf_windows.generate_wf_windows(...)` y ejecutar una corrida independiente del stage largo por cada ventana.
+  - Implementar `validation/wf_long_report.py` para:
+    - construir `per_window` con métricas homogéneas del stage (`max_drift_observed_pp`, `total_rebalance_cost`, `monthly_drawdown_long`, `rebalances_executed`);
+    - calcular summary global con reglas explícitas:
+      - `worst_monthly_drawdown_long`: mínimo entre ventanas válidas;
+      - `avg_rebalance_cost`: promedio entre ventanas válidas;
+      - `total_rebalances_executed`: suma de ventanas válidas;
+      - `max_drift_observed_pp`: máximo + localización (`max_drift_window_index`, `period_start`, `period_end`);
+    - listar `windows_skipped` con motivo (`empty_window`, `stage_skipped`, `incomplete_metrics`).
+  - Definir “ventana válida” como: no `skipped`, no vacía y con métricas completas (sin `None`).
+  - Exponer `scripts/run_long_engine_wf.py` para generar `validation_reports/long_engine_wf_YYYY-MM-DD_HH-MM.json`.
+- **Por qué**:
+  - Mantiene coherencia con el principio paper-first: el reporte global se calcula sobre corridas efectivamente ejecutadas, sin mezclar faltantes con ceros.
+  - Evita ambigüedad semántica entre “sin dato” y “resultado numérico”.
+  - Hace trazable dónde ocurrió el peor drift, útil para debugging y auditoría.
+- **Consecuencias**:
+  - Los agregados no representan “todas las ventanas generadas” sino “ventanas usables”; por eso el reporte incluye `windows_total` y `windows_used_in_aggregates`.
+  - Si todas las ventanas quedan excluidas, los agregados numéricos salen `null` y `total_rebalances_executed=0` (comportamiento explícito).
+  - Se preserva separación de responsabilidades: `run_long_engine_stage` no conoce reglas de reporte global.
+- **Alternativas consideradas**:
+  - **Incluir ventanas skipped como cero en agregados**: descartada por sesgo estadístico y pérdida de interpretabilidad.
+  - **Recalcular métricas globales directamente desde barras concatenadas**: descartada en v1 por solape de ventanas y riesgo de doble conteo; se prioriza agregación por ventana.
+- **Archivos**: `validation/wf_windows.py`, `validation/wf_runner.py`, `validation/wf_long_report.py`, `scripts/run_long_engine_wf.py`, `tests/test_wf_windows.py`, `tests/test_wf_runner.py`, `tests/test_wf_long_report.py`
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
