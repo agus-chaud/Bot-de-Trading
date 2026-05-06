@@ -13,7 +13,7 @@ from data.schema import OHLCVRow
 
 logger = logging.getLogger(__name__)
 
-_VENUE = "US"
+_VENUE = "XNYS"
 _CURRENCY = "USD"
 _REQUIRED_COLUMNS = {"Open", "High", "Low", "Close", "Volume"}
 

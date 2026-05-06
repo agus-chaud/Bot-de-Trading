@@ -72,7 +72,7 @@ class TestFetchUsOhlcvSuccess:
         assert row.close == pytest.approx(463.0)
         assert row.volume == pytest.approx(80_000_000.0)
         assert row.currency == "USD"
-        assert row.venue == "US"
+        assert row.venue == "XNYS"
         assert row.imputed is False
 
     def test_should_return_multiple_rows_when_range_spans_several_days(self):
@@ -245,6 +245,40 @@ class TestPartialData:
         assert result == []
         assert any("fetch_skipped" in r.message for r in caplog.records)
         assert any("data_error" in r.message for r in caplog.records)
+
+    def test_us_connector_emits_xnys_venue_and_persists_round_trip(self):
+        """End-to-end: fetch via mocked yfinance, persist to MarketDB, read back.
+
+        Verifies that the venue label produced by the connector (`XNYS`) matches
+        what `MarketDB` expects when querying — i.e. no schema mismatch between
+        producer and storage.
+        """
+        from data.storage import MarketDB
+
+        df = _make_df([
+            {"Date": pd.Timestamp("2024-01-15"), "Open": 460.0, "High": 465.0, "Low": 458.0, "Close": 463.0, "Volume": 80_000_000.0},
+            {"Date": pd.Timestamp("2024-01-16"), "Open": 463.0, "High": 470.0, "Low": 461.0, "Close": 468.0, "Volume": 75_000_000.0},
+        ])
+        with _patch_history(return_value=df):
+            rows = fetch_us_ohlcv("SPY", _START, _END)
+
+        assert rows is not None
+        assert len(rows) == 2
+        for row in rows:
+            assert row.venue == "XNYS"
+
+        db = MarketDB(":memory:")
+        db.upsert_ohlcv(rows)
+
+        # Read back using the same venue label that the connector emitted.
+        persisted = db.get_ohlcv("SPY", _START, _END, venue="XNYS")
+        assert len(persisted) == 2
+        assert all(r.venue == "XNYS" for r in persisted)
+
+        # Sanity: querying with the legacy "US" label must return nothing,
+        # confirming no rows were silently written under the old venue.
+        legacy = db.get_ohlcv("SPY", _START, _END, venue="US")
+        assert legacy == []
 
     def test_should_not_retry_on_data_error(self):
         """Data errors (e.g. missing columns) are not retried — only one attempt made."""
