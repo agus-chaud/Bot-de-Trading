@@ -123,8 +123,12 @@ def test_short_term_risk_kill_switch_blocks_orders_same_month():
     calendar_store = TradingCalendarStore.from_yaml(str(REPO_ROOT / "config" / "calendars" / "trading_days.v1.yaml"))
     actions_store = CorporateActionsStore.from_yaml(str(REPO_ROOT / "config" / "corporate_actions" / "us_actions.v1.yaml"))
 
+    # Bajo la nueva semántica de bucket-equity DD:
+    # Día 1 BUY 10@100 → short_cash=-1000, MV=1000, bucket_eq=0.
+    # Día 2 rally a 200 → MV=2000, bucket_eq=1000, peak=1000.
+    # Día 3 caída a 190 → MV=1900, bucket_eq=900, DD=-0.10 (<= -0.08 kill threshold).
     ledger.update_day(
-        trading_day=date(2026, 4, 29),
+        trading_day=date(2026, 4, 28),
         fills=[
             {
                 "symbol": "SPY",
@@ -138,11 +142,16 @@ def test_short_term_risk_kill_switch_blocks_orders_same_month():
         daily_bars={"SPY": {"close": 100.0}},
     )
     ledger.update_day(
+        trading_day=date(2026, 4, 29),
+        fills=[],
+        daily_bars={"SPY": {"close": 200.0}},
+    )
+    ledger.update_day(
         trading_day=date(2026, 4, 30),
         fills=[],
-        daily_bars={"SPY": {"close": 90.0}},
+        daily_bars={"SPY": {"close": 190.0}},
     )
-    assert ledger.mark_to_market(date(2026, 4, 30), {"SPY": {"close": 90.0}})["short_bucket"]["monthly_drawdown"] <= policy[
+    assert ledger.mark_to_market(date(2026, 4, 30), {"SPY": {"close": 190.0}})["short_bucket"]["monthly_drawdown"] <= policy[
         "short_kill_switch_monthly_dd"
     ]
 
