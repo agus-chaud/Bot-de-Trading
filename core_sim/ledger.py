@@ -48,7 +48,6 @@ class PortfolioLedger:
         self._current_short_month: tuple[int, int] | None = None
         self._short_monthly_peak = 0.0
         self._short_monthly_drawdown = 0.0
-        self._short_month_start_cash = 0.0  # short_cash al inicio del mes en curso
         # short MV por fecha (última escritura gana) para `daily_return` con varias MTM en un día
         self._short_eod_by_trading_date: dict[date, float] = {}
 
@@ -288,35 +287,27 @@ class PortfolioLedger:
         short_equity: float,
         short_cash: float = 0.0,
     ) -> dict[str, float]:
-        """Calcula el drawdown mensual del bucket corto.
+        """Drawdown mensual del bucket corto medido sobre BUCKET EQUITY.
 
-        Usa `short_equity` (MV de posiciones abiertas) como métrica principal.
-        Cuando todas las posiciones están cerradas (`short_equity == 0`) y el peak
-        del mes fue positivo, la pérdida real ya está realizada: se calcula como
-        `(peak + short_cash_net) / peak - 1`, donde `short_cash_net` acumula el
-        cash neto de los fills del bucket corto en el mes.  Esto evita el drawdown
-        espurio de -1.0 que ocurría cuando el stop-loss cerraba la última posición.
+        `bucket_equity = short_cash + short_equity` (MV de posiciones abiertas).
+        El peak es el running max de `bucket_equity` dentro del mes calendario,
+        reseteado al primer call de cada mes nuevo. DD = `bucket_equity / peak - 1`,
+        clampado a 0 cuando `peak <= 0`. La key `equity` del dict retornado MANTIENE
+        `short_equity` (MV) por contrato con `_attach_short_daily_return` (REQ-5).
         """
+        bucket_equity = float(short_cash) + float(short_equity)
         month_key = (trading_day.year, trading_day.month)
+
         if self._current_short_month != month_key:
+            # Primer call de un nuevo mes calendario → reset peak al bucket_equity actual.
             self._current_short_month = month_key
-            self._short_monthly_peak = short_equity
+            self._short_monthly_peak = bucket_equity
             self._short_monthly_drawdown = 0.0
-            self._short_month_start_cash = short_cash  # cash neto al inicio del mes
         else:
-            self._short_monthly_peak = max(self._short_monthly_peak, short_equity)
+            self._short_monthly_peak = max(self._short_monthly_peak, bucket_equity)
 
         if self._short_monthly_peak > 0:
-            if short_equity == 0.0:
-                # Todas las posiciones cerradas: la pérdida real es el cambio en cash
-                # respecto al inicio del mes más el peak implícito de posiciones.
-                # Aproximación: (short_cash - short_month_start_cash) es el PnL neto
-                # realizado en el mes. El drawdown es ese PnL relativo al peak.
-                month_cash_delta = short_cash - self._short_month_start_cash
-                effective_value = self._short_monthly_peak + month_cash_delta
-                self._short_monthly_drawdown = (effective_value / self._short_monthly_peak) - 1.0
-            else:
-                self._short_monthly_drawdown = (short_equity / self._short_monthly_peak) - 1.0
+            self._short_monthly_drawdown = (bucket_equity / self._short_monthly_peak) - 1.0
         else:
             self._short_monthly_drawdown = 0.0
 

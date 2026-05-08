@@ -37,15 +37,19 @@ def _build_spy_history(*, n: int = 25) -> list[dict[str, float]]:
 def _make_ledger_with_monthly_dd(monthly_dd_fraction: float) -> PortfolioLedger:
     """Creates a ledger where the short bucket has a given monthly drawdown but near-zero daily return.
 
-    Buys SPY on Apr 1 at 100, marks it down to target on Apr 14 so that on TRADING_DAY (Apr 15)
-    the price is flat — monthly_drawdown = monthly_dd_fraction, daily_return ≈ 0.
-    Monthly DD is computed within the same calendar month as the buy, so the position must be
-    opened in April for the ledger to track it.
+    Bajo la semántica bucket-equity (`bucket_equity = short_cash + MV_short`):
+      - Día 1: BUY 10 @ $100 (short_cash=-1000, MV=1000, bucket_equity=0).
+      - Día 2: precio sube a $200 → MV=2000, bucket_equity=+1000, peak=1000.
+      - Día 3 (Apr 14): precio cae a $200*(1+dd) → bucket_equity=2000*(1+dd)-1000;
+        para que `bucket_equity / peak - 1 == dd`, ajustamos:
+            target_eq = peak * (1 + dd)              [peak=1000]
+            close = (target_eq + 1000) / 10
+        Apr 15 flat al mismo close → daily_return ≈ 0.
     """
     ledger = PortfolioLedger(starting_cash=200_000.0)
     buy_price = 100.0
-    intermediate_price = buy_price * (1.0 + monthly_dd_fraction)
 
+    # Día 1: BUY → short_cash=-1000, MV=1000, eq=0.
     ledger.update_day(
         trading_day=date(2026, 4, 1),
         fills=[
@@ -60,7 +64,17 @@ def _make_ledger_with_monthly_dd(monthly_dd_fraction: float) -> PortfolioLedger:
         ],
         daily_bars={"SPY": {"close": buy_price}},
     )
-    # Decline accumulated on Apr 14; Apr 15 will be flat at intermediate_price
+    # Día 2: rally a $200 para sembrar un peak real de 1000.
+    peak_close = 200.0
+    ledger.update_day(
+        trading_day=date(2026, 4, 2),
+        fills=[],
+        daily_bars={"SPY": {"close": peak_close}},
+    )
+    # Apr 14: caída calibrada para producir DD = monthly_dd_fraction.
+    peak = 1_000.0
+    target_eq = peak * (1.0 + monthly_dd_fraction)
+    intermediate_price = (target_eq + 1_000.0) / 10.0
     ledger.update_day(
         trading_day=date(2026, 4, 14),
         fills=[],
@@ -121,8 +135,9 @@ def test_runner_with_db_and_healthy_dd_generates_orders(tmp_path):
 
     handlers = create_short_term_pipeline_handlers(policy, REPO_ROOT, ledger, db=db)
 
-    # flat on TRADING_DAY — daily return ~0, monthly_dd ~-1%
-    result = _run_propose(handlers, ledger, close_price=100.0 * (1.0 - 0.01))
+    # flat on TRADING_DAY — daily return ~0, monthly_dd ~-1% bajo bucket-equity
+    # (peak=1000, target_eq = 1000*(1-0.01) = 990, close = (990+1000)/10 = 199.0).
+    result = _run_propose(handlers, ledger, close_price=199.0)
 
     assert result.get("sizing_metrics", {}).get("halt_reason") is None or result["sizing_metrics"]["halt_reason"] == ""
     # Kill switch should NOT be active in DB
@@ -146,8 +161,9 @@ def test_runner_with_db_and_deep_dd_activates_kill_switch(tmp_path):
 
     handlers = create_short_term_pipeline_handlers(policy, REPO_ROOT, ledger, db=db)
 
-    # Price on TRADING_DAY is same as Apr 14 close → daily return ≈ 0
-    end_price = 100.0 * (1.0 + dd_fraction)
+    # Price on TRADING_DAY mantiene el mismo bucket_equity que Apr 14 → DD ≈ dd_fraction
+    # bajo semántica bucket-equity con peak=1000: close = (1000*(1+dd) + 1000) / 10.
+    end_price = (1_000.0 * (1.0 + dd_fraction) + 1_000.0) / 10.0
     result = _run_propose(handlers, ledger, close_price=end_price)
 
     # Kill switch blocks before stop loss evaluation, so broker_orders is fully empty

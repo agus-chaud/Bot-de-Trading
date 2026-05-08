@@ -4,7 +4,7 @@ Each test exercises multiple layers working together with a real SQLite in-memor
 External connectors (yfinance, IOL) are mocked — everything else runs for real.
 
 Key contract discoveries captured here:
-- us_connector produces venue="US" (NOT "XNYS") — normalizer passes it through unchanged
+- us_connector produces venue="XNYS" (canonical ISO MIC for NYSE) — normalizer passes it through unchanged
 - ar_connector produces venue="AR" (NOT "XBUE") — same
 - MarketDB.get_ohlcv filters by venue, so queries must use the venue the connector sets
 - calendar_builder uses "XNYS"/"XBUE" as venue keys in the calendars table
@@ -45,7 +45,7 @@ def _us_row(symbol: str, ts: date, close: float = 100.0) -> OHLCVRow:
         close=close,
         volume=1_000_000.0,
         currency="USD",
-        venue="US",   # what us_connector actually produces
+        venue="XNYS",   # canonical ISO MIC for NYSE — what us_connector produces
         imputed=False,
     )
 
@@ -94,9 +94,9 @@ class TestUSPipelineHappyPath:
         normalized = normalize(rows, calendar)
         db.upsert_ohlcv(normalized)
 
-        stored = db.get_ohlcv("SPY", START, END, venue="US")
+        stored = db.get_ohlcv("SPY", START, END, venue="XNYS")
         assert len(stored) == 5
-        assert all(r.venue == "US" for r in stored)
+        assert all(r.venue == "XNYS" for r in stored)
         assert all(r.currency == "USD" for r in stored)
         assert all(r.imputed is False for r in stored)
         dates_stored = {r.ts for r in stored}
@@ -133,7 +133,7 @@ class TestPipelineWithOutlier:
         normalized = normalize(rows, calendar)
         db.upsert_ohlcv(normalized)
 
-        stored = db.get_ohlcv("SPY", START, END, venue="US")
+        stored = db.get_ohlcv("SPY", START, END, venue="XNYS")
         stored_dates = {r.ts for r in stored}
         assert outlier_day not in stored_dates
         # Confirm outlier day was not gap-filled either (it's in excluded set)
@@ -152,7 +152,7 @@ class TestPipelineWithGap:
         normalized = normalize(rows, calendar)
         db.upsert_ohlcv(normalized)
 
-        stored = db.get_ohlcv("SPY", START, END, venue="US")
+        stored = db.get_ohlcv("SPY", START, END, venue="XNYS")
         imputed_rows = [r for r in stored if r.imputed]
         real_rows = [r for r in stored if not r.imputed]
 
@@ -200,7 +200,7 @@ class TestFetchAndStoreRoundTrip:
         assert report.errors == []
         assert report.rows_stored == 10  # 5 US + 5 AR
 
-        spy_rows = db.get_ohlcv("SPY", START, END, venue="US")
+        spy_rows = db.get_ohlcv("SPY", START, END, venue="XNYS")
         ggal_rows = db.get_ohlcv("GGAL", START, END, venue="AR")
         assert len(spy_rows) == 5
         assert len(ggal_rows) == 5
@@ -228,8 +228,8 @@ class TestFetchPartialFailure:
         assert "QQQ" in report.fetched_us
         assert report.errors == []
 
-        spy_rows = db.get_ohlcv("SPY", START, END, venue="US")
-        qqq_rows = db.get_ohlcv("QQQ", START, END, venue="US")
+        spy_rows = db.get_ohlcv("SPY", START, END, venue="XNYS")
+        qqq_rows = db.get_ohlcv("QQQ", START, END, venue="XNYS")
         assert len(spy_rows) == 0
         assert len(qqq_rows) == 5
 
@@ -258,7 +258,7 @@ class TestFetchIdempotent:
         assert report1.rows_stored == report2.rows_stored
 
         # Storage must have exactly 5 rows — not 10
-        stored = db.get_ohlcv("SPY", START, END, venue="US")
+        stored = db.get_ohlcv("SPY", START, END, venue="XNYS")
         assert len(stored) == 5
 
 
@@ -315,13 +315,13 @@ class TestImputedRowsNotCountedAsReal:
             OHLCVRow(
                 symbol="SPY", ts=d,
                 open=100.0, high=101.0, low=99.0, close=100.0,
-                volume=0.0, currency="USD", venue="US", imputed=True,
+                volume=0.0, currency="USD", venue="XNYS", imputed=True,
             )
             for d in (tue, wed, thu)
         ]
         db.upsert_ohlcv(real_rows + imputed_rows)
 
-        all_rows = db.get_ohlcv("SPY", START, END, venue="US")
+        all_rows = db.get_ohlcv("SPY", START, END, venue="XNYS")
         real_only = [r for r in all_rows if not r.imputed]
         imputed_only = [r for r in all_rows if r.imputed]
 

@@ -62,21 +62,21 @@ def fetch_and_store(
         try:
             rows = fetch_us_ohlcv(symbol, start_date, end_date)
             if rows is None:
-                logger.warning('{"event": "symbol_skipped", "symbol": "%s", "venue": "US", "reason": "connector_returned_none"}', symbol)
+                logger.warning('{"event": "symbol_skipped", "symbol": "%s", "venue": "XNYS", "reason": "connector_returned_none"}', symbol)
                 skipped_us.append(symbol)
                 continue
             if not rows:
-                logger.warning('{"event": "symbol_skipped", "symbol": "%s", "venue": "US", "reason": "empty_data"}', symbol)
+                logger.warning('{"event": "symbol_skipped", "symbol": "%s", "venue": "XNYS", "reason": "empty_data"}', symbol)
                 skipped_us.append(symbol)
                 continue
             normalized = normalize(rows, cal_us)
             db.upsert_ohlcv(normalized)
             rows_stored += len(normalized)
             fetched_us.append(symbol)
-            logger.info('{"event": "symbol_fetched", "symbol": "%s", "venue": "US", "rows": %d}', symbol, len(normalized))
+            logger.info('{"event": "symbol_fetched", "symbol": "%s", "venue": "XNYS", "rows": %d}', symbol, len(normalized))
         except Exception as exc:
             msg = f"US:{symbol}: unexpected error: {exc}"
-            logger.exception('{"event": "symbol_error", "symbol": "%s", "venue": "US"}', symbol)
+            logger.exception('{"event": "symbol_error", "symbol": "%s", "venue": "XNYS"}', symbol)
             errors.append(msg)
 
     for symbol in symbols_ar:
