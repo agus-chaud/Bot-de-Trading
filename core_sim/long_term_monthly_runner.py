@@ -77,6 +77,7 @@ def create_long_term_pipeline_handlers(
     ledger: Any,
     *,
     calendar_store: Any = None,
+    db: Any = None,
 ) -> dict[str, Callable[..., Any]]:
     """Handlers listos para inyectar en `DailyEventBacktester` (signals/propose/risk).
 
@@ -234,11 +235,12 @@ def create_long_term_monthly_backtester(
     broker: Any,
     calendar_store: Any | None = None,
     corporate_actions_store: Any | None = None,
+    db: Any = None,
 ) -> Any:
     """Ensambla `DailyEventBacktester` con pipeline largo + broker + ledger."""
     from .event_engine import DailyEventBacktester
 
-    h = create_long_term_pipeline_handlers(policy_doc, repo_root, ledger, calendar_store=calendar_store)
+    h = create_long_term_pipeline_handlers(policy_doc, repo_root, ledger, calendar_store=calendar_store, db=db)
 
     def update_ledger(**kwargs: Any) -> dict[str, Any]:
         return ledger.mark_to_market(trading_day=kwargs["trading_day"], daily_bars=kwargs["daily_bars"])

@@ -5,11 +5,15 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from data.schema import CorporateActionRow, OHLCVRow
+
+if TYPE_CHECKING:
+    from core_sim.ledger import PortfolioLedger
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,62 @@ CREATE TABLE IF NOT EXISTS kill_switch_log (
 );
 """
 
+_VENUE_MAP: dict[str, str] = {"US": "XNYS", "AR": "XBUE"}
+
+_CREATE_PAPER_FILLS = """
+CREATE TABLE IF NOT EXISTS paper_fills (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id           TEXT NOT NULL,
+    mode             TEXT NOT NULL CHECK(mode IN ('paper_live', 'backtest')),
+    trading_day      TEXT NOT NULL,
+    ts_fill          TEXT NOT NULL,
+    symbol           TEXT NOT NULL,
+    venue            TEXT NOT NULL,
+    side             TEXT NOT NULL CHECK(side IN ('BUY', 'SELL')),
+    qty              REAL NOT NULL,
+    price            REAL NOT NULL,
+    bucket           TEXT NOT NULL CHECK(bucket IN ('short', 'long')),
+    engine           TEXT NOT NULL,
+    reason           TEXT,
+    fee              REAL NOT NULL DEFAULT 0.0,
+    slippage         REAL NOT NULL DEFAULT 0.0,
+    cost_total       REAL NOT NULL DEFAULT 0.0,
+    source_bar_close REAL,
+    notes            TEXT,
+    created_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pf_mode_day    ON paper_fills(mode, trading_day);
+CREATE INDEX IF NOT EXISTS idx_pf_symbol_day  ON paper_fills(symbol, trading_day);
+CREATE INDEX IF NOT EXISTS idx_pf_run         ON paper_fills(run_id);
+"""
+
+_CREATE_PAPER_SNAPSHOTS = """
+CREATE TABLE IF NOT EXISTS paper_snapshots (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    mode                   TEXT NOT NULL CHECK(mode IN ('paper_live', 'backtest')),
+    trading_day            TEXT NOT NULL,
+    equity_total           REAL NOT NULL,
+    equity_short           REAL NOT NULL,
+    equity_long            REAL NOT NULL,
+    short_cash             REAL NOT NULL,
+    cash                   REAL NOT NULL,
+    realized_pnl_total     REAL NOT NULL,
+    unrealized_pnl_total   REAL NOT NULL,
+    costs_day              REAL NOT NULL,
+    mv_us                  REAL NOT NULL,
+    mv_ar                  REAL NOT NULL,
+    short_monthly_peak     REAL,
+    short_monthly_drawdown REAL,
+    short_daily_return     REAL,
+    kill_switch_active     INTEGER NOT NULL DEFAULT 0,
+    num_open_positions     INTEGER NOT NULL DEFAULT 0,
+    num_fills_today        INTEGER NOT NULL DEFAULT 0,
+    realized_pnl_day       REAL,
+    created_at             TEXT NOT NULL,
+    UNIQUE(mode, trading_day)
+);
+"""
+
 
 class MarketDB:
     """Local SQLite store for OHLCV bars, corporate actions, and fetch audit logs."""
@@ -120,6 +180,8 @@ class MarketDB:
                 + _CREATE_CALENDARS
                 + _CREATE_FETCH_LOG
                 + _CREATE_KILL_SWITCH_LOG
+                + _CREATE_PAPER_FILLS
+                + _CREATE_PAPER_SNAPSHOTS
             )
 
     # ------------------------------------------------------------------
@@ -366,6 +428,169 @@ class MarketDB:
             reset_reason=None,
             auto_reset=False,
         )
+
+    # ------------------------------------------------------------------
+    # Paper trading persistence
+    # ------------------------------------------------------------------
+
+    def persist_fills(
+        self,
+        run_id: str,
+        mode: str,
+        trading_day: date,
+        fills: list[dict[str, Any]],
+        engine: str = "short_term_v1",
+    ) -> None:
+        """Insert one row per fill into paper_fills. Extracts slippage from cost_breakdown."""
+        if not fills:
+            return
+        created_at = datetime.now(tz=timezone.utc).isoformat()
+        ts_fill = created_at
+        records = []
+        for fill in fills:
+            market = str(fill.get("market", ""))
+            venue = _VENUE_MAP.get(market, market)
+            cost_bd = fill.get("cost_breakdown") or {}
+            slippage = float(cost_bd.get("slippage", 0.0))
+            cost_total = float(cost_bd.get("total", fill.get("fee", 0.0)))
+            records.append((
+                run_id,
+                mode,
+                trading_day.isoformat(),
+                ts_fill,
+                str(fill["symbol"]),
+                venue,
+                str(fill["side"]),
+                float(fill["qty"]),
+                float(fill["price"]),
+                str(fill.get("bucket", "short")),
+                engine,
+                fill.get("reason"),
+                float(fill.get("fee", 0.0)),
+                slippage,
+                cost_total,
+                fill.get("source_bar_close"),
+                fill.get("notes"),
+                created_at,
+            ))
+        with self._conn:
+            self._conn.executemany(
+                """
+                INSERT INTO paper_fills
+                    (run_id, mode, trading_day, ts_fill, symbol, venue, side, qty,
+                     price, bucket, engine, reason, fee, slippage, cost_total,
+                     source_bar_close, notes, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                records,
+            )
+
+    def persist_snapshot(
+        self,
+        mode: str,
+        trading_day: date,
+        snapshot: dict[str, Any],
+        short_cash: float,
+        kill_switch_active: bool = False,
+        num_fills_today: int = 0,
+    ) -> None:
+        """Upsert one end-of-day portfolio snapshot per (mode, trading_day)."""
+        sb = snapshot.get("short_bucket") or {}
+        created_at = datetime.now(tz=timezone.utc).isoformat()
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO paper_snapshots
+                    (mode, trading_day, equity_total, equity_short, equity_long,
+                     short_cash, cash, realized_pnl_total, unrealized_pnl_total,
+                     costs_day, mv_us, mv_ar, short_monthly_peak,
+                     short_monthly_drawdown, short_daily_return,
+                     kill_switch_active, num_open_positions, num_fills_today,
+                     realized_pnl_day, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    mode,
+                    trading_day.isoformat(),
+                    float(snapshot.get("equity_total", 0.0)),
+                    float(snapshot.get("equity_short", 0.0)),
+                    float(snapshot.get("equity_long", 0.0)),
+                    float(short_cash),
+                    float(snapshot.get("cash", 0.0)),
+                    float(snapshot.get("realized_pnl_total", 0.0)),
+                    float(snapshot.get("unrealized_pnl_total", 0.0)),
+                    float(snapshot.get("costs_day", 0.0)),
+                    float(snapshot.get("mv_us", 0.0)),
+                    float(snapshot.get("mv_ar", 0.0)),
+                    sb.get("monthly_peak"),
+                    sb.get("monthly_drawdown"),
+                    sb.get("daily_return"),
+                    int(kill_switch_active),
+                    len(snapshot.get("positions") or {}),
+                    num_fills_today,
+                    None,
+                    created_at,
+                ),
+            )
+
+    def get_paper_fills(
+        self,
+        mode: str,
+        since: date | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return fills for mode ordered by (trading_day ASC, id ASC)."""
+        if since is not None:
+            cursor = self._conn.execute(
+                """
+                SELECT * FROM paper_fills
+                WHERE mode = ? AND trading_day >= ?
+                ORDER BY trading_day ASC, id ASC
+                """,
+                (mode, since.isoformat()),
+            )
+        else:
+            cursor = self._conn.execute(
+                """
+                SELECT * FROM paper_fills
+                WHERE mode = ?
+                ORDER BY trading_day ASC, id ASC
+                """,
+                (mode,),
+            )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def replay_ledger_from_fills(
+        self,
+        mode: str = "paper_live",
+        starting_cash: float = 1000.0,
+    ) -> "PortfolioLedger":
+        """Reconstruct a PortfolioLedger by replaying historical fills in order."""
+        from core_sim.ledger import PortfolioLedger
+
+        ledger = PortfolioLedger(starting_cash=starting_cash)
+        rows = self.get_paper_fills(mode=mode)
+        by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            by_day[row["trading_day"]].append(row)
+        for day_str in sorted(by_day):
+            day = date.fromisoformat(day_str)
+            fills = [
+                {
+                    "symbol": r["symbol"],
+                    "side": r["side"],
+                    "qty": r["qty"],
+                    "price": r["price"],
+                    "market": next(
+                        (k for k, v in _VENUE_MAP.items() if v == r["venue"]),
+                        r["venue"],
+                    ),
+                    "bucket": r["bucket"],
+                    "fee": r["fee"],
+                }
+                for r in by_day[day_str]
+            ]
+            ledger.apply_fills(day, fills)
+        return ledger
 
     # ------------------------------------------------------------------
     # Supabase sync (private, non-blocking)

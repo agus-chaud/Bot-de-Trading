@@ -815,6 +815,36 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-039 — Persistencia de fills y snapshots en SQLite (paper-persistence)
+
+- **Fecha**: 2026-05-08
+- **Estado**: aceptada
+- **Contexto**: Sin persistencia, cada corrida del bot arranca de cero — sin memoria de posiciones anteriores ni histórico de P&L. Para arrancar paper-live es imprescindible acumular fills y snapshots diarios en la DB existente (`data/market.db`).
+- **Decisión**:
+  - Agregar dos tablas nuevas en `MarketDB`: `paper_fills` (un registro por fill ejecutado) y `paper_snapshots` (un snapshot de equity/DD/drift por día hábil, UNIQUE por `mode + trading_day`).
+  - Persisitir desde la capa del caller (runner/orquestador) después de `backtester.run_day()`, leyendo fills de `broker.get_fills()` (full `FillReport` con slippage) y snapshot de `ledger.mark_to_market()` + `ledger.short_cash` (attr directo, no está en el dict de retorno).
+  - Venue derivada en persist time: `market="US"` → `"XNYS"`, `market="AR"` → `"XBUE"`.
+  - Replay-from-fills como estrategia de reanudación: ledger vacío → `apply_fills()` por día en orden → estado reconstruido determinísticamente.
+  - `paper_snapshots` usa `INSERT OR REPLACE` para tolerar reinicios mid-day.
+  - Wiring del param `db: MarketDB | None = None` en `long_term_monthly_runner` (le faltaba).
+- **Por qué**:
+  - El mismo patrón ya usado por `kill_switch_log`: la capa de core_sim no conoce storage; el caller persiste. Cero contaminación de `core_sim`.
+  - `INSERT OR REPLACE` en snapshots es idempotente — un crash y restart no genera duplicados ni viola UNIQUE.
+  - Replay-from-fills es determinístico y O(n fills): suficiente para paper trading (estimado <50 fills/día). Snapshots son cache derivado, no fuente de verdad.
+  - `broker.get_fills()` es necesario (no `fill_orders()` return) porque `fill_orders()` strip the `cost_breakdown` — slippage se pierde en el retorno simplificado.
+- **Consecuencias**:
+  - `short_cash` del ledger debe leerse como attr (`ledger.short_cash`), no desde el dict de `mark_to_market()`.
+  - Las tablas se crean automáticamente en `_init_schema()` via `CREATE TABLE IF NOT EXISTS` — no requiere migration script manual.
+  - Backtests siguen escribiendo CSV; no tocan estas tablas.
+  - Supabase sync para paper tables: postergado (future).
+- **Alternativas consideradas**:
+  - **Persist dentro de `PaperBrokerSim`**: descartada — rompe SRP, acopla core_sim al data layer.
+  - **Callback hook en `DailyEventBacktester`**: descartada — overkill para un solo consumer; agrega complejidad sin beneficio inmediato.
+- **Archivos**: `data/storage.py`, `core_sim/long_term_monthly_runner.py`, `tests/test_data_storage.py`
+- **Change**: SDD #2 `paper-persistence` (propuesta, spec, diseño y tasks en Engram)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
