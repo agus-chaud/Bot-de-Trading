@@ -517,7 +517,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 ## ADR-025 — Bug fix: drawdown mensual del bucket corto excluía cash realizado
 
 - **Fecha**: 2026-04-28
-- **Estado**: aceptada
+- **Estado**: reemplazada → ver ADR-036
 - **Contexto**: `_update_short_drawdown` en `ledger.py` calculaba el drawdown sobre `market_value` de posiciones abiertas únicamente. Al ejecutar un stop-loss que cerraba la última posición del bucket corto, el cash obtenido volvía a `self.cash` global pero era invisible para la métrica. Resultado: `drawdown = (0 / peak) - 1 = -1.0` aunque la pérdida real era ~0.11%. El error se detectó cuando el validation-wf corrió con datos reales por primera vez — la ventana 2 mostraba -100% espurio.
 - **Decisión**: Introducir `self.short_cash` y `self._short_month_start_cash` en `PortfolioLedger`. Cuando `short_equity == 0` y el mes tuvo actividad, calcular `effective_value = peak + (short_cash - month_start_cash)` para reflejar el PnL neto realizado en lugar de asumir valor cero.
 - **Por qué**:
@@ -742,6 +742,76 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Solo asserts “no es None” sin golden**: descartada — no detecta drift silencioso en magnitudes.
   - **Golden generado en runtime del test**: descartada — rompe reproducibilidad entre máquinas y dificulta revisar el diff en PR.
 - **Referencias**: `.cursor/plans/bot_trading_paper-first_155d6f04.plan.md` (Fase 5, ítem 9), `docs/kpi_report_spec.v1.md`, `tests/test_kpi_regression_golden.py`.
+
+---
+
+## ADR-036 — Short bucket: drawdown mensual sobre bucket equity (actualización de ADR-025)
+
+- **Fecha**: 2026-05-08
+- **Estado**: aceptada (reemplaza ADR-025)
+- **Contexto**: ADR-025 introdujo `short_cash` y `_short_month_start_cash` para capturar el cash realizado al cerrar posiciones. Sin embargo, la implementación seguía calculando el peak y el drawdown sobre el MV de posiciones abiertas, con un ajuste ad-hoc para el caso de `short_equity == 0`. Esto producía resultados incorrectos en escenarios con cierre parcial o mid-month: el drawdown podía superar el -100% teórico, y el peak se calculaba sobre una base diferente al valor con el que se comparaba. La causa raíz era que el "valor del bucket" no tenía una definición unificada.
+- **Decisión**:
+  - Definir `bucket_equity_t = short_cash_t + sum(market_value de posiciones short abiertas a t)` como la base única de cómputo para peak y drawdown mensual del bucket corto.
+  - `monthly_peak = max(bucket_equity_t)` durante el mes corriente; resetea el primer día hábil de cada mes al `bucket_equity` de ese momento.
+  - `monthly_drawdown = (bucket_equity_t / monthly_peak) - 1` si `peak > 0`, else `0`.
+  - Eliminar `_short_month_start_cash` (ya no es necesario el ajuste ad-hoc).
+  - El campo `daily_return` del bucket short **sigue** calculado sobre MV de posiciones abiertas (mide calidad de stock-picking; base distinta al drawdown es intencional).
+- **Por qué**:
+  - El cálculo previo (MV-only) generaba drawdown de -100% al cerrar una posición con ganancia: el MV caía a 0 pero el cash subía — pérdida contable falsa. Esto contaminaba el gate del validation-wf (`floor -0.25`) con señales falsas.
+  - `bucket_equity` captura correctamente el valor total del bucket bajo la mecánica BUY-first del ledger: cuando se vende (cierre), el cash sube y el MV baja; la suma permanece estable si no hubo pérdida real.
+  - `daily_return` y `monthly_drawdown` miden cosas distintas: calidad de selección (MV open) vs. riesgo de capital comprometido (bucket equity). Tener bases distintas es una decisión explícita documentada aquí.
+- **Consecuencias**:
+  - Fixtures de tests del kill switch (`test_short_term_day_runner.py`, `test_short_term_day_runner_kill_switch.py`) requirieron recalibración al cambiar la semántica del DD; se recalibraron solo fixtures, no thresholds ni lógica.
+  - La recalibración de thresholds operativos (`-0.08` kill switch, `-0.25` floor pre-gate) queda pendiente post-baseline paper-live con datos reales.
+- **Alternativas consideradas**:
+  - **Mantener ajuste ad-hoc de ADR-025 (`effective_value`)**: descartada — no cubría escenarios mid-month con posiciones parcialmente cerradas; la corrección era puntual para `equity == 0`, no para el caso general.
+  - **Usar `short_cash - month_start_cash` como proxy de PnL**: descartada — requería rastrear el cash inicial del mes, complicaba el reset y era frágil ante múltiples ciclos de apertura/cierre en el mismo mes.
+- **Archivos**: `core_sim/ledger.py` (`_update_short_drawdown` reescrito, `_short_month_start_cash` eliminado), `tests/test_ledger.py` (1 rediseñado, 1 ajustado, 4 nuevos: SCN-3/5/7/10)
+- **Commit**: `e724378`
+
+---
+
+## ADR-037 — Venue: código MIC para conectores de mercado (US = XNYS)
+
+- **Fecha**: 2026-05-08
+- **Estado**: aceptada
+- **Contexto**: `data/connectors/us_connector.py` hardcodeaba `venue="US"` al construir `OHLCVRow`. Todo el resto del sistema — schema SQLite, calendar builder, fetcher logs, queries de validación — usaba `"XNYS"` (código MIC de NYSE). El mismatch era silencioso: no crasheaba en unit tests pero hubiera roto la capa de persistencia desde el primer día de paper-live (las filas insertadas con `venue="US"` nunca serían encontradas por queries que filtran `venue="XNYS"`).
+- **Decisión**:
+  - Introducir constante `_VENUE = "XNYS"` en `data/connectors/us_connector.py`; todos los `OHLCVRow` retornados usan ese valor.
+  - Actualizar labels de log en `data/fetcher.py` para que digan `XNYS` donde antes decían `US`.
+  - Agregar script idempotente `scripts/migrate_venue_us_to_xnys.py` para backfill de datos existentes en SQLite (exit codes: 0 OK, 1 error DB, 2 DB no encontrada).
+  - **Regla de equipo**: cualquier connector nuevo usa el código MIC como venue. US = `"XNYS"` (NYSE), AR = `"XBUE"` (BYMA). Nunca strings informales como `"US"` o `"AR"`.
+- **Por qué**:
+  - Un mismatch de venue en la capa de persistencia es un bug silencioso de consecuencias graves: datos correctamente descargados son invisibles para el sistema.
+  - Los códigos MIC son estándar ISO 10383, sin ambigüedad. Strings informales crean fricciones cuando se agregan nuevos mercados o fuentes.
+  - La migración idempotente permite corregir datos existentes sin riesgo de duplicados (maneja conflictos de PK).
+- **Consecuencias**:
+  - Antes de iniciar paper-live con una DB existente, correr `python scripts/migrate_venue_us_to_xnys.py --db data/market.db`.
+  - Tests de integración en `test_data_us_connector.py` y `test_data_integration.py` actualizados para assertar `"XNYS"` en lugar de `"US"`.
+- **Alternativas consideradas**:
+  - **Normalizar venue en la capa de storage (MarketDB) en lugar del conector**: descartada — el contrato dice que el caller produce el `OHLCVRow` correcto; normalizar en storage oculta bugs upstream (mismo argumento que ADR-023 para side uppercase).
+  - **Enum para venue en lugar de string**: postergada para v2 — agregar un enum en v1 requeriría cambiar la firma de los conectores y el schema en el mismo commit que el bug fix; el costo supera el beneficio inmediato.
+- **Archivos**: `data/connectors/us_connector.py`, `data/fetcher.py`, `scripts/migrate_venue_us_to_xnys.py` (nuevo), `tests/test_data_us_connector.py`, `tests/test_data_integration.py`, `tests/test_migrate_venue_us_to_xnys.py` (nuevo)
+- **Commits**: `ef3bd8b`, `b333381`
+
+---
+
+## ADR-038 — Desviaciones documentadas del change ledger-dd-fix
+
+- **Fecha**: 2026-05-08
+- **Estado**: aceptada
+- **Contexto**: Durante la aplicación del change `ledger-dd-fix` se materializaron dos desviaciones respecto al diseño acordado. Se documentan aquí siguiendo la convención del proyecto de trazar historial sin borrar.
+
+### Desviación 1: re-calibración de fixtures en kill-switch tests
+
+- **Escenario**: el cambio semántico del DD (ADR-036) rompió fixtures en `tests/test_short_term_day_runner.py` y `tests/test_short_term_day_runner_kill_switch.py`. Los tests asumían números basados en MV-only que dejaron de ser válidos con la nueva base de bucket equity.
+- **Resolución**: se re-calibraron los fixtures (datos de entrada de los tests) para que sean consistentes con la nueva definición de DD. La lógica del kill switch, los thresholds (`-0.08`) y el floor del validation-wf (`-0.25`) no fueron modificados.
+- **Pendiente**: recalibración de thresholds operativos post-baseline paper-live (ver `paper-live/plan`). La calibración actual es coherente internamente pero no ha sido validada contra distribución de retornos reales.
+
+### Desviación 2: exit code 2 en script de migración
+
+- **Escenario**: el diseño especificaba "non-zero en error de DB". El implementador agregó `exit code 2` específico para "la DB no existe" (pre-check antes de abrir SQLite).
+- **Resolución**: mejora aceptada. El exit code 2 previene que Python cree silenciosamente un archivo SQLite vacío ante un typo en el path `--db`. El spirit del diseño (avisar si algo sale mal) se honra con más precisión. Convención: exit 0 = OK, exit 1 = error durante operación, exit 2 = precondición no cumplida (DB no encontrada).
 
 ---
 
