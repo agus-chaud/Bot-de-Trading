@@ -22,7 +22,8 @@
     "data_providers",
     "calendar",
     "corporate_actions",
-    "validation_wf"
+    "validation_wf",
+    "ramp_stage"
   ],
   "properties": {
     "schema_version": {
@@ -414,6 +415,11 @@
           }
         }
       }
+    },
+    "ramp_stage": {
+      "type": "string",
+      "enum": ["paper", "ramp_10", "ramp_25", "ramp_50", "live_100"],
+      "description": "Fase actual de ramp-up hacia capital real. Cambia solo con revisión humana documentada."
     }
   },
   "$defs": {

@@ -878,6 +878,40 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-041 — Gate KPI OOS con umbrales pre-registrados y protocolo ramp-up
+
+- **Fecha**: 2026-05-11
+- **Estado**: aceptada
+- **Contexto**: El plan maestro quedó con 12/12 todos completados en código, pero faltaba el último entregable de Fase 5: umbrales numéricos congelados **antes** del primer resultado OOS agregado, y el protocolo de transición paper → capital real. Sin esto, el gate es una infraestructura vacía (thresholds en `null`, `enabled: false`).
+- **Decisión**:
+  - **Activar `kpi_oos_gate.enabled: true`** en `config/policy.v1.yaml` y rellenar 7 umbrales bloqueantes + 2 informativos:
+    - `min_sharpe_annualized_total: 0.30` — piso modesto; no destruir valor ajustado por riesgo vs ETFs pasivos (Sharpe histórico SPY ~0.4–0.5).
+    - `min_sortino_annualized_total: 0.40` — con kill switch y límites diarios, downside debería estar más acotado que upside.
+    - `max_drawdown_total_floor: -0.18` — peor caso razonable: largo 70% × -25% + corto 30% × -8% ≈ -20%.
+    - `max_drawdown_short_floor: -0.10` — kill switch se auto-resetea por mes; en ventana OOS de ~3 meses puede acumular dos activaciones.
+    - `max_drawdown_long_floor: -0.25` — tolerar bear market normal sin culpar al bot; detectar errores de rebalanceo.
+    - `max_turnover_long_monthly_last: 0.08` — con bandas drift 2pp, turnover esperado 1–5%; techo de 8% detecta bugs de churn.
+    - `min_alpha_simple_return_total: -0.02` — tolerar hasta -2% anuales vs benchmark pasivo como costo del bloque corto activo.
+    - `min_calmar_12m_long: null` + `max_mdd_12m_rolling_long_floor: null` — informativas, no bloqueantes (dependen del mercado, no del bot).
+  - **Agregar `ramp_stage: paper`** al YAML con enum validado en schema (`paper`, `ramp_10`, `ramp_25`, `ramp_50`, `live_100`).
+  - **Anexo fechado §13** en `POLICY.md` (`gate.v1`, 2026-05-11): tabla de umbrales con justificación, regla de agregación (`all`), parámetros walk-forward (burn-in 252, OOS 60, step 30), y gobernanza de versiones.
+  - **Protocolo ramp-up §14** en `POLICY.md`: 5 escalones (paper → 10% → 25% → 50% → 100%) con criterio de entrada, duración mínima por escalón (30–60 días), criterios de rollback (DD real > 1.5× peor OOS), y regla de rollback a paper (DD > 2× peor OOS). Subir de escalón es decisión humana; bajar puede ser automático.
+- **Por qué**:
+  - Pre-registrar umbrales evita "tirar hasta acertar" — si los fijás después de ver resultados, no tenés gate, tenés confirmation bias.
+  - Separar métricas de mercado (Calmar/MDD largo) de métricas del bot (Sharpe/alpha/turnover) da señal limpia.
+  - El ramp gradual con checkpoints reduce riesgo de overshoot si el paper sobreestima calidad de ejecución real (slippage real > simulado, etc.).
+- **Consecuencias**:
+  - Datos mínimos para la primera evaluación: 312 días hábiles (~15 meses de paper-live). Hoy hay ~120 días históricos; el gate no puede correrse hasta acumular suficiente serie.
+  - Cambiar cualquier umbral requiere `gate.v2` con fecha y motivo en POLICY.md y YAML simultáneamente.
+  - El `ramp_stage` es trazabilidad pura; no tiene lógica automática en el código hoy (el runner no cambia comportamiento por escalón).
+- **Alternativas consideradas**:
+  - **Umbrales más agresivos (Sharpe >= 1.0, alpha >= 0)**: descartadas — un bot v1 moderado con 70% pasivo no debería aspirar a Sharpe > 1; un piso agresivo invalida el gate ante cualquier régimen normal.
+  - **Calmar/MDD como bloqueantes**: descartadas para el largo pasivo — detectan mercado, no bot; activarlos generaría falsos positivos en bear markets.
+  - **Ramp sin escalones intermedios (paper → 100%)**: descartada por riesgo operativo; los escalones permiten detectar discrepancias paper vs real a escala menor.
+- **Archivos**: `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `POLICY.md` (§13, §14)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

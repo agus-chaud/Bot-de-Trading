@@ -267,4 +267,87 @@ Resumen ejecutivo; el detalle autoritativo sigue en `docs/kpi_report_spec.v1.md`
 
 ---
 
-*Fin del documento — Fase 1 (especificación paper) + referencias Fase 5 (informe KPI).*
+## 13. Gate KPI OOS — umbrales pre-registrados (Fase 5)
+
+**Fecha de registro: 2026-05-11.**
+**Versión: gate.v1.**
+Cualquier cambio posterior requiere **nueva versión** (`gate.v2`, …) con fecha y motivo en el commit.
+
+### 13.1 Propósito
+
+Lista cerrada de umbrales que cada ventana OOS del walk-forward debe cumplir **antes** de avanzar a capital real. Definidos **antes del primer resultado OOS agregado** para evitar sesgo de confirmación (p-hacking financiero).
+
+### 13.2 Umbrales bloqueantes
+
+| Métrica | Umbral | Justificación |
+|---------|--------|---------------|
+| Sharpe anualizado (total) | **≥ 0,30** | 70 % del portfolio son ETFs pasivos (Sharpe histórico SPY ~0,4–0,5). Un piso de 0,30 exige no destruir valor ajustado por riesgo respecto del mercado. |
+| Sortino anualizado (total) | **≥ 0,40** | Con kill switch (-8 %) y límite diario (-2 % corto, -3 % total), el downside debería estar más acotado que el upside; Sortino > Sharpe es la expectativa. |
+| Max drawdown total | **≥ -18 %** | Peor caso razonable: largo 0,70 × -25 % ≈ -17,5 % + corto 0,30 × -8 % ≈ -2,4 %. Un piso de -18 % detecta fallas estructurales sin disparar falsos positivos por bear market moderado. |
+| Max drawdown bucket corto | **≥ -10 %** | Kill switch congela a -8 % mensual pero se auto-resetea a inicio de mes; en una ventana OOS de ~3 meses puede acumular dos activaciones. -10 % da 2 pp de margen. |
+| Max drawdown bucket largo | **≥ -25 %** | Sleeve pasivo ETFs broad market. SPY cayó -25 % en 2022 y -34 % en 2020. El umbral detecta errores de rebalanceo, no ciclos de mercado. |
+| Turnover mensual largo (último) | **≤ 8 %** | Con bandas de drift 2,0 pp y rebalanceo mensual, el turnover esperado es 1–5 %. Un techo de 8 % detecta bugs de churn sin penalizar meses volátiles puntuales. |
+| Alpha simple vs benchmark 20/80 (total) | **≥ -2 %** | El alpha real viene del 30 % corto (momentum v1). Pedir α > 0 en v1 es optimista; -2 % dice "no destruyas más de 2 pp anuales respecto al benchmark pasivo". Si pierde más, el bloque corto no justifica su costo operativo. |
+
+### 13.3 Métricas informativas (sin umbral bloqueante en v1)
+
+| Métrica | Umbral | Motivo |
+|---------|--------|--------|
+| Calmar 12m (largo) | **null** | Depende casi 100 % del mercado en sleeve pasivo. Se calcula y reporta pero no bloquea. |
+| MDD 12m rolling (largo) | **null** | Misma lógica que Calmar; informativo para monitoreo. |
+
+### 13.4 Regla de agregación
+
+**`rule: all`** — todos los tramos OOS deben pasar todos los umbrales bloqueantes. Si un tramo falla por shock externo y se considera que no refleja un defecto del bot, se puede pasar a `rule: k_of_last_q` en una versión futura (`gate.v2`), con fecha y motivo documentados.
+
+### 13.5 Walk-forward del gate
+
+| Parámetro | Valor |
+|-----------|-------|
+| Burn-in | **252** días hábiles (~1 año) |
+| Ventana OOS | **60** días hábiles (~3 meses) |
+| Step | **30** días hábiles (~1,5 meses) |
+| Mínimo de ventanas OOS | **1** |
+
+Datos mínimos para la primera evaluación: **312 días hábiles** (~15 meses de operación paper-live).
+
+### 13.6 Gobernanza
+
+- Los umbrales viven como fuente parseable en `config/policy.v1.yaml` → `kpi_oos_gate.thresholds`.
+- Este anexo en `POLICY.md` es la **fuente de verdad humana** con justificación.
+- Para cambiar un umbral: nueva versión del anexo (`gate.v2`, …), nuevo commit con fecha y motivo, actualización simultánea de YAML y POLICY.
+
+---
+
+## 14. Protocolo de ramp-up (paper → capital real)
+
+### 14.1 Propósito
+
+Graduar la exposición a capital real en escalones con checkpoints de revisión. Evitar pasar de 0 a 100 % de golpe aunque el gate pase.
+
+### 14.2 Escalones
+
+| Escalón | % del capital asignado al bot | Criterio de entrada | Duración mínima | Criterio de rollback |
+|---------|-------------------------------|---------------------|------------------|----------------------|
+| **paper** | 0 % (simulado) | Estado inicial | Sin mínimo; hasta que gate pase | N/A |
+| **ramp_10** | 10 % | Gate KPI OOS pasado (`rule: all`) + CI verde 5 días consecutivos | **30 días** de operación real | DD mensual real > 1,5× peor DD OOS observado **o** fallo de CI en paper-live |
+| **ramp_25** | 25 % | 30 días en `ramp_10` sin rollback + gate re-evaluado con datos reales nuevos | **30 días** | Idem |
+| **ramp_50** | 50 % | 30 días en `ramp_25` sin rollback + revisión manual de drift y costos reales vs simulados | **60 días** | Idem + desvío costos reales vs simulados > 50 % |
+| **live_100** | 100 % | 60 días en `ramp_50` sin rollback + revisión completa de KPIs reales | Indefinido | Cualquier criterio de rollback anterior + revisión mensual obligatoria |
+
+### 14.3 Reglas de operación
+
+1. **Subir de escalón es decisión humana**: el bot no auto-promueve. El operador revisa los datos, decide y cambia `ramp_stage` en el YAML con commit documentado.
+2. **Bajar de escalón puede ser automático**: si el criterio de rollback se activa, el sistema (o el operador) retrocede al escalón anterior y registra motivo.
+3. **Rollback a paper**: si en cualquier escalón el DD mensual real supera **2× el peor DD OOS observado**, se vuelve a `paper` hasta nueva revisión completa.
+4. **Paper-live sigue corriendo**: incluso en `live_100`, el paper-live paralelo sigue operando para comparar simulado vs real y detectar divergencias.
+
+### 14.4 Trazabilidad
+
+- El campo `ramp_stage` en `config/policy.v1.yaml` refleja el escalón actual.
+- Valores válidos: `paper`, `ramp_10`, `ramp_25`, `ramp_50`, `live_100`.
+- Cada transición de escalón se registra como commit con fecha y motivo (ej. "ramp_10 → ramp_25: 30d sin rollback, gate re-evaluado 2026-08-15").
+
+---
+
+*Fin del documento — Fase 1 (especificación paper) + Fase 5 (informe KPI, gate, ramp-up).*

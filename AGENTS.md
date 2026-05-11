@@ -13,6 +13,7 @@ Plan maestro: `.cursor/plans/bot_trading_paper-first_155d6f04.plan.md`.
 | Qué | Dónde |
 |-----|--------|
 | Política humana (umbrales, matriz de violaciones, mapa de datos) | `POLICY.md` |
+| Gate KPI OOS (umbrales pre-registrados, ramp-up) | `POLICY.md` §13-14 + `config/policy.v1.yaml` → `kpi_oos_gate`, `ramp_stage` |
 | Contrato parseable (YAML) | `config/policy.v1.yaml` |
 | Validación estructural CI | `config/policy.v1.schema.json` + `tests/test_policy_schema.py` |
 | Listas de símbolos | `config/symbols/whitelist_us.yaml`, `whitelist_ar.yaml` |

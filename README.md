@@ -32,8 +32,8 @@ En resumen: primero se prueba el proceso, despues se escala con plata de verdad.
 La transición a real está planteada como gate, no como salto de fe:
 
 - `pre-gate` estadístico (walk-forward OOS) para bloquear sobreajuste.
-- Criterios de riesgo y performance definidos de antemano.
-- Ramp-up gradual de exposición (por etapas), manteniendo los mismos guardarraíles.
+- **Gate KPI OOS activo** (`kpi_oos_gate.enabled: true`): umbrales pre-registrados (Sharpe ≥ 0.30, DD total ≥ -18%, alpha ≥ -2%, etc.) congelados el 2026-05-11 antes del primer resultado OOS. Detalle en `POLICY.md` §13.
+- **Ramp-up gradual** en 5 escalones: paper → 10% → 25% → 50% → 100% del capital, con duración mínima por escalón y criterios de rollback. Detalle en `POLICY.md` §14.
 
 
 ## Estado actual (mayo 2026)
@@ -95,7 +95,7 @@ La transición a real está planteada como gate, no como salto de fe:
   - `reporting/kpi_v0.py` — CSV diario §2.1 + fills/trades §2.2 (opcional si el equity trae `costs_day_short`/`costs_day_long`): retorno neto anualizado total §5, max drawdown §7, **Sharpe/Sortino** por segmento (equity total/corto/largo) §6, **hit rate y profit factor** por motor FIFO §8, **drift 30/70 y 20/80** §11, y v3 en bloque largo (**MDD_12m rolling**, **Calmar_12m**, **turnover_long_monthly**) + **alpha vs benchmark** §12.
   - `scripts/report_kpis.py` — `--equity`, `--trades`, `--metadata`, `--benchmark-returns` → `--out-json` y `--out-md`.
   - **Walk-forward OOS del KPI v3 (Fase 5, tabla maestra + gate opcional)**:
-    - Bloque **`kpi_oos_gate`** en `config/policy.v1.yaml` (schema en `policy.v1.schema.json`): rejilla **`burn_in` / OOS / step**, agregación **`all`** o **`k_of_last_q`**, umbrales opcionales por métrica; **`enabled: false`** hasta fijarlos en anexo político.
+    - Bloque **`kpi_oos_gate`** en `config/policy.v1.yaml` (schema en `policy.v1.schema.json`): rejilla **`burn_in` / OOS / step**, agregación **`all`** o **`k_of_last_q`**, umbrales por métrica; **`enabled: true`** con umbrales pre-registrados (ver §13 de POLICY.md).
     - `reporting/kpi_walk_forward.py` — por cada ventana: slice CSV → mismo informe que v3 (`build_kpi_v0_report_from_tables`) → **`master_table`** + pass/fail por ventana si el gate está activo.
     - `core_sim/short_term_pre_gate.py` — **`walk_forward_oos_windows`** (API pública de rejilla de ventanas).
     - `scripts/report_kpis_walk_forward.py` — export JSON consolidado (exit ≠ 0 si falla gate agregado o hay fallos globales).
@@ -117,11 +117,17 @@ La transición a real está planteada como gate, no como salto de fe:
   - Tests en `tests/test_storage.py` y `tests/test_run_paper_live.py` (gap detection, F3 exit code, single/multi-day integration, idempotencia).
   - Decisión registrada en `decisiones-tecnicas.md` (**ADR-040**).
 
+- **Gate KPI OOS activo** (Fase 5, gate-ramp):
+  - `kpi_oos_gate.enabled: true` en `config/policy.v1.yaml` con 7 umbrales bloqueantes pre-registrados (2026-05-11): Sharpe ≥ 0.30, Sortino ≥ 0.40, DD total ≥ -18%, DD corto ≥ -10%, DD largo ≥ -25%, turnover largo ≤ 8%, alpha ≥ -2%.
+  - 2 métricas informativas (Calmar 12m, MDD 12m rolling largo): `null` — no bloqueantes en v1.
+  - `ramp_stage: paper` en YAML, validado por schema (enum: `paper`, `ramp_10`, `ramp_25`, `ramp_50`, `live_100`).
+  - Protocolo ramp-up documentado en `POLICY.md` §14: 5 escalones con criterios de entrada, duración mínima y rollback.
+  - Decisión registrada en `decisiones-tecnicas.md` (**ADR-041**).
+
 ### Pendiente principal
 
-- **Activar paper-live real**: seed DB con historial (120 días), push `paper-live-data`, validar workflow con dispatch manual.
+- **Acumular datos paper-live**: el gate requiere mínimo 312 días hábiles (~15 meses); hoy hay ~120 días históricos. El workflow diario está activo y acumulando.
 - Integración completa del `long_term_monthly_runner` en `event_engine` operativo diario.
-- Definir umbrales concretos del gate (`kpi_oos_gate.enabled: false` → fijar antes del primer resultado OOS).
 - Completar restantes del informe KPI respecto del spec (p. ej. cobertura de turnover por otros segmentos además de largo) — ver `docs/kpi_report_spec.v1.md`.
 - Conectar fuentes de datos reales (feeds, APIs broker) con `PaperBrokerSim` como adaptador, manteniendo interfaces estables.
 

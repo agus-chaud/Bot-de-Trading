@@ -9,6 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Gate KPI OOS activado** (`config/policy.v1.yaml`, `config/policy.v1.schema.json`):
+  `kpi_oos_gate.enabled` cambia de `false` a `true`; 7 umbrales bloqueantes rellenados
+  (Sharpe ≥ 0.30, Sortino ≥ 0.40, DD total ≥ -18%, DD corto ≥ -10%, DD largo ≥ -25%,
+  turnover largo ≤ 8%, alpha ≥ -2%); 2 informativas (Calmar, MDD 12m) en `null`.
+  Nuevo campo `ramp_stage: paper` con enum validado en schema.
+  Anexo fechado `gate.v1` (2026-05-11) en `POLICY.md` §13.
+  Protocolo ramp-up (paper → 10% → 25% → 50% → 100%) en `POLICY.md` §14.
+  Decisión registrada en `decisiones-tecnicas.md` (**ADR-041**).
+
 - **Paper-live workflow hardening** (`.github/workflows/paper_live_daily.yml`): added
   `Fetch latest OHLCV` step before pipeline execution (`fetch_daily.py --lookback 5`),
   switched `git add` to `git add -f` for gitignore robustness, and added `Notify on failure`
