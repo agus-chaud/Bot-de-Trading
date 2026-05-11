@@ -109,6 +109,12 @@ La transición a real está planteada como gate, no como salto de fe:
   - `tests/test_kpi_v0.py` — comportamiento + series sintéticas.
   - Decisiones registradas en `decisiones-tecnicas.md` (**ADR-030**, **ADR-031**, **ADR-032**, **ADR-033**, **ADR-034**, **ADR-035**).
 
+- **Paper-live daily orchestrator**:
+  - `scripts/run_paper_live.py` — CLI que ejecuta el pipeline corto día a día contra OHLCV real en SQLite, con catch-up automático y política F3 (gap > 3 días hábiles → exit(2), intervención manual).
+  - `data/storage.py` — `get_last_snapshot_day(mode)` para detectar último día procesado.
+  - `.github/workflows/paper_live_daily.yml` — cron Lun–Vie 10:00 UTC (post-cierre US) + `workflow_dispatch`; opera sobre branch `paper-live-data` y commitea la DB tras cada corrida.
+  - Tests en `tests/test_storage.py` y `tests/test_run_paper_live.py` (gap detection, F3 exit code, single/multi-day integration, idempotencia).
+
 ### Pendiente principal
 
 - Integración completa del `long_term_monthly_runner` en `event_engine` operativo diario.
@@ -132,6 +138,8 @@ La transición a real está planteada como gate, no como salto de fe:
 - `reporting/kpi_v0` + `scripts/report_kpis.py`: informe JSON/Markdown según `docs/kpi_report_spec.v1.md` (lectura post-corrida del export equity + fills).
 - `kpi_oos_gate` + `reporting/kpi_walk_forward` + `scripts/report_kpis_walk_forward.py`: varias ventanas OOS sobre la misma serie, mismo informe v3 por tramo, tabla maestra y gate reproducible opcional (**ADR-034**).
 - `tests/fixtures/kpi_golden` + `tests/test_kpi_regression_golden.py`: regresión con dataset fijo de 60 días y JSON golden en CI (**ADR-035**).
+- `scripts/run_paper_live.py`: orquestador diario paper-live del bloque corto — gap detection (F3), catch-up idempotente, replay de ledger, persistencia de fills/snapshots bajo mode `paper_live`.
+- `.github/workflows/paper_live_daily.yml`: cron + dispatch sobre branch `paper-live-data`.
 - `event_engine`: orquestador diario con soporte para `execution_mode` (auto/semi_auto) y bypass de stop loss en semi_auto.
 - Flujo completo: Data -> Engines -> `risk_guardrails` -> Allocator -> `paper_broker_sim` -> `ledger`; ambos motores convergen en el mismo núcleo para mantener consistencia y auditoría.
 
@@ -156,6 +164,7 @@ python scripts/report_kpis.py --equity path/to/equity.csv --trades path/to/fills
 python scripts/report_kpis_walk_forward.py --equity path/to/equity.csv --trades path/to/fills.csv --out-json wf_kpi_oos.json
 # Si el CSV tiene pocos días y policy usa burn_in=252: --wf-burn-in 0 --wf-oos 60 --wf-step 60 (ajustar al largo real del CSV)
 python scripts/regenerate_kpi_golden_fixtures.py   # solo tras cambio consciente del spec / KPIs (actualiza tests/fixtures/kpi_golden/)
+python scripts/run_paper_live.py --date 2026-05-09 --db data/market.db   # ejecución manual paper-live (branch paper-live-data)
 ```
 
 Por módulo (desarrollo acotado):

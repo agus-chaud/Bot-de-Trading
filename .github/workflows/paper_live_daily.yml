@@ -1,0 +1,52 @@
+name: Paper Live Daily
+
+on:
+  schedule:
+    # 10:00 UTC Mon–Fri (post US market close)
+    - cron: "0 10 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Target trading day (YYYY-MM-DD). Leave empty for previous weekday."
+        required: false
+        type: string
+
+concurrency:
+  group: paper-live-daily
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: paper-live-data
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run paper-live script
+        run: |
+          DATE_ARG=""
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            DATE_ARG="--date ${{ github.event.inputs.date }}"
+          fi
+          python scripts/run_paper_live.py $DATE_ARG --db data/market.db
+
+      - name: Commit and push DB changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/market.db
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "paper-live: $(date -u +%Y-%m-%d) daily run"
+            git push
+          fi

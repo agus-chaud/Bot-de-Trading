@@ -533,6 +533,17 @@ class MarketDB:
                 ),
             )
 
+    def get_last_snapshot_day(self, mode: str) -> date | None:
+        """Return the most recent trading_day with a snapshot for *mode*, or None."""
+        cursor = self._conn.execute(
+            "SELECT MAX(trading_day) AS last_day FROM paper_snapshots WHERE mode = ?",
+            (mode,),
+        )
+        row = cursor.fetchone()
+        if row and row["last_day"]:
+            return date.fromisoformat(row["last_day"])
+        return None
+
     def get_paper_fills(
         self,
         mode: str,
