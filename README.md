@@ -154,6 +154,7 @@ python scripts/run_short_term_pre_gate.py
 python scripts/run_long_engine_wf.py --window-months 6 --step-months 1
 python scripts/report_kpis.py --equity path/to/equity.csv --trades path/to/fills.csv --benchmark-returns path/to/benchmark_returns.csv --out-json kpi.json --out-md kpi.md
 python scripts/report_kpis_walk_forward.py --equity path/to/equity.csv --trades path/to/fills.csv --out-json wf_kpi_oos.json
+# Si el CSV tiene pocos días y policy usa burn_in=252: --wf-burn-in 0 --wf-oos 60 --wf-step 60 (ajustar al largo real del CSV)
 python scripts/regenerate_kpi_golden_fixtures.py   # solo tras cambio consciente del spec / KPIs (actualiza tests/fixtures/kpi_golden/)
 ```
 

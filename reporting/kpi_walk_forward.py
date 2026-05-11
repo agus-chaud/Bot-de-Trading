@@ -221,12 +221,15 @@ def run_kpi_oos_walk_forward_from_paths(
     metadata_path: str | Path | None = None,
     benchmark_returns_path: str | Path | None = None,
     policy_doc_override: dict[str, Any] | None = None,
+    walk_forward_override: dict[str, Any] | None = None,
 ) -> KpiOosWalkForwardResult:
     """Carga CSV/YAML, corta ventanas OOS, arma KPI v3 por ventana y aplica gate si está habilitado."""
     policy_doc = policy_doc_override or _load_policy_doc(policy_path)
     gate_cfg = policy_doc.get("kpi_oos_gate") or {}
     gate_enabled = bool(gate_cfg.get("enabled", False))
-    wf = gate_cfg.get("walk_forward") or {}
+    wf: dict[str, Any] = dict(gate_cfg.get("walk_forward") or {})
+    if walk_forward_override:
+        wf.update({k: v for k, v in walk_forward_override.items() if v is not None})
 
     meta: dict[str, Any] = load_metadata(metadata_path) if metadata_path is not None else {}
     eq_rows, fieldnames = load_equity_csv(equity_path)
@@ -267,7 +270,9 @@ def run_kpi_oos_walk_forward_from_paths(
             aggregate_rule_applied="none",
             global_failures=[
                 f"insufficient_oos_windows:need_{min_windows}_got_{len(windows)}_"
-                f"(days={len(trading_days)},burn_in={burn_in},oos={oos_len},step={step})"
+                f"(days={len(trading_days)},burn_in={burn_in},oos={oos_len},step={step}). "
+                f"Necesitás al menos burn_in+oos días de equity, o bajá burn_in/oos en "
+                f"kpi_oos_gate.walk_forward (p. ej. --wf-burn-in en el script CLI)."
             ],
             windows=[],
             master_table=[],

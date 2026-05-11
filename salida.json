@@ -1,0 +1,788 @@
+{
+  "spec_id": "rpt_kpi.v1",
+  "report_version": "report_kpis_v3",
+  "run_id": "kpi_golden_60d",
+  "reporting_ccy": "USD",
+  "trading_days_per_year": 252,
+  "ts_start": "2024-01-02",
+  "ts_end": "2024-03-25",
+  "segment": {
+    "total": {
+      "net_return_annualized": 0.357432490809523,
+      "net_return_annualized_na_reason": null,
+      "max_drawdown": -0.03815879394601096,
+      "n_trading_days": 60,
+      "n_return_steps": 59,
+      "sharpe_annualized": 2.299328987809783,
+      "sharpe_na_reason": null,
+      "sortino_annualized": 6.294258836302024,
+      "sortino_na_reason": null,
+      "hit_rate": 0.5,
+      "hit_rate_na_reason": null,
+      "profit_factor": 2.0826978074356535,
+      "profit_factor_na_reason": null,
+      "n_round_trips": 4
+    },
+    "short": {
+      "sharpe_annualized": 1.317343206283423,
+      "sharpe_na_reason": null,
+      "sortino_annualized": 4.119888008596445,
+      "sortino_na_reason": null,
+      "hit_rate": 0.5,
+      "hit_rate_na_reason": null,
+      "profit_factor": 1.8845043310875844,
+      "profit_factor_na_reason": null,
+      "n_round_trips": 2
+    },
+    "long": {
+      "sharpe_annualized": 3.4370913706898225,
+      "sharpe_na_reason": null,
+      "sortino_annualized": 8.674794903016451,
+      "sortino_na_reason": null,
+      "hit_rate": 0.5,
+      "hit_rate_na_reason": null,
+      "profit_factor": 2.4047544573037234,
+      "profit_factor_na_reason": null,
+      "n_round_trips": 2,
+      "mdd_12m_rolling_last": null,
+      "mdd_12m_rolling_na_reason": "insufficient_history",
+      "calmar_12m_last": null,
+      "calmar_12m_na_reason": "insufficient_history",
+      "mdd_12m_rolling_series": [],
+      "turnover_long_monthly": {
+        "2024-01": {
+          "turnover_long_monthly": 0.1323676973768632,
+          "turnover_long_monthly_na_reason": null,
+          "sum_abs_notional_long": 1900.0,
+          "avg_equity_long": 7176.977607272726
+        },
+        "2024-02": {
+          "turnover_long_monthly": 0.07448571387820255,
+          "turnover_long_monthly_na_reason": null,
+          "sum_abs_notional_long": 1080.0,
+          "avg_equity_long": 7249.712352666667
+        },
+        "2024-03": {
+          "turnover_long_monthly": 0.058850417969952086,
+          "turnover_long_monthly_na_reason": null,
+          "sum_abs_notional_long": 870.0,
+          "avg_equity_long": 7391.621249352941
+        }
+      },
+      "turnover_long_monthly_last": 0.058850417969952086,
+      "turnover_long_monthly_last_na_reason": null,
+      "turnover_long_monthly_last_month": "2024-03"
+    }
+  },
+  "costs_by_motor": {
+    "short": 15.0,
+    "long": 7.649999999999999
+  },
+  "costs_na_reason": null,
+  "mandate_drift": {
+    "targets": {
+      "weight_short": 0.3,
+      "weight_long": 0.7,
+      "weight_ar": 0.2,
+      "weight_us": 0.8
+    },
+    "geo_series_na_reason": null,
+    "series": [
+      {
+        "ts": "2024-01-02",
+        "weight_short": 0.3,
+        "weight_long": 0.7,
+        "drift_short_pp": 0.0,
+        "drift_long_pp": 0.0,
+        "weight_ar": 0.2,
+        "weight_us": 0.8,
+        "drift_ar_pp": 0.0,
+        "drift_us_pp": 0.0
+      },
+      {
+        "ts": "2024-01-03",
+        "weight_short": 0.3021999902118156,
+        "weight_long": 0.6981442201320411,
+        "drift_short_pp": 0.21999902118156056,
+        "drift_long_pp": -0.18557798679588178,
+        "weight_ar": 0.20000000003971846,
+        "weight_us": 0.7999999999602815,
+        "drift_ar_pp": 3.97184507505699e-09,
+        "drift_us_pp": -3.971856177287236e-09
+      },
+      {
+        "ts": "2024-01-04",
+        "weight_short": 0.3041219460998218,
+        "weight_long": 0.6952235078233259,
+        "drift_short_pp": 0.4121946099821805,
+        "drift_long_pp": -0.47764921766740853,
+        "weight_ar": 0.19999999998036685,
+        "weight_us": 0.8000000000196331,
+        "drift_ar_pp": -1.9633156211895653e-09,
+        "drift_us_pp": 1.9633072945168806e-09
+      },
+      {
+        "ts": "2024-01-05",
+        "weight_short": 0.30283996522323187,
+        "weight_long": 0.6925893693204834,
+        "drift_short_pp": 0.28399652232318773,
+        "drift_long_pp": -0.7410630679516528,
+        "weight_ar": 0.20000000001939122,
+        "weight_us": 0.7999999999806089,
+        "drift_ar_pp": 1.9391210859254215e-09,
+        "drift_us_pp": -1.9391155348102984e-09
+      },
+      {
+        "ts": "2024-01-08",
+        "weight_short": 0.2977173218763677,
+        "weight_long": 0.6915680722571221,
+        "drift_short_pp": -0.2282678123632309,
+        "drift_long_pp": -0.843192774287782,
+        "weight_ar": 0.19999999999999998,
+        "weight_us": 0.7999999999999999,
+        "drift_ar_pp": -2.7755575615628914e-15,
+        "drift_us_pp": -1.1102230246251565e-14
+      },
+      {
+        "ts": "2024-01-09",
+        "weight_short": 0.2914516481101278,
+        "weight_long": 0.692962387275183,
+        "drift_short_pp": -0.8548351889872186,
+        "drift_long_pp": -0.7037612724816955,
+        "weight_ar": 0.20000000001912932,
+        "weight_us": 0.7999999999808706,
+        "drift_ar_pp": 1.912930924774514e-09,
+        "drift_us_pp": -1.9129475781198835e-09
+      },
+      {
+        "ts": "2024-01-10",
+        "weight_short": 0.2882682530871267,
+        "weight_long": 0.696711564038494,
+        "drift_short_pp": -1.1731746912873264,
+        "drift_long_pp": -0.32884359615059644,
+        "weight_ar": 0.19999999999999998,
+        "weight_us": 0.7999999999999999,
+        "drift_ar_pp": -2.7755575615628914e-15,
+        "drift_us_pp": -1.1102230246251565e-14
+      },
+      {
+        "ts": "2024-01-11",
+        "weight_short": 0.29084673997867505,
+        "weight_long": 0.7018090070716098,
+        "drift_short_pp": -0.9153260021324938,
+        "drift_long_pp": 0.18090070716098028,
+        "weight_ar": 0.20000000003869306,
+        "weight_us": 0.7999999999613068,
+        "drift_ar_pp": 3.8693048765026106e-09,
+        "drift_us_pp": -3.869327080963103e-09
+      },
+      {
+        "ts": "2024-01-12",
+        "weight_short": 0.2984217126324449,
+        "weight_long": 0.7065455091683621,
+        "drift_short_pp": -0.1578287367555109,
+        "drift_long_pp": 0.6545509168362162,
+        "weight_ar": 0.1999999999608656,
+        "weight_us": 0.7999999999412984,
+        "drift_ar_pp": -3.913441792846584e-09,
+        "drift_us_pp": -5.870159913712314e-09
+      },
+      {
+        "ts": "2024-01-15",
+        "weight_short": 0.30694430485233554,
+        "weight_long": 0.7090695047942649,
+        "drift_short_pp": 0.6944304852335548,
+        "drift_long_pp": 0.9069504794264938,
+        "weight_ar": 0.19999999998022883,
+        "weight_us": 0.8000000000197711,
+        "drift_ar_pp": -1.9771184689432175e-09,
+        "drift_us_pp": 1.9771073667129713e-09
+      },
+      {
+        "ts": "2024-01-16",
+        "weight_short": 0.31129711004096344,
+        "weight_long": 0.708103751974945,
+        "drift_short_pp": 1.1297110040963454,
+        "drift_long_pp": 0.8103751974945061,
+        "weight_ar": 0.20000000001988824,
+        "weight_us": 0.7999999999801117,
+        "drift_ar_pp": 1.9888229951803282e-09,
+        "drift_us_pp": -1.988831321853013e-09
+      },
+      {
+        "ts": "2024-01-17",
+        "weight_short": 0.3088051441794844,
+        "weight_long": 0.7035152518041964,
+        "drift_short_pp": 0.8805144179484414,
+        "drift_long_pp": 0.35152518041964287,
+        "weight_ar": 0.20000000001987633,
+        "weight_us": 0.7999999999801236,
+        "drift_ar_pp": 1.9876322809864178e-09,
+        "drift_us_pp": -1.987643383216664e-09
+      },
+      {
+        "ts": "2024-01-18",
+        "weight_short": 0.3013734948852308,
+        "weight_long": 0.6964559301676371,
+        "drift_short_pp": 0.13734948852308082,
+        "drift_long_pp": -0.3544069832362884,
+        "weight_ar": 0.2,
+        "weight_us": 0.8,
+        "drift_ar_pp": 0.0,
+        "drift_us_pp": 0.0
+      },
+      {
+        "ts": "2024-01-19",
+        "weight_short": 0.2938687547645204,
+        "weight_long": 0.689009107096873,
+        "drift_short_pp": -0.6131245235479588,
+        "drift_long_pp": -1.0990892903126936,
+        "weight_ar": 0.20000000003902355,
+        "weight_us": 0.7999999999609765,
+        "drift_ar_pp": 3.90235344038814e-09,
+        "drift_us_pp": -3.9023562159457015e-09
+      },
+      {
+        "ts": "2024-01-22",
+        "weight_short": 0.2903631918156146,
+        "weight_long": 0.6835240854563207,
+        "drift_short_pp": -0.9636808184385393,
+        "drift_long_pp": -1.6475914543679249,
+        "weight_ar": 0.1999999999614574,
+        "weight_us": 0.7999999999421861,
+        "drift_ar_pp": -3.85426135451894e-09,
+        "drift_us_pp": -5.781397582893533e-09
+      },
+      {
+        "ts": "2024-01-23",
+        "weight_short": 0.2917447303013444,
+        "weight_long": 0.6819094080533559,
+        "drift_short_pp": -0.8255269698655587,
+        "drift_long_pp": -1.8090591946644086,
+        "weight_ar": 0.19999999998091328,
+        "weight_us": 0.8000000000190869,
+        "drift_ar_pp": -1.9086732194750766e-09,
+        "drift_us_pp": 1.908684321705323e-09
+      },
+      {
+        "ts": "2024-01-24",
+        "weight_short": 0.29580363730108383,
+        "weight_long": 0.6850751041662937,
+        "drift_short_pp": -0.4196362698916156,
+        "drift_long_pp": -1.4924895833706264,
+        "weight_ar": 0.19999999998098897,
+        "weight_us": 0.7999999999239559,
+        "drift_ar_pp": -1.9011042740046946e-09,
+        "drift_us_pp": -7.604417096018778e-09
+      },
+      {
+        "ts": "2024-01-25",
+        "weight_short": 0.29906379157436597,
+        "weight_long": 0.6926050973785246,
+        "drift_short_pp": -0.0936208425634022,
+        "drift_long_pp": -0.7394902621475352,
+        "weight_ar": 0.20000000003812815,
+        "weight_us": 0.8000000000571923,
+        "drift_ar_pp": 3.812813953452121e-09,
+        "drift_us_pp": 5.719225093514524e-09
+      },
+      {
+        "ts": "2024-01-26",
+        "weight_short": 0.29938323163920305,
+        "weight_long": 0.7027154717444226,
+        "drift_short_pp": -0.061676836079693764,
+        "drift_long_pp": 0.27154717444226595,
+        "weight_ar": 0.1999999999807731,
+        "weight_us": 0.8000000000192269,
+        "drift_ar_pp": -1.9226897851609692e-09,
+        "drift_us_pp": 1.922684234045846e-09
+      },
+      {
+        "ts": "2024-01-29",
+        "weight_short": 0.29760555062834654,
+        "weight_long": 0.7125892186750877,
+        "drift_short_pp": -0.2394449371653451,
+        "drift_long_pp": 1.2589218675087777,
+        "weight_ar": 0.20000000001944626,
+        "weight_us": 0.800000000077785,
+        "drift_ar_pp": 1.9446250165700008e-09,
+        "drift_us_pp": 7.778500066280003e-09
+      },
+      {
+        "ts": "2024-01-30",
+        "weight_short": 0.2965959603546022,
+        "weight_long": 0.7191421321059133,
+        "drift_short_pp": -0.3404039645397816,
+        "drift_long_pp": 1.9142132105913312,
+        "weight_ar": 0.20000000003929783,
+        "weight_us": 0.8000000000589467,
+        "drift_ar_pp": 3.929781500211504e-09,
+        "drift_us_pp": 5.894662535865791e-09
+      },
+      {
+        "ts": "2024-01-31",
+        "weight_short": 0.29847190874189683,
+        "weight_long": 0.7200700451005541,
+        "drift_short_pp": -0.15280912581031592,
+        "drift_long_pp": 2.00700451005541,
+        "weight_ar": 0.20000000001976528,
+        "weight_us": 0.7999999999802346,
+        "drift_ar_pp": 1.9765272751826046e-09,
+        "drift_us_pp": -1.9765411529704124e-09
+      },
+      {
+        "ts": "2024-02-01",
+        "weight_short": 0.3026101166781095,
+        "weight_long": 0.714759021212589,
+        "drift_short_pp": 0.26101166781095086,
+        "drift_long_pp": 1.4759021212589096,
+        "weight_ar": 0.2,
+        "weight_us": 0.8,
+        "drift_ar_pp": 0.0,
+        "drift_us_pp": 0.0
+      },
+      {
+        "ts": "2024-02-02",
+        "weight_short": 0.3058736381157233,
+        "weight_long": 0.7045890628500474,
+        "drift_short_pp": 0.5873638115723334,
+        "drift_long_pp": 0.4589062850047454,
+        "weight_ar": 0.2000000000392288,
+        "weight_us": 0.7999999999607711,
+        "drift_ar_pp": 3.9228786885558975e-09,
+        "drift_us_pp": -3.922895341901267e-09
+      },
+      {
+        "ts": "2024-02-05",
+        "weight_short": 0.30487402986242773,
+        "weight_long": 0.6924691649965433,
+        "drift_short_pp": 0.4874029862427742,
+        "drift_long_pp": -0.7530835003456637,
+        "weight_ar": 0.20000000003878227,
+        "weight_us": 0.8000000000581734,
+        "drift_ar_pp": 3.878225518505474e-09,
+        "drift_us_pp": 5.817335502200649e-09
+      },
+      {
+        "ts": "2024-02-06",
+        "weight_short": 0.29888549105700557,
+        "weight_long": 0.6818711506473891,
+        "drift_short_pp": -0.11145089429944188,
+        "drift_long_pp": -1.8128849352610832,
+        "weight_ar": 0.19999999999999998,
+        "weight_us": 0.7999999999999999,
+        "drift_ar_pp": -2.7755575615628914e-15,
+        "drift_us_pp": -1.1102230246251565e-14
+      },
+      {
+        "ts": "2024-02-07",
+        "weight_short": 0.29094682933192123,
+        "weight_long": 0.6758140181305277,
+        "drift_short_pp": -0.9053170668078758,
+        "drift_long_pp": -2.4185981869472295,
+        "weight_ar": 0.20000000003793747,
+        "weight_us": 0.7999999999620625,
+        "drift_ar_pp": 3.793745873004184e-09,
+        "drift_us_pp": -3.793754199676869e-09
+      },
+      {
+        "ts": "2024-02-08",
+        "weight_short": 0.2858308900675345,
+        "weight_long": 0.6761081743621721,
+        "drift_short_pp": -1.4169109932465507,
+        "drift_long_pp": -2.389182563782788,
+        "weight_ar": 0.19999999996221296,
+        "weight_us": 0.800000000037787,
+        "drift_ar_pp": -3.778705126578075e-09,
+        "drift_us_pp": 3.7786995754629515e-09
+      },
+      {
+        "ts": "2024-02-09",
+        "weight_short": 0.2867425935108682,
+        "weight_long": 0.6829319498810927,
+        "drift_short_pp": -1.3257406489131762,
+        "drift_long_pp": -1.7068050118907219,
+        "weight_ar": 0.19999999998105378,
+        "weight_us": 0.8000000000189461,
+        "drift_ar_pp": -1.8946233470984453e-09,
+        "drift_us_pp": 1.894606693753076e-09
+      },
+      {
+        "ts": "2024-02-12",
+        "weight_short": 0.2933772196717641,
+        "weight_long": 0.6947171792660515,
+        "drift_short_pp": -0.6622780328235878,
+        "drift_long_pp": -0.5282820733948479,
+        "weight_ar": 0.19999999998089196,
+        "weight_us": 0.800000000019108,
+        "drift_ar_pp": -1.910804847682357e-09,
+        "drift_us_pp": 1.9107937454521107e-09
+      },
+      {
+        "ts": "2024-02-13",
+        "weight_short": 0.3020494305246094,
+        "weight_long": 0.7083891680327272,
+        "drift_short_pp": 0.20494305246094302,
+        "drift_long_pp": 0.8389168032727268,
+        "weight_ar": 0.199999999980674,
+        "weight_us": 0.8000000000193259,
+        "drift_ar_pp": -1.9326013012133103e-09,
+        "drift_us_pp": 1.9325874234255025e-09
+      },
+      {
+        "ts": "2024-02-14",
+        "weight_short": 0.3077033682101912,
+        "weight_long": 0.7200709844176123,
+        "drift_short_pp": 0.7703368210191186,
+        "drift_long_pp": 2.0070984417612348,
+        "weight_ar": 0.20000000003905483,
+        "weight_us": 0.7999999999609451,
+        "drift_ar_pp": 3.905481493760021e-09,
+        "drift_us_pp": -3.905498147105391e-09
+      },
+      {
+        "ts": "2024-02-15",
+        "weight_short": 0.30723220275964463,
+        "weight_long": 0.7262294419604458,
+        "drift_short_pp": 0.7232202759644646,
+        "drift_long_pp": 2.6229441960445854,
+        "weight_ar": 0.19999999998035692,
+        "weight_us": 0.8000000000196431,
+        "drift_ar_pp": -1.9643092707966048e-09,
+        "drift_us_pp": 1.9643064952390432e-09
+      },
+      {
+        "ts": "2024-02-16",
+        "weight_short": 0.3017824995907494,
+        "weight_long": 0.7249124703388004,
+        "drift_short_pp": 0.17824995907493868,
+        "drift_long_pp": 2.4912470338800397,
+        "weight_ar": 0.19999999998036871,
+        "weight_us": 0.7999999999214749,
+        "drift_ar_pp": -1.9631296588329405e-09,
+        "drift_us_pp": -7.852518635331762e-09
+      },
+      {
+        "ts": "2024-02-19",
+        "weight_short": 0.29556139012243,
+        "weight_long": 0.7164959608798789,
+        "drift_short_pp": -0.4438609877569999,
+        "drift_long_pp": 1.6495960879878924,
+        "weight_ar": 0.19999999996101375,
+        "weight_us": 0.7999999999415207,
+        "drift_ar_pp": -3.898625866582961e-09,
+        "drift_us_pp": -5.847933248759318e-09
+      },
+      {
+        "ts": "2024-02-20",
+        "weight_short": 0.2923134544994029,
+        "weight_long": 0.7035363928682669,
+        "drift_short_pp": -0.7686545500597108,
+        "drift_long_pp": 0.3536392868266902,
+        "weight_ar": 0.1999999999614576,
+        "weight_us": 0.8000000000385425,
+        "drift_ar_pp": -3.854241925616009e-09,
+        "drift_us_pp": 3.8542502522886934e-09
+      },
+      {
+        "ts": "2024-02-21",
+        "weight_short": 0.29288946444748915,
+        "weight_long": 0.689833964016128,
+        "drift_short_pp": -0.7110535552510844,
+        "drift_long_pp": -1.0166035983872002,
+        "weight_ar": 0.19999999996193257,
+        "weight_us": 0.8000000000380675,
+        "drift_ar_pp": -3.806743809064983e-09,
+        "drift_us_pp": 3.806743809064983e-09
+      },
+      {
+        "ts": "2024-02-22",
+        "weight_short": 0.2952912804112197,
+        "weight_long": 0.6792078131669821,
+        "drift_short_pp": -0.47087195887802746,
+        "drift_long_pp": -2.0792186833017867,
+        "weight_ar": 0.1999999999622971,
+        "weight_us": 0.8000000000377028,
+        "drift_ar_pp": -3.7702924116089775e-09,
+        "drift_us_pp": 3.770272982706047e-09
+      },
+      {
+        "ts": "2024-02-23",
+        "weight_short": 0.2965351501523864,
+        "weight_long": 0.6744731732144535,
+        "drift_short_pp": -0.34648498476135825,
+        "drift_long_pp": -2.552682678554641,
+        "weight_ar": 0.1999999999624466,
+        "weight_us": 0.8000000000375534,
+        "drift_ar_pp": -3.755340483024838e-09,
+        "drift_us_pp": 3.755340483024838e-09
+      },
+      {
+        "ts": "2024-02-26",
+        "weight_short": 0.29515862648787966,
+        "weight_long": 0.6768274197523055,
+        "drift_short_pp": -0.48413735121203283,
+        "drift_long_pp": -2.317258024769442,
+        "weight_ar": 0.2,
+        "weight_us": 0.8,
+        "drift_ar_pp": 0.0,
+        "drift_us_pp": 0.0
+      },
+      {
+        "ts": "2024-02-27",
+        "weight_short": 0.29257485400948857,
+        "weight_long": 0.6856240445278731,
+        "drift_short_pp": -0.7425145990511417,
+        "drift_long_pp": -1.437595547212689,
+        "weight_ar": 0.20000000003797974,
+        "weight_us": 0.7999999999620202,
+        "drift_ar_pp": 3.797973047170444e-09,
+        "drift_us_pp": -3.7979841494006905e-09
+      },
+      {
+        "ts": "2024-02-28",
+        "weight_short": 0.2918661121377936,
+        "weight_long": 0.6984955750389134,
+        "drift_short_pp": -0.8133887862206368,
+        "drift_long_pp": -0.15044249610866034,
+        "weight_ar": 0.20000000003841298,
+        "weight_us": 0.799999999961587,
+        "drift_ar_pp": 3.8412967251488794e-09,
+        "drift_us_pp": -3.841305051821564e-09
+      },
+      {
+        "ts": "2024-02-29",
+        "weight_short": 0.2950262263734307,
+        "weight_long": 0.7118751519006584,
+        "drift_short_pp": -0.4973773626569311,
+        "drift_long_pp": 1.1875151900658465,
+        "weight_ar": 0.19999999998059334,
+        "weight_us": 0.8000000000194067,
+        "drift_ar_pp": -1.940667071487212e-09,
+        "drift_us_pp": 1.9406698470447736e-09
+      },
+      {
+        "ts": "2024-03-01",
+        "weight_short": 0.3010687304445039,
+        "weight_long": 0.7219489948239715,
+        "drift_short_pp": 0.10687304445038959,
+        "drift_long_pp": 2.19489948239715,
+        "weight_ar": 0.19999999996095677,
+        "weight_us": 0.7999999999414352,
+        "drift_ar_pp": -3.9043240862568496e-09,
+        "drift_us_pp": -5.856481966048932e-09
+      },
+      {
+        "ts": "2024-03-04",
+        "weight_short": 0.30628875023847385,
+        "weight_long": 0.7258487758240972,
+        "drift_short_pp": 0.6288750238473861,
+        "drift_long_pp": 2.584877582409728,
+        "weight_ar": 0.2,
+        "weight_us": 0.8,
+        "drift_ar_pp": 0.0,
+        "drift_us_pp": 0.0
+      },
+      {
+        "ts": "2024-03-05",
+        "weight_short": 0.30663005377941416,
+        "weight_long": 0.7226247855349558,
+        "drift_short_pp": 0.6630053779414169,
+        "drift_long_pp": 2.262478553495584,
+        "weight_ar": 0.19999999998062737,
+        "weight_us": 0.8000000000193725,
+        "drift_ar_pp": -1.937264237916736e-09,
+        "drift_us_pp": 1.937250360128928e-09
+      },
+      {
+        "ts": "2024-03-06",
+        "weight_short": 0.3008929949678686,
+        "weight_long": 0.7135304199668405,
+        "drift_short_pp": 0.08929949678685989,
+        "drift_long_pp": 1.3530419966840568,
+        "weight_ar": 0.2000000000383041,
+        "weight_us": 0.7999999999616959,
+        "drift_ar_pp": 3.830408212834868e-09,
+        "drift_us_pp": -3.830413763949991e-09
+      },
+      {
+        "ts": "2024-03-07",
+        "weight_short": 0.2920884326856709,
+        "weight_long": 0.701491514699204,
+        "drift_short_pp": -0.7911567314329071,
+        "drift_long_pp": 0.1491514699204055,
+        "weight_ar": 0.20000000003783205,
+        "weight_us": 0.8000000000567481,
+        "drift_ar_pp": 3.783204305385368e-09,
+        "drift_us_pp": 5.674805070299271e-09
+      },
+      {
+        "ts": "2024-03-08",
+        "weight_short": 0.2853358068425319,
+        "weight_long": 0.6900630944887254,
+        "drift_short_pp": -1.4664193157468086,
+        "drift_long_pp": -0.9936905511274574,
+        "weight_ar": 0.2,
+        "weight_us": 0.8,
+        "drift_ar_pp": 0.0,
+        "drift_us_pp": 0.0
+      },
+      {
+        "ts": "2024-03-11",
+        "weight_short": 0.2843181302529493,
+        "weight_long": 0.682349593766289,
+        "drift_short_pp": -1.5681869747050714,
+        "drift_long_pp": -1.7650406233710947,
+        "weight_ar": 0.20000000001866056,
+        "weight_us": 0.8000000000746422,
+        "drift_ar_pp": 1.8660545331172784e-09,
+        "drift_us_pp": 7.464218132469114e-09
+      },
+      {
+        "ts": "2024-03-12",
+        "weight_short": 0.2892373655799523,
+        "weight_long": 0.6802263038098731,
+        "drift_short_pp": -1.0762634420047712,
+        "drift_long_pp": -1.977369619012681,
+        "weight_ar": 0.1999999999812874,
+        "weight_us": 0.8000000000187125,
+        "drift_ar_pp": -1.8712614791027704e-09,
+        "drift_us_pp": 1.8712476013149626e-09
+      },
+      {
+        "ts": "2024-03-13",
+        "weight_short": 0.2969436150064228,
+        "weight_long": 0.6839660315837964,
+        "drift_short_pp": -0.3056384993577188,
+        "drift_long_pp": -1.6033968416203526,
+        "weight_ar": 0.19999999998112758,
+        "weight_us": 0.8000000000188726,
+        "drift_ar_pp": -1.8872431395422495e-09,
+        "drift_us_pp": 1.8872570173300574e-09
+      },
+      {
+        "ts": "2024-03-14",
+        "weight_short": 0.302796388966607,
+        "weight_long": 0.6922519262114806,
+        "drift_short_pp": 0.27963889666069996,
+        "drift_long_pp": -0.7748073788519383,
+        "weight_ar": 0.19999999996182452,
+        "weight_us": 0.7999999999427367,
+        "drift_ar_pp": -3.817549054652147e-09,
+        "drift_us_pp": -5.726330520872125e-09
+      },
+      {
+        "ts": "2024-03-15",
+        "weight_short": 0.30368538788146127,
+        "weight_long": 0.7025574368960856,
+        "drift_short_pp": 0.3685387881461277,
+        "drift_long_pp": 0.2557436896085674,
+        "weight_ar": 0.20000000001928664,
+        "weight_us": 0.7999999999807134,
+        "drift_ar_pp": 1.9286627850334526e-09,
+        "drift_us_pp": -1.9286683361485757e-09
+      },
+      {
+        "ts": "2024-03-18",
+        "weight_short": 0.3002453289660975,
+        "weight_long": 0.7118660209366141,
+        "drift_short_pp": 0.02453289660975244,
+        "drift_long_pp": 1.1866020936614152,
+        "weight_ar": 0.2000000000388018,
+        "weight_us": 0.7999999999611982,
+        "drift_ar_pp": 3.880179511028814e-09,
+        "drift_us_pp": -3.880185062143937e-09
+      },
+      {
+        "ts": "2024-03-19",
+        "weight_short": 0.29596250704152666,
+        "weight_long": 0.7175871806115299,
+        "drift_short_pp": -0.4037492958473332,
+        "drift_long_pp": 1.7587180611529973,
+        "weight_ar": 0.19999999998061072,
+        "weight_us": 0.8000000000193893,
+        "drift_ar_pp": -1.9389295724536737e-09,
+        "drift_us_pp": 1.938926796896112e-09
+      },
+      {
+        "ts": "2024-03-20",
+        "weight_short": 0.2939971316257236,
+        "weight_long": 0.718365584497318,
+        "drift_short_pp": -0.6002868374276382,
+        "drift_long_pp": 1.8365584497318066,
+        "weight_ar": 0.2000000000192528,
+        "weight_us": 0.7999999999807471,
+        "drift_ar_pp": 1.9252793803659074e-09,
+        "drift_us_pp": -1.9252932581537152e-09
+      },
+      {
+        "ts": "2024-03-21",
+        "weight_short": 0.2948566952220512,
+        "weight_long": 0.7144520240833018,
+        "drift_short_pp": -0.5143304777948776,
+        "drift_long_pp": 1.4452024083301818,
+        "weight_ar": 0.19999999999999996,
+        "weight_us": 0.7999999999999998,
+        "drift_ar_pp": -5.551115123125783e-15,
+        "drift_us_pp": -2.220446049250313e-14
+      },
+      {
+        "ts": "2024-03-22",
+        "weight_short": 0.29644993038517437,
+        "weight_long": 0.7074919929196886,
+        "drift_short_pp": -0.3550069614825624,
+        "drift_long_pp": 0.7491992919688606,
+        "weight_ar": 0.20000000003759813,
+        "weight_us": 0.7999999999624019,
+        "drift_ar_pp": 3.759811906256516e-09,
+        "drift_us_pp": -3.759814681814078e-09
+      },
+      {
+        "ts": "2024-03-25",
+        "weight_short": 0.2960215262466862,
+        "weight_long": 0.6998657278247824,
+        "drift_short_pp": -0.39784737533137826,
+        "drift_long_pp": -0.013427217521755352,
+        "weight_ar": 0.20000000003723806,
+        "weight_us": 0.800000000055857,
+        "drift_ar_pp": 3.7238045980103607e-09,
+        "drift_us_pp": 5.585698570342856e-09
+      }
+    ],
+    "snapshot_last_ts": {
+      "ts": "2024-03-25",
+      "weight_short": 0.2960215262466862,
+      "weight_long": 0.6998657278247824,
+      "drift_short_pp": -0.39784737533137826,
+      "drift_long_pp": -0.013427217521755352,
+      "weight_ar": 0.20000000003723806,
+      "weight_us": 0.800000000055857,
+      "drift_ar_pp": 3.7238045980103607e-09,
+      "drift_us_pp": 5.585698570342856e-09,
+      "geo_na_reason": null,
+      "bands_half_width_pp": {
+        "short": 5.0,
+        "long": 5.0,
+        "AR": 3.0,
+        "US": 3.0
+      },
+      "outside_band_axes": null
+    }
+  },
+  "alpha_vs_benchmark": {
+    "total": {
+      "alpha_simple_return": 0.012408829262520404,
+      "alpha_na_reason": null,
+      "n_obs": 59,
+      "bot_simple_return_aligned": 0.07416975829999939,
+      "benchmark_simple_return_aligned": 0.061760929037478984
+    },
+    "long": {
+      "alpha_simple_return": 0.012202784819664414,
+      "alpha_na_reason": null,
+      "n_obs": 59,
+      "bot_simple_return_aligned": 0.0739637138571434,
+      "benchmark_simple_return_aligned": 0.061760929037478984
+    }
+  }
+}
