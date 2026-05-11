@@ -4,7 +4,7 @@
 
 Bot de trading/inversión en **Python**, perfil **moderado**, split **30/70** (corto/largo) y **20/80** (AR/US), **paper trading** con datos reales, riesgo **determinístico** antes que heurísticas opacas o LLM en la ejecución.
 
-Problema que atacamos: el dueño del repo no quiere depender de trading manual diario (tiempo + sesgo emocional), pero sí construir un proceso con probabilidad de retorno sostenible. El enfoque es **proceso primero, dinero después**: metodología medible en paper, luego ramp-up controlado a capital real.
+Problema que atacamos: no quiero depender de trading manual diario (tiempo + sesgo emocional), pero sí construir un proceso con probabilidad de retorno sostenible. El enfoque es **proceso primero, dinero después**: metodología medible en paper, luego ramp-up controlado a capital real.
 
 Plan maestro: `.cursor/plans/bot_trading_paper-first_155d6f04.plan.md`.
 
@@ -80,6 +80,21 @@ pip install -r requirements.txt
 python -m pytest tests/ -v
 python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
 ```
+
+## Modelo de branches (paper-live)
+
+El proyecto usa dos ramas con responsabilidades distintas:
+
+| Rama | Propósito | Qué se commitea |
+|------|-----------|-----------------|
+| `main` | Evolución de código, PRs, CI | Solo código y docs |
+| `paper-live-data` | Operación diaria automatizada | Código + `data/market.db` (via Git LFS) |
+
+- El **workflow** (`paper_live_daily.yml`) vive en `main` (GitHub lee schedule/dispatch del default branch), pero hace `checkout` de `paper-live-data` para ejecutar.
+- **Sincronización de código**: `git checkout paper-live-data; git merge main` trae cambios de código sin perder la DB.
+- **Git LFS**: `data/*.db` en `paper-live-data` se trackea con LFS (`.gitattributes`); en `main` la DB está gitignoreada.
+- **Notificación de fallos**: el workflow crea un issue GitHub automáticamente si algún step falla (detección temprana, evita violar F3).
+- Decisión registrada en `decisiones-tecnicas.md` (**ADR-040**).
 
 ## Convenciones
 

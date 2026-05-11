@@ -112,12 +112,16 @@ La transición a real está planteada como gate, no como salto de fe:
 - **Paper-live daily orchestrator**:
   - `scripts/run_paper_live.py` — CLI que ejecuta el pipeline corto día a día contra OHLCV real en SQLite, con catch-up automático y política F3 (gap > 3 días hábiles → exit(2), intervención manual).
   - `data/storage.py` — `get_last_snapshot_day(mode)` para detectar último día procesado.
-  - `.github/workflows/paper_live_daily.yml` — cron Lun–Vie 10:00 UTC (post-cierre US) + `workflow_dispatch`; opera sobre branch `paper-live-data` y commitea la DB tras cada corrida.
+  - `.github/workflows/paper_live_daily.yml` — cron Lun–Vie 10:00 UTC (post-cierre US) + `workflow_dispatch`; opera sobre branch `paper-live-data` y commitea la DB tras cada corrida. Incluye step de **fetch OHLCV** previo al pipeline (`fetch_daily.py --lookback 5`) y **notificación automática** (issue GitHub) ante fallos.
+  - **Branch `paper-live-data`**: rama dedicada para datos operativos diarios (DB + fills + snapshots); `main` se mantiene limpio para evolución de código. Git LFS para `data/*.db` evita inflación del repo por commits binarios diarios.
   - Tests en `tests/test_storage.py` y `tests/test_run_paper_live.py` (gap detection, F3 exit code, single/multi-day integration, idempotencia).
+  - Decisión registrada en `decisiones-tecnicas.md` (**ADR-040**).
 
 ### Pendiente principal
 
+- **Activar paper-live real**: seed DB con historial (120 días), push `paper-live-data`, validar workflow con dispatch manual.
 - Integración completa del `long_term_monthly_runner` en `event_engine` operativo diario.
+- Definir umbrales concretos del gate (`kpi_oos_gate.enabled: false` → fijar antes del primer resultado OOS).
 - Completar restantes del informe KPI respecto del spec (p. ej. cobertura de turnover por otros segmentos además de largo) — ver `docs/kpi_report_spec.v1.md`.
 - Conectar fuentes de datos reales (feeds, APIs broker) con `PaperBrokerSim` como adaptador, manteniendo interfaces estables.
 
@@ -139,7 +143,7 @@ La transición a real está planteada como gate, no como salto de fe:
 - `kpi_oos_gate` + `reporting/kpi_walk_forward` + `scripts/report_kpis_walk_forward.py`: varias ventanas OOS sobre la misma serie, mismo informe v3 por tramo, tabla maestra y gate reproducible opcional (**ADR-034**).
 - `tests/fixtures/kpi_golden` + `tests/test_kpi_regression_golden.py`: regresión con dataset fijo de 60 días y JSON golden en CI (**ADR-035**).
 - `scripts/run_paper_live.py`: orquestador diario paper-live del bloque corto — gap detection (F3), catch-up idempotente, replay de ledger, persistencia de fills/snapshots bajo mode `paper_live`.
-- `.github/workflows/paper_live_daily.yml`: cron + dispatch sobre branch `paper-live-data`.
+- `.github/workflows/paper_live_daily.yml`: cron + dispatch sobre branch `paper-live-data`; fetch OHLCV + pipeline + commit DB + issue on failure.
 - `event_engine`: orquestador diario con soporte para `execution_mode` (auto/semi_auto) y bypass de stop loss en semi_auto.
 - Flujo completo: Data -> Engines -> `risk_guardrails` -> Allocator -> `paper_broker_sim` -> `ledger`; ambos motores convergen en el mismo núcleo para mantener consistencia y auditoría.
 

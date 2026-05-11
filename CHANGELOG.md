@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- **Paper-live workflow hardening** (`.github/workflows/paper_live_daily.yml`): added
+  `Fetch latest OHLCV` step before pipeline execution (`fetch_daily.py --lookback 5`),
+  switched `git add` to `git add -f` for gitignore robustness, and added `Notify on failure`
+  step that creates a GitHub issue automatically when the daily run fails.
+  ([`9546f2b`] `ci(paper-live): fetch OHLCV before daily run and alert failures`)
+
+- **Git LFS for paper-live DB** (`.gitattributes`, branch `paper-live-data`): configured
+  Git LFS tracking for `data/*.db` to prevent binary bloat from daily SQLite commits.
+  `.gitignore` updated with `!data/market.db` negation on `paper-live-data` branch only.
+
 ### Fixed
 - **Short bucket monthly drawdown** (`core_sim/ledger.py`): switched DD calculation
   from MV-only to bucket equity (`short_cash + MV_short`). Closing a profitable

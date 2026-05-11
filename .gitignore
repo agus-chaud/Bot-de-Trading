@@ -46,6 +46,7 @@ secrets/
 
 # Local market DB + SQLite sidecars (regenerable con fetch / pipeline)
 data/*.db
+!data/market.db
 data/*.db-wal
 data/*.db-shm
 

@@ -845,6 +845,39 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-040 — Activación paper-live: branch dedicada, Git LFS y workflow robusto
+
+- **Fecha**: 2026-05-11
+- **Estado**: aceptada
+- **Contexto**: El orquestador paper-live (`scripts/run_paper_live.py`, ADR-039) ya existía pero no podía funcionar en producción real por tres gaps: (1) el workflow no descargaba OHLCV antes de ejecutar el pipeline; (2) `git add data/market.db` era ignorado por `.gitignore`; (3) no había notificación ante fallos, lo que dejaba ventana para violar la política F3 (gap > 3 días hábiles) sin detección.
+- **Decisión**:
+  - **Branch `paper-live-data`** separada de `main`: código operativo + DB persistida. `main` evoluciona limpio (solo código); `paper-live-data` acumula artefactos operativos diarios. Sincronización de código vía `git merge main` desde `paper-live-data`.
+  - **Git LFS** para `data/*.db` en `paper-live-data` (`.gitattributes` con filtro LFS): evita que commits diarios de binario SQLite inflen el repo (~250 commits/año × tamaño creciente de DB).
+  - **`.gitignore` con negación** `!data/market.db` solo en `paper-live-data`: permite tracking de la DB sin afectar `main`.
+  - **Workflow** (`.github/workflows/paper_live_daily.yml` en `main`):
+    - Step `Fetch latest OHLCV` (`fetch_daily.py --lookback 5`) antes de `run_paper_live.py`, con env opcionales `IOL_USER`/`IOL_PASS` desde secrets.
+    - `git add -f data/market.db` en lugar de `git add` para robustez ante gitignore.
+    - Step `Notify on failure` (`actions/github-script@v7`): crea issue GitHub automático al fallar, con link a logs del run.
+  - **Seed inicial local**: `fetch_daily.py --lookback 120` para poblar historial mínimo antes del primer cron.
+- **Por qué**:
+  - Sin fetch en el workflow, la DB no tiene barras del día y `run_paper_live.py` falla con "No OHLCV bars found".
+  - Sin LFS, el repo crece ~1 GB/año en commits binarios — impacta clones, CI y mantenimiento.
+  - Sin notificación, un fallo silencioso de 3+ días activa F3 y requiere intervención manual sin aviso previo.
+  - Separar branches evita contaminar `main` con ~250 commits/año de DB binaria y preserva historial limpio para PRs y revisiones de código.
+- **Consecuencias**:
+  - GitHub LFS tiene 1 GB storage + 1 GB bandwidth gratis; suficiente para paper trading.
+  - Para usar IOL directo (AR), configurar `IOL_USER`/`IOL_PASS` en GitHub secrets; sin ellos, fallback Byma funciona.
+  - Cambios de código en `main` deben mergearse a `paper-live-data` para que el cron los use.
+  - El workflow YAML vive en `main` (GitHub lee schedule/dispatch del default branch); el checkout ejecuta contra `paper-live-data`.
+- **Alternativas consideradas**:
+  - **Todo en `main`**: descartada por ruido de commits diarios de DB en historial de código.
+  - **Artifact storage externo (S3/GCS)**: descartada por complejidad adicional sin beneficio claro para paper trading.
+  - **`git add -f` sin LFS**: descartada por inflación de repo a mediano plazo.
+- **Archivos**: `.github/workflows/paper_live_daily.yml`, `.gitattributes` (nuevo en `paper-live-data`), `.gitignore` (modificado en `paper-live-data`)
+- **Commits**: `9546f2b` (workflow en `main`)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
