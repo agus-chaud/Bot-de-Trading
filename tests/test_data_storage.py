@@ -6,6 +6,7 @@ from datetime import date
 
 import pytest
 
+from core_sim.ledger import PortfolioLedger
 from data.schema import CorporateActionRow, OHLCVRow
 from data.storage import KillSwitchState, MarketDB
 
@@ -183,3 +184,236 @@ class TestKillSwitch:
         short_state = db.get_kill_switch_state("short")
         assert long_state.active is False
         assert short_state.active is True
+
+
+# ---------------------------------------------------------------------------
+# Helpers for paper persistence tests
+# ---------------------------------------------------------------------------
+
+def _fill(
+    symbol: str = "SPY",
+    market: str = "US",
+    side: str = "BUY",
+    qty: float = 10.0,
+    price: float = 100.0,
+    bucket: str = "short",
+    fee: float = 0.5,
+    slippage: float = 0.42,
+) -> dict:
+    return {
+        "symbol": symbol,
+        "side": side,
+        "qty": qty,
+        "price": price,
+        "market": market,
+        "bucket": bucket,
+        "fee": fee,
+        "cost_breakdown": {
+            "slippage": slippage,
+            "commission": fee - slippage,
+            "spread": 0.0,
+            "total": fee,
+            "notional": qty * price,
+            "market": market,
+        },
+    }
+
+
+def _snapshot(
+    equity_total: float = 1000.0,
+    equity_short: float = 200.0,
+    equity_long: float = 800.0,
+    cash: float = 500.0,
+) -> dict:
+    return {
+        "equity_total": equity_total,
+        "equity_short": equity_short,
+        "equity_long": equity_long,
+        "cash": cash,
+        "realized_pnl_total": 0.0,
+        "unrealized_pnl_total": 0.0,
+        "costs_day": 1.0,
+        "mv_us": 400.0,
+        "mv_ar": 100.0,
+        "positions": {},
+        "short_bucket": {
+            "monthly_peak": 200.0,
+            "monthly_drawdown": -0.01,
+            "daily_return": 0.005,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# REQ-1 / REQ-2: Table creation
+# ---------------------------------------------------------------------------
+
+class TestPaperTablesCreation:
+    def test_paper_fills_table_created_on_fresh_db(self, db):
+        cursor = db._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='paper_fills'"
+        )
+        assert cursor.fetchone() is not None
+
+    def test_paper_snapshots_table_created_on_fresh_db(self, db):
+        cursor = db._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='paper_snapshots'"
+        )
+        assert cursor.fetchone() is not None
+
+    def test_tables_are_created_idempotently_on_existing_db(self, tmp_path):
+        path = str(tmp_path / "idempotent.db")
+        db1 = MarketDB(path)
+        db1._conn.close()
+        db2 = MarketDB(path)
+        cursor = db2._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='paper_fills'"
+        )
+        assert cursor.fetchone() is not None
+
+
+# ---------------------------------------------------------------------------
+# REQ-3: persist_fills
+# ---------------------------------------------------------------------------
+
+class TestPersistFills:
+    def test_persists_two_fills_with_correct_venue_mapping(self, db):
+        fills = [_fill(symbol="SPY", market="US"), _fill(symbol="GGAL", market="AR")]
+        db.persist_fills("run-1", "paper_live", date(2026, 1, 2), fills)
+        cursor = db._conn.execute("SELECT symbol, venue FROM paper_fills ORDER BY symbol")
+        rows = cursor.fetchall()
+        assert len(rows) == 2
+        by_sym = {r["symbol"]: r["venue"] for r in rows}
+        assert by_sym["SPY"] == "XNYS"
+        assert by_sym["GGAL"] == "XBUE"
+
+    def test_us_market_maps_to_xnys(self, db):
+        db.persist_fills("run-1", "paper_live", date(2026, 1, 2), [_fill(market="US")])
+        cursor = db._conn.execute("SELECT venue FROM paper_fills")
+        assert cursor.fetchone()["venue"] == "XNYS"
+
+    def test_ar_market_maps_to_xbue(self, db):
+        db.persist_fills("run-1", "paper_live", date(2026, 1, 2), [_fill(market="AR")])
+        cursor = db._conn.execute("SELECT venue FROM paper_fills")
+        assert cursor.fetchone()["venue"] == "XBUE"
+
+    def test_slippage_extracted_from_cost_breakdown(self, db):
+        db.persist_fills("run-1", "paper_live", date(2026, 1, 2), [_fill(slippage=0.42)])
+        cursor = db._conn.execute("SELECT slippage FROM paper_fills")
+        assert cursor.fetchone()["slippage"] == pytest.approx(0.42)
+
+    def test_empty_fills_list_inserts_nothing(self, db):
+        db.persist_fills("run-1", "paper_live", date(2026, 1, 2), [])
+        cursor = db._conn.execute("SELECT COUNT(*) FROM paper_fills")
+        assert cursor.fetchone()[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# REQ-4: persist_snapshot
+# ---------------------------------------------------------------------------
+
+class TestPersistSnapshot:
+    _D = date(2026, 1, 2)
+
+    def test_first_snapshot_inserts_one_row(self, db):
+        db.persist_snapshot("paper_live", self._D, _snapshot(), short_cash=100.0)
+        cursor = db._conn.execute("SELECT COUNT(*) FROM paper_snapshots")
+        assert cursor.fetchone()[0] == 1
+
+    def test_second_call_same_day_replaces_not_duplicates(self, db):
+        db.persist_snapshot("paper_live", self._D, _snapshot(equity_total=1000.0), short_cash=100.0)
+        db.persist_snapshot("paper_live", self._D, _snapshot(equity_total=1050.0), short_cash=120.0)
+        cursor = db._conn.execute("SELECT COUNT(*), equity_total FROM paper_snapshots")
+        row = cursor.fetchone()
+        assert row[0] == 1
+        assert row["equity_total"] == pytest.approx(1050.0)
+
+
+# ---------------------------------------------------------------------------
+# REQ-5: get_paper_fills
+# ---------------------------------------------------------------------------
+
+class TestGetPaperFills:
+    def test_returns_fills_ordered_by_trading_day_then_id(self, db):
+        db.persist_fills("run-1", "paper_live", date(2026, 1, 3), [_fill(symbol="B")])
+        db.persist_fills("run-1", "paper_live", date(2026, 1, 2), [_fill(symbol="A")])
+        rows = db.get_paper_fills(mode="paper_live")
+        assert [r["symbol"] for r in rows] == ["A", "B"]
+
+    def test_returns_empty_list_when_no_fills(self, db):
+        assert db.get_paper_fills(mode="paper_live") == []
+
+    def test_filters_by_mode(self, db):
+        db.persist_fills("run-1", "paper_live", date(2026, 1, 2), [_fill(symbol="SPY")])
+        db.persist_fills("run-2", "backtest", date(2026, 1, 2), [_fill(symbol="QQQ")])
+        rows = db.get_paper_fills(mode="paper_live")
+        assert all(r["mode"] == "paper_live" for r in rows)
+        assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# REQ-6: replay_ledger_from_fills
+# ---------------------------------------------------------------------------
+
+class TestReplayLedgerFromFills:
+    def test_replay_produces_same_state_as_live_run(self, db):
+        live_ledger = PortfolioLedger(starting_cash=1000.0)
+        fills_d1 = [
+            {"symbol": "SPY", "side": "BUY", "qty": 5.0, "price": 100.0,
+             "market": "US", "bucket": "short", "fee": 0.5},
+        ]
+        fills_d2 = [
+            {"symbol": "SPY", "side": "SELL", "qty": 5.0, "price": 105.0,
+             "market": "US", "bucket": "short", "fee": 0.5},
+        ]
+        live_ledger.apply_fills(date(2026, 1, 2), fills_d1)
+        live_ledger.apply_fills(date(2026, 1, 3), fills_d2)
+
+        db_fills_d1 = [_fill(symbol="SPY", market="US", side="BUY", qty=5.0,
+                             price=100.0, fee=0.5, slippage=0.0)]
+        db_fills_d2 = [_fill(symbol="SPY", market="US", side="SELL", qty=5.0,
+                             price=105.0, bucket="short", fee=0.5, slippage=0.0)]
+        db.persist_fills("run-1", "paper_live", date(2026, 1, 2), db_fills_d1)
+        db.persist_fills("run-1", "paper_live", date(2026, 1, 3), db_fills_d2)
+
+        replayed = db.replay_ledger_from_fills(mode="paper_live", starting_cash=1000.0)
+
+        assert replayed.cash == pytest.approx(live_ledger.cash)
+        assert replayed.realized_pnl_total == pytest.approx(live_ledger.realized_pnl_total)
+        assert set(replayed.positions.keys()) == set(live_ledger.positions.keys())
+
+    def test_empty_fills_returns_fresh_ledger(self, db):
+        ledger = db.replay_ledger_from_fills(mode="paper_live", starting_cash=1000.0)
+        assert ledger.cash == pytest.approx(1000.0)
+        assert ledger.positions == {}
+
+
+# ---------------------------------------------------------------------------
+# REQ-7: long_term_monthly_runner db param
+# ---------------------------------------------------------------------------
+
+class TestLongTermRunnerDbParam:
+    def test_create_backtester_without_db_param_still_works(self, tmp_path):
+        from pathlib import Path
+        from unittest.mock import MagicMock
+        import yaml
+        from core_sim.long_term_monthly_runner import create_long_term_monthly_backtester
+        from core_sim.ledger import PortfolioLedger
+        from core_sim.paper_broker_sim import PaperBrokerSim
+        from core_sim.cost_model import CostModel, MarketCostConfig, SlippageMode
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with (repo_root / "config" / "policy.v1.yaml").open(encoding="utf-8") as f:
+            policy_doc = yaml.safe_load(f)
+
+        ledger = PortfolioLedger(starting_cash=200_000.0)
+        cost_model = CostModel(market_configs={
+            "US": MarketCostConfig(
+                commission_bps_per_side=1.0,
+                slippage_bps=2.0,
+                slippage_mode=SlippageMode.FIXED_BPS,
+            )
+        })
+        broker = PaperBrokerSim(ledger=ledger, cost_model=cost_model)
+        backtester = create_long_term_monthly_backtester(policy_doc, repo_root, ledger, broker)
+        assert backtester is not None
