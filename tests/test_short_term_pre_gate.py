@@ -67,12 +67,19 @@ def test_pre_gate_passes_on_synthetic_walk_forward():
     for w in report.windows:
         assert w.passed is True
         assert w.metrics["n_fills"] >= 0
+        assert "entries_blocked_by_rsi" in w.metrics
+        assert "exits_by_rsi" in w.metrics
+        assert "exits_by_stop_loss" in w.metrics
+        assert w.metrics["entries_blocked_by_rsi"] >= 0
+        assert w.metrics["exits_by_rsi"] >= 0
+        assert w.metrics["exits_by_stop_loss"] >= 0
 
 
 def test_pre_gate_fails_when_fee_threshold_impossibly_low():
     with (REPO_ROOT / "config" / "policy.v1.yaml").open(encoding="utf-8") as f:
         policy = yaml.safe_load(f)
     policy = deepcopy(policy)
+    policy["short_term_engine"]["rsi_overbought_entry"] = 100.0
     policy["short_term_pre_gate"]["thresholds"]["max_fee_pct_of_initial_per_window"] = 1e-9
 
     days = _weekdays_from(date(2026, 2, 2), 90)

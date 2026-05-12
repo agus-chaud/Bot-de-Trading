@@ -27,6 +27,7 @@ from .short_term_engine import (
     RiskCaps,
     ShortEngineConfig,
     build_orders_intent,
+    compute_rsi,
     compute_signal_candidates,
     rank_top_k_by_market,
 )
@@ -148,6 +149,10 @@ def build_market_snapshot_rows(
         if vol_20d is None:
             skipped.append({"symbol": sym, "reason": "insufficient_returns_for_vol"})
             continue
+        rsi = compute_rsi(combined, lookback=ste_cfg.rsi_lookback)
+        if rsi is None:
+            skipped.append({"symbol": sym, "reason": "insufficient_history_for_rsi"})
+            continue
 
         session_valid = (
             bool(market_open.get("is_us_session")) if market == "US" else bool(market_open.get("is_ar_business_day"))
@@ -161,6 +166,7 @@ def build_market_snapshot_rows(
                 "close_n_days_ago": float(close_n_days_ago),
                 "volume_percentile": float(vol_pct.get(sym, 0.0)),
                 "vol_20d": float(vol_20d),
+                "rsi": float(rsi),
                 "session_valid": session_valid,
                 "sector": sector_map.get(sym, "UNKNOWN"),
             }
@@ -222,6 +228,7 @@ def _data_quality_broken(
         "invalid_price",
         "insufficient_history",
         "insufficient_returns_for_vol",
+        "insufficient_history_for_rsi",
     }
     return any(s.get("reason") in bad for s in (skipped_whitelist or []))
 
@@ -280,6 +287,9 @@ def create_short_term_pipeline_handlers(
         volatility_20d_max=float(ste_raw["volatility_20d_max"]),
         top_k_per_market=int(ste_raw["top_k_per_market"]),
         risk_budget_trade_pct=float(ste_raw["risk_budget_trade_pct"]),
+        rsi_lookback=int(ste_raw.get("rsi_lookback", 14)),
+        rsi_overbought_entry=float(ste_raw.get("rsi_overbought_entry", 70.0)),
+        rsi_exit_threshold=float(ste_raw.get("rsi_exit_threshold", 45.0)),
         allow_leverage=bool(ste_raw.get("allow_leverage", False)),
     )
     risk_cfg = policy_doc["risk"]
@@ -403,6 +413,7 @@ def create_short_term_pipeline_handlers(
             "selected": selected,
             "skipped_whitelist_or_data": skipped_whitelist,
             "skipped_signal": skipped_signal,
+            "rsi_by_symbol": {str(row["symbol"]): float(row["rsi"]) for row in rows if "rsi" in row},
             "metrics": {
                 "whitelist_size": len(merged),
                 "snapshot_rows": len(rows),
@@ -422,6 +433,7 @@ def create_short_term_pipeline_handlers(
         flags = signals.get("risk_flags") or {}
 
         selected = signals.get("selected") or []
+        rsi_today_by_symbol = signals.get("rsi_by_symbol") or {}
         snap = ledger.mark_to_market(trading_day=ctx["trading_day"], daily_bars=ctx["daily_bars"])
         equity_total = float(snap["equity_total"])
         short_mv, notionals, sector_pct = _short_bucket_exposure(snap)
@@ -476,7 +488,36 @@ def create_short_term_pipeline_handlers(
             short_tranche_headroom=short_tranche_headroom,
             geo_headroom=geo_headroom,
         )
+        entries_blocked_by_rsi = sum(1 for item in (signals.get("skipped_signal") or []) if item.get("reason") == "rsi_overbought")
+        metrics["entries_blocked_by_rsi"] = int(entries_blocked_by_rsi)
+        metrics["exits_by_rsi"] = 0
+        metrics["exits_by_stop_loss"] = 0
         broker_orders = orders_intent_to_broker_orders(intents)
+
+        rsi_prev_by_symbol = ctx.get("rsi_prev_by_symbol") or {}
+        rsi_exit_symbols: set[str] = set()
+        for sym, pos in (snap.get("positions") or {}).items():
+            if str(pos.get("bucket")) != "short":
+                continue
+            qty = float(pos.get("qty", 0.0))
+            if qty <= 0:
+                continue
+            prev_rsi = rsi_prev_by_symbol.get(sym)
+            today_rsi = rsi_today_by_symbol.get(sym)
+            if prev_rsi is None or today_rsi is None:
+                continue
+            if float(prev_rsi) >= ste.rsi_exit_threshold and float(today_rsi) < ste.rsi_exit_threshold:
+                rsi_exit_symbols.add(str(sym))
+                broker_orders.append(
+                    {
+                        "symbol": str(sym),
+                        "side": "SELL",
+                        "qty": qty,
+                        "market": str(pos.get("market", "US")),
+                        "bucket": "short",
+                        "reason": "rsi_momentum_exhausted",
+                    }
+                )
 
         # Evaluate stop loss for every open short position regardless of guardrail state
         all_positions = snap.get("positions") or {}
@@ -495,9 +536,13 @@ def create_short_term_pipeline_handlers(
             price_history=ohlcv_history,
             config=stop_loss_config,
         )
+        stop_loss_symbols: set[str] = set()
         for sym in sl_triggered:
+            if sym in rsi_exit_symbols:
+                continue
             pos_info = sl_positions[sym]
             bar = ctx["daily_bars"].get(sym) or {}
+            stop_loss_symbols.add(str(sym))
             broker_orders.append(
                 {
                     "symbol": sym,
@@ -509,6 +554,8 @@ def create_short_term_pipeline_handlers(
                     "reason": "stop_loss",
                 }
             )
+        metrics["exits_by_rsi"] = len(rsi_exit_symbols)
+        metrics["exits_by_stop_loss"] = len(stop_loss_symbols)
 
         log_risk_cycle(
             engine="short",
@@ -523,6 +570,7 @@ def create_short_term_pipeline_handlers(
             "broker_orders": broker_orders,
             "skip_sizing": skip_sizing,
             "sizing_metrics": metrics,
+            "rsi_today_by_symbol": rsi_today_by_symbol,
         }
 
     def risk_check(**ctx: Any) -> list[dict[str, str | float]]:

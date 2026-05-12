@@ -15,6 +15,9 @@ class ShortEngineConfig:
     volatility_20d_max: float
     top_k_per_market: int
     risk_budget_trade_pct: float
+    rsi_lookback: int = 14
+    rsi_overbought_entry: float = 70.0
+    rsi_exit_threshold: float = 45.0
     allow_leverage: bool = False
 
 
@@ -24,6 +27,36 @@ class RiskCaps:
 
     max_position_pct: float
     max_sector_pct: float
+
+
+def compute_rsi(closes: list[float], lookback: int = 14) -> float | None:
+    """Compute RSI in [0,100] from closing prices.
+
+    Uses average gains/losses over the last `lookback` differences.
+    Returns None when history is insufficient or contains invalid prices.
+    """
+    if lookback < 1 or len(closes) < (lookback + 1):
+        return None
+    window = closes[-(lookback + 1) :]
+    if any(float(c) <= 0 for c in window):
+        return None
+
+    gains = 0.0
+    losses = 0.0
+    for i in range(1, len(window)):
+        delta = float(window[i]) - float(window[i - 1])
+        if delta > 0:
+            gains += delta
+        elif delta < 0:
+            losses += abs(delta)
+
+    avg_gain = gains / float(lookback)
+    avg_loss = losses / float(lookback)
+    if avg_loss == 0.0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    return float(rsi)
 
 
 def compute_signal_candidates(
@@ -48,6 +81,7 @@ def compute_signal_candidates(
                 "close_n_days_ago",
                 "volume_percentile",
                 "vol_20d",
+                "rsi",
                 "session_valid",
             )
             if field not in row
@@ -69,6 +103,7 @@ def compute_signal_candidates(
         close_n_days_ago = float(row["close_n_days_ago"])
         volume_percentile = float(row["volume_percentile"])
         vol_20d = float(row["vol_20d"])
+        rsi = float(row["rsi"])
         if close <= 0 or close_n_days_ago <= 0:
             skipped.append({"symbol": symbol, "reason": "invalid_price"})
             continue
@@ -80,6 +115,9 @@ def compute_signal_candidates(
             continue
         if vol_20d > config.volatility_20d_max:
             skipped.append({"symbol": symbol, "reason": "volatility_above_threshold"})
+            continue
+        if rsi > config.rsi_overbought_entry:
+            skipped.append({"symbol": symbol, "reason": "rsi_overbought"})
             continue
 
         signal_score = (close / close_n_days_ago) - 1.0

@@ -1,15 +1,15 @@
 # Project Overview — Bot de Trading (paper-first)
 
-Este documento explica como fue construido el proyecto, por que se tomaron las decisiones principales y como se conecta cada componente. Esta pensado para dos usos:
+Este documento esta pensado para dos usos:
 
 - Servir como guion tecnico para una defensa oral.
 - Permitir lectura simple para alguien que entra por primera vez al repo.
 
-No busca reemplazar la documentacion normativa (`POLICY.md`) ni el registro de decisiones (`decisiones-tecnicas.md`), sino unir arquitectura, criterio y estado actual en una sola narrativa.
+No busca reemplazar la documentacion normativa (`POLICY.md`) ni el registro de decisiones (`decisiones-tecnicas.md`), sino unir arquitectura, criterio y estado actual.
 
 ## 1) El problema y la filosofia
 
-El problema que resuelve el proyecto no es "adivinar el mercado", sino evitar decisiones manuales impulsivas y no reproducibles. El foco esta en construir un proceso estable, medible y auditable.
+El problema que resuelve el proyecto es evitar decisiones de inversion manuales impulsivas y no reproducibles. El foco esta en construir un proceso estable, medible y auditable.
 
 La filosofia base es:
 

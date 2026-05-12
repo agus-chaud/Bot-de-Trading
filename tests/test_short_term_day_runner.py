@@ -2,6 +2,7 @@
 
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -35,6 +36,12 @@ def _build_qqq_history_declining(*, n: int = 25) -> list[dict[str, float]]:
     return [{"close": float(base - i), "volume": 2_000_000.0} for i in range(n)]
 
 
+def _build_spy_history_rsi_down_cross() -> list[dict[str, float]]:
+    # Serie con tramo alcista y caída final para forzar RSI bajo.
+    closes = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0, 112.0, 113.0, 114.0, 112.0, 110.0, 108.0, 106.0, 104.0, 102.0, 101.0, 100.0, 99.0, 98.0]
+    return [{"close": c, "volume": 1_000_000.0} for c in closes]
+
+
 def test_load_merged_whitelist_includes_core_etfs():
     policy = _load_policy()
     wl = load_merged_whitelist(REPO_ROOT, policy)
@@ -44,6 +51,7 @@ def test_load_merged_whitelist_includes_core_etfs():
 
 def test_short_term_pipeline_end_to_end_produces_fills():
     policy = _load_policy()
+    policy["short_term_engine"]["rsi_overbought_entry"] = 100.0
     ledger = PortfolioLedger(starting_cash=100_000.0)
     broker = PaperBrokerSim(
         ledger=ledger,
@@ -381,3 +389,98 @@ def test_stop_loss_order_side_is_uppercase_sell():
     assert stop_loss_orders[0]["side"] == "SELL", (
         "stop-loss side must be 'SELL' (uppercase) — PaperBrokerSim rejects any other value"
     )
+
+
+def test_rsi_exit_triggers_only_on_descending_crossover():
+    policy = _load_policy()
+    policy["short_term_engine"]["rsi_overbought_entry"] = 100.0
+    ledger = PortfolioLedger(starting_cash=100_000.0)
+    broker = PaperBrokerSim(
+        ledger=ledger,
+        cost_model=CostModel(
+            market_configs={
+                "US": MarketCostConfig(
+                    commission_bps_per_side=1.0,
+                    slippage_bps=2.0,
+                    min_spread_bps=0.5,
+                )
+            }
+        ),
+    )
+    backtester = create_short_term_daily_backtester(
+        policy_doc=policy,
+        repo_root=REPO_ROOT,
+        ledger=ledger,
+        broker=broker,
+    )
+    # Seed short position from previous day.
+    ledger.update_day(
+        trading_day=date(2026, 4, 14),
+        fills=[
+            {
+                "symbol": "SPY",
+                "side": "BUY",
+                "qty": 10,
+                "price": 97.0,
+                "market": "US",
+                "bucket": "short",
+            }
+        ],
+        daily_bars={"SPY": {"close": 97.0}},
+    )
+    daily_bars = {"SPY": {"open": 97.0, "high": 99.0, "low": 95.0, "close": 97.0, "volume": 50_000_000.0}}
+    history = {"SPY": _build_spy_history_rsi_down_cross()}
+
+    with patch("core_sim.short_term_day_runner.check_stop_loss", return_value=[]):
+        events = backtester.run_day(
+            trading_day=date(2026, 4, 15),
+            daily_bars=daily_bars,
+            pipeline_context={"history_by_symbol": history, "rsi_prev_by_symbol": {"SPY": 60.0}},
+        )
+    proposed = events[2].payload
+    rsi_orders = [o for o in proposed["broker_orders"] if o.get("reason") == "rsi_momentum_exhausted"]
+    assert len(rsi_orders) == 1
+    assert rsi_orders[0]["side"] == "SELL"
+
+    ledger2 = PortfolioLedger(starting_cash=100_000.0)
+    broker2 = PaperBrokerSim(
+        ledger=ledger2,
+        cost_model=CostModel(
+            market_configs={
+                "US": MarketCostConfig(
+                    commission_bps_per_side=1.0,
+                    slippage_bps=2.0,
+                    min_spread_bps=0.5,
+                )
+            }
+        ),
+    )
+    backtester2 = create_short_term_daily_backtester(
+        policy_doc=policy,
+        repo_root=REPO_ROOT,
+        ledger=ledger2,
+        broker=broker2,
+    )
+    ledger2.update_day(
+        trading_day=date(2026, 4, 14),
+        fills=[
+            {
+                "symbol": "SPY",
+                "side": "BUY",
+                "qty": 10,
+                "price": 97.0,
+                "market": "US",
+                "bucket": "short",
+            }
+        ],
+        daily_bars={"SPY": {"close": 97.0}},
+    )
+    with patch("core_sim.short_term_day_runner.check_stop_loss", return_value=[]):
+        events_no_cross = backtester2.run_day(
+            trading_day=date(2026, 4, 15),
+            daily_bars=daily_bars,
+            pipeline_context={"history_by_symbol": history, "rsi_prev_by_symbol": {"SPY": 40.0}},
+        )
+    proposed_no_cross = events_no_cross[2].payload
+    rsi_orders_no_cross = [o for o in proposed_no_cross["broker_orders"] if o.get("reason") == "rsi_momentum_exhausted"]
+    assert rsi_orders_no_cross == []

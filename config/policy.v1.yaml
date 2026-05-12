@@ -82,6 +82,9 @@ short_term_engine:
   volatility_20d_max: 0.04           # vol_20d máxima (desvío estándar diario)
   top_k_per_market: 5                # K máximo por mercado en ranking diario
   risk_budget_trade_pct: 0.005       # presupuesto de riesgo por trade (0.5% del bucket corto)
+  rsi_lookback: 14                   # RSI base para filtro de entrada/salida
+  rsi_overbought_entry: 70.0         # no comprar si RSI supera este umbral
+  rsi_exit_threshold: 45.0           # vender por crossover descendente bajo este umbral
   allow_leverage: false              # v1: sin apalancamiento
 
 # Pre-gate estadístico mínimo (walk-forward OOS del bloque corto; Fase 3 plan)
