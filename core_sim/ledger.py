@@ -35,9 +35,11 @@ class PositionState:
 class PortfolioLedger:
     """Tracks cash, positions and daily metrics for paper trading."""
 
-    def __init__(self, starting_cash: float) -> None:
+    def __init__(self, starting_cash: float, *, short_allocation: float = 0.0) -> None:
         if starting_cash < 0:
             raise ValueError("starting_cash must be >= 0")
+        if short_allocation < 0:
+            raise ValueError("short_allocation must be >= 0")
 
         self.cash = float(starting_cash)
         self.short_cash = 0.0  # cash asignado al bucket corto (aumenta con SELLs, disminuye con BUYs)
@@ -45,6 +47,7 @@ class PortfolioLedger:
         self.realized_pnl_total = 0.0
         self.equity_curve_points: list[dict[str, float | str]] = []
         self._costs_by_trading_day: dict[date, float] = {}
+        self._short_allocation = float(short_allocation)
         self._current_short_month: tuple[int, int] | None = None
         self._short_monthly_peak = 0.0
         self._short_monthly_drawdown = 0.0
@@ -287,27 +290,31 @@ class PortfolioLedger:
         short_equity: float,
         short_cash: float = 0.0,
     ) -> dict[str, float]:
-        """Drawdown mensual del bucket corto medido sobre BUCKET EQUITY.
+        """Drawdown mensual del bucket corto medido sobre ADJUSTED EQUITY.
 
-        `bucket_equity = short_cash + short_equity` (MV de posiciones abiertas).
-        El peak es el running max de `bucket_equity` dentro del mes calendario,
-        reseteado al primer call de cada mes nuevo. DD = `bucket_equity / peak - 1`,
-        clampado a 0 cuando `peak <= 0`. La key `equity` del dict retornado MANTIENE
-        `short_equity` (MV) por contrato con `_attach_short_daily_return` (REQ-5).
+        `adjusted_equity = short_cash + short_equity + short_allocation` donde
+        `short_allocation` es el capital nominal asignado al bucket (inyectado al
+        construir el ledger). El peak es el running max de `adjusted_equity` dentro
+        del mes calendario, reseteado al primer call de cada mes nuevo.
+        DD = max(-1.0, adjusted_equity / peak - 1), clampado a 0 cuando peak <= 0.
+        La key `equity` del dict retornado MANTIENE `short_equity` (MV) por contrato
+        con `_attach_short_daily_return` (REQ-5).
         """
         bucket_equity = float(short_cash) + float(short_equity)
+        adjusted_equity = bucket_equity + self._short_allocation
         month_key = (trading_day.year, trading_day.month)
 
         if self._current_short_month != month_key:
-            # Primer call de un nuevo mes calendario → reset peak al bucket_equity actual.
             self._current_short_month = month_key
-            self._short_monthly_peak = bucket_equity
+            self._short_monthly_peak = adjusted_equity
             self._short_monthly_drawdown = 0.0
         else:
-            self._short_monthly_peak = max(self._short_monthly_peak, bucket_equity)
+            self._short_monthly_peak = max(self._short_monthly_peak, adjusted_equity)
 
         if self._short_monthly_peak > 0:
-            self._short_monthly_drawdown = (bucket_equity / self._short_monthly_peak) - 1.0
+            self._short_monthly_drawdown = max(
+                -1.0, (adjusted_equity / self._short_monthly_peak) - 1.0
+            )
         else:
             self._short_monthly_drawdown = 0.0
 

@@ -103,7 +103,11 @@ def _simulate_oos_window(
     starting_cash: float,
     history_cap: int,
 ) -> dict[str, Any]:
-    ledger = PortfolioLedger(starting_cash=float(starting_cash))
+    short_weight = float(policy_doc.get("weights", {}).get("short", 0.30))
+    ledger = PortfolioLedger(
+        starting_cash=float(starting_cash),
+        short_allocation=float(starting_cash) * short_weight,
+    )
     broker = PaperBrokerSim(ledger=ledger, cost_model=_cost_model_from_policy(policy_doc))
     backtester = create_short_term_daily_backtester(
         policy_doc=policy_doc,

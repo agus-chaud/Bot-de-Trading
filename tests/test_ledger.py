@@ -200,14 +200,17 @@ def test_mixed_short_long_buckets_sum_to_total_equity():
 
 
 def test_should_update_short_drawdown_and_reset_by_calendar_month():
-    """Bucket-equity DD: peak es running max de short_cash + MV; reset al primer
-    día del mes calendario; DD = bucket_equity / peak - 1 (clamp 0 si peak <= 0).
+    """Bucket-equity DD: peak es running max de bucket_equity dentro del mes;
+    reset al primer día del mes calendario; DD = max(-1.0, bucket_equity / peak - 1)
+    clampado a 0 cuando peak <= 0.
+
+    Sin short_allocation (default=0), el peak se seedea con bucket_equity crudo.
 
     Trayectoria (April):
       - Apr 27 BUY 10@100, close=100  → short_cash=-1000, MV=1000, eq=0,    peak=0,    DD=0
       - Apr 28 close=110              → MV=1100,                  eq=100,  peak=100,  DD=0
-      - Apr 29 close=90               → MV=900,                   eq=-100, peak=100,  DD=-2.0
-      - Apr 30 close=95               → MV=950,                   eq=-50,  peak=100,  DD=-1.5
+      - Apr 29 close=90               → MV=900,                   eq=-100, peak=100,  DD=-1.0 (clamped)
+      - Apr 30 close=95               → MV=950,                   eq=-50,  peak=100,  DD=-1.0 (clamped)
     Reset (May):
       - May 1 close=95                → eq=-50, RESET peak=-50,            DD=0
     """
@@ -254,30 +257,30 @@ def test_should_update_short_drawdown_and_reset_by_calendar_month():
     # Day 2: precio sube → bucket_equity=100, peak=100, DD=0.
     assert day_two["short_bucket"]["monthly_peak"] == pytest.approx(100.0)
     assert day_two["short_bucket"]["monthly_drawdown"] == pytest.approx(0.0)
-    # Day 3: precio cae → bucket_equity=-100, peak conserva 100, DD=-2.0.
+    # Day 3: precio cae → bucket_equity=-100, peak conserva 100, DD clamped a -1.0.
     assert day_three["short_bucket"]["monthly_peak"] == pytest.approx(100.0)
-    assert day_three["short_bucket"]["monthly_drawdown"] == pytest.approx(-2.0)
-    # Day 4: precio sube parcial → bucket_equity=-50, peak conserva 100, DD=-1.5.
+    assert day_three["short_bucket"]["monthly_drawdown"] == pytest.approx(-1.0)
+    # Day 4: precio sube parcial → bucket_equity=-50, peak conserva 100, DD clamped a -1.0.
     assert day_four["short_bucket"]["monthly_peak"] == pytest.approx(100.0)
-    assert day_four["short_bucket"]["monthly_drawdown"] == pytest.approx(-1.5)
-    # Day 5 (May): reset → peak = bucket_equity actual (-50), DD clamped a 0 (peak<=0).
+    assert day_four["short_bucket"]["monthly_drawdown"] == pytest.approx(-1.0)
+    # Day 5 (May): reset → adjusted_equity = -50 + 0 = -50, peak = -50, DD=0 (peak<=0).
     assert day_five["short_bucket"]["monthly_peak"] == pytest.approx(-50.0)
     assert day_five["short_bucket"]["monthly_drawdown"] == pytest.approx(0.0)
-    # daily_return sigue calculado sobre MV (REQ-5, fuera de scope del fix de DD).
+    # daily_return sigue calculado sobre MV (fuera de scope del fix de DD).
     assert day_two["short_bucket"]["daily_return"] == pytest.approx((1_100.0 - 1_000.0) / 1_000.0)
     assert day_five["short_bucket"]["daily_return"] == pytest.approx((950.0 - 950.0) / 950.0)
 
 
-def test_stop_loss_closing_last_short_position_does_not_produce_full_drawdown():
-    """Stop-loss cierra la última posición: el DD mensual refleja la pérdida real
-    (= -realized_loss / peak), NO -100% (bug histórico: short_equity=0 / peak).
+def test_stop_loss_closing_last_short_position_dd_is_clamped():
+    """Stop-loss cierra la última posición: el DD mensual se clampea a -1.0
+    porque el raw DD (-1.5) excede el piso físico de -100%.
 
-    Trayectoria:
+    Trayectoria (sin short_allocation, default=0):
       Day 1: BUY 10@100 close=100  → short_cash=-1000, MV=1000, eq=0,    peak=0
       Day 2: close=110             → MV=1100,                  eq=100,  peak=100
       Day 3: close=95              → MV=950,                   eq=-50,  peak=100
       Day 4: SELL 10@95 (stop)     → short_cash=-50, MV=0,     eq=-50,  peak=100
-                                     DD = -50/100 - 1 = -1.5  (= -realized_loss/peak donde realized_loss=50)
+                                     raw DD = -50/100 - 1 = -1.5 → clamped a -1.0
     """
     ledger = PortfolioLedger(starting_cash=10_000)
     ledger.update_day(
@@ -295,19 +298,16 @@ def test_stop_loss_closing_last_short_position_does_not_produce_full_drawdown():
         ],
         daily_bars={"AAPL": {"close": 100.0}},
     )
-    # Sembramos un peak real con un día favorable.
     ledger.update_day(
         trading_day=date(2026, 4, 15),
         fills=[],
         daily_bars={"AAPL": {"close": 110.0}},
     )
-    # Precio cae a 95 (sin cerrar).
     ledger.update_day(
         trading_day=date(2026, 4, 16),
         fills=[],
         daily_bars={"AAPL": {"close": 95.0}},
     )
-    # Stop-loss cierra la posición a 95.
     day_close = ledger.update_day(
         trading_day=date(2026, 4, 17),
         fills=[
@@ -324,31 +324,87 @@ def test_stop_loss_closing_last_short_position_does_not_produce_full_drawdown():
         daily_bars={"AAPL": {"close": 95.0}},
     )
 
-    peak = 100.0
-    realized_loss = 50.0  # (95 - 100) * 10
-    expected_dd = -realized_loss / peak  # = -0.5
-    # bucket_equity post-cierre = short_cash (-50) + MV (0) = -50
-    # DD = -50/100 - 1 = -1.5 ; equivalente a (peak - realized_loss)/peak - 1 = -realized_loss/peak - 1
-    # El valor honesto es bucket_equity/peak - 1 = -1.5. Aserción exacta:
-    bucket_equity_post = -50.0
-    assert day_close["short_bucket"]["monthly_peak"] == pytest.approx(peak)
-    assert day_close["short_bucket"]["monthly_drawdown"] == pytest.approx(
-        bucket_equity_post / peak - 1.0
-    )
-    # Y NO el -100% espurio: dejamos el guard explícito.
-    assert day_close["short_bucket"]["monthly_drawdown"] != pytest.approx(-1.0)
-    # Estado posicional / cash post-cierre.
+    assert day_close["short_bucket"]["monthly_peak"] == pytest.approx(100.0)
+    assert day_close["short_bucket"]["monthly_drawdown"] == pytest.approx(-1.0)
     assert "AAPL" not in day_close["positions"]
     assert day_close["cash"] == pytest.approx(9_950.0)
-    # Sanity-check del invariante peak - realized_loss = bucket_equity_post:
-    assert peak - realized_loss == pytest.approx(bucket_equity_post + peak)
-    # Y la fórmula coincide con la definición de design "= -realized_loss / peak" relativa al peak puro
-    # cuando el peak fue creado únicamente por unrealized gains (eq=100): la pérdida total realizada
-    # respecto del peak es (peak - bucket_equity_post)/peak = (100-(-50))/100 = 1.5 → DD=-1.5.
-    assert day_close["short_bucket"]["monthly_drawdown"] == pytest.approx(-1.5)
-    # Y consistente con expected_dd (la pérdida REALIZADA sobre el peak es 0.5 cuando el peak era de
-    # unrealized; aquí DD honesto incluye también la unrealized perdida del rally previo, total -1.5):
-    assert expected_dd == pytest.approx(-0.5)  # documentado, no es la magnitud final del DD
+
+
+def test_short_drawdown_allocation_seeds_peak():
+    """Con short_allocation, el DD se mide sobre adjusted_equity (bucket_equity + allocation).
+    Esto produce drawdowns semánticamente correctos y siempre en [-1, 0]."""
+    ledger = PortfolioLedger(starting_cash=100_000, short_allocation=30_000)
+    day_one = ledger.update_day(
+        trading_day=date(2026, 4, 14),
+        fills=[
+            {
+                "symbol": "SPY",
+                "side": "BUY",
+                "qty": 10,
+                "price": 100.0,
+                "market": "US",
+                "bucket": "short",
+                "fee": 0.0,
+            }
+        ],
+        daily_bars={"SPY": {"close": 100.0}},
+    )
+    # bucket_equity = 0; adjusted = 0 + 30_000 = 30_000; peak = 30_000; DD = 0.
+    assert day_one["short_bucket"]["monthly_peak"] == pytest.approx(30_000.0)
+    assert day_one["short_bucket"]["monthly_drawdown"] == pytest.approx(0.0)
+
+    day_two = ledger.update_day(
+        trading_day=date(2026, 4, 15),
+        fills=[],
+        daily_bars={"SPY": {"close": 90.0}},
+    )
+    # bucket_equity = -100; adjusted = -100 + 30_000 = 29_900; peak = 30_000.
+    # DD = (29_900 / 30_000) - 1 ≈ -0.00333.
+    assert day_two["short_bucket"]["monthly_peak"] == pytest.approx(30_000.0)
+    assert day_two["short_bucket"]["monthly_drawdown"] == pytest.approx(
+        (29_900.0 / 30_000.0) - 1.0
+    )
+    assert day_two["short_bucket"]["monthly_drawdown"] > -1.0
+
+
+def test_short_drawdown_clamp_at_minus_one_without_allocation():
+    """Sin allocation (default=0), el clamp impide DD < -1.0."""
+    ledger = PortfolioLedger(starting_cash=10_000)
+    ledger.update_day(
+        trading_day=date(2026, 7, 1),
+        fills=[
+            {
+                "symbol": "TSLA",
+                "side": "BUY",
+                "qty": 10,
+                "price": 100.0,
+                "market": "US",
+                "bucket": "short",
+                "fee": 0.0,
+            }
+        ],
+        daily_bars={"TSLA": {"close": 105.0}},
+    )
+    snap = ledger.update_day(
+        trading_day=date(2026, 7, 2),
+        fills=[],
+        daily_bars={"TSLA": {"close": 80.0}},
+    )
+    # bucket_equity = -1000 + 800 = -200; peak was 50 (from day 1: -1000+1050=50).
+    # raw DD = (-200 / 50) - 1 = -5.0 → clamped to -1.0.
+    assert snap["short_bucket"]["monthly_drawdown"] == pytest.approx(-1.0)
+    assert snap["short_bucket"]["monthly_drawdown"] >= -1.0
+
+
+def test_short_allocation_zero_backward_compat():
+    """Default short_allocation=0: sin fills, peak=0 y DD=0 cada día."""
+    ledger = PortfolioLedger(starting_cash=10_000)
+    for i in range(5):
+        snap = ledger.mark_to_market(
+            trading_day=date(2026, 6, 2 + i), daily_bars={}
+        )
+        assert snap["short_bucket"]["monthly_peak"] == pytest.approx(0.0)
+        assert snap["short_bucket"]["monthly_drawdown"] == pytest.approx(0.0)
 
 
 def test_close_at_profit_does_not_inflate_short_drawdown():

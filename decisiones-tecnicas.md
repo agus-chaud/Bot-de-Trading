@@ -912,6 +912,33 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-042 — RSI(14) como filtro de entrada y señal de salida del motor corto
+
+- **Fecha**: 2026-05-12
+- **Estado**: aceptada
+- **Contexto**: El walk-forward OOS de 180 días mostraba 9/13 ventanas fallando por `monthly_short_drawdown` debajo del floor (-0.25). El motor corto entraba en tickers sobrecomprados (momentum positivo pero RSI alto) y solo salía por stop-loss ATR, acumulando drawdowns innecesarios.
+- **Decisión**: Agregar RSI(14) al motor corto con dos roles:
+  1. **Filtro de entrada**: descartar candidatos con RSI > `rsi_overbought_entry` (default 70). Reason: `rsi_overbought`.
+  2. **Señal de salida por crossover descendente**: vender posiciones del bucket short cuando `rsi_yesterday >= rsi_exit_threshold` y `rsi_today < rsi_exit_threshold` (default 45). Reason: `rsi_momentum_exhausted`. El crossover evita salidas falsas cuando RSI simplemente está bajo y estable.
+  3. **Contadores de auditoría**: cada ventana OOS reporta `entries_blocked_by_rsi`, `exits_by_rsi`, `exits_by_stop_loss` para explicar por qué cambió el resultado.
+- **Por qué**:
+  - RSI es complementario al momentum (no redundante): momentum dice "sube", RSI dice "se pasó de rosca".
+  - Solo 2 umbrales tunables reales (`rsi_overbought_entry`, `rsi_exit_threshold`); `rsi_lookback=14` es estándar fijo.
+  - Fórmula determinística y auditable; sin ventanas adaptativas ni ML.
+  - Alternativas con más parámetros (MACD: 3, cruces de medias: 2 lookbacks) excedían la complejidad mínima pedida.
+- **Consecuencias**:
+  - Walk-forward 180d con RSI: `avg_max_dd` mejoró de -0.134% a -0.098%; turnover bajó de 1.69 a 1.26; RSI bloqueó 130 entradas y disparó 5 salidas anticipadas.
+  - `windows_passed` se mantuvo en 4/13 — el drawdown mensual del bucket corto sigue siendo el cuello de botella, pero la mejora en DD total indica dirección correcta.
+  - Si `rsi_overbought_entry=70` resulta muy restrictivo en tendencias fuertes, se puede subir a 75 sin cambiar arquitectura.
+  - Deduplicación implementada: si RSI ya generó SELL, stop-loss no duplica la orden para el mismo símbolo.
+- **Alternativas consideradas**:
+  - **MACD**: 3 parámetros nuevos (fast, slow, signal) — más complejidad de la pedida.
+  - **Bollinger Bands**: resuelve solo entradas, no salidas.
+  - **RSI con umbral fijo para salida** (sin crossover): genera salidas falsas cuando RSI está bajo pero estable (pullback sano en tendencia alcista).
+- **Archivos**: `core_sim/short_term_engine.py`, `core_sim/short_term_day_runner.py`, `core_sim/short_term_pre_gate.py`, `scripts/run_short_term_pre_gate.py`, `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `core_sim/__init__.py`
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
