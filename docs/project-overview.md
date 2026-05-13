@@ -41,7 +41,7 @@ flowchart LR
 
 ### Decisiones clave de arquitectura
 
-- Se separan **engines por horizonte** (`short_term_engine` diario y `long_term_engine` mensual) para no mezclar logicas con distintos tiempos de decision.
+- Se separan **engines por horizonte** (`short_term_engine` diario y `long_term_engine` semanal) para no mezclar logicas con distintos tiempos de decision.
 - El modulo `risk_guardrails` concentra reglas de bloqueo para tener un unico punto auditable.
 - `event_engine` coordina el pipeline diario y evita que cada modulo defina su propio "orden de pasos".
 - `paper_broker_sim` y `ledger` modelan ejecucion y PnL de forma estable antes de hablar de capital real.
@@ -119,7 +119,7 @@ flowchart TD
 
 ## 5) Motor de largo plazo
 
-El largo plazo trabaja con rebalanceo mensual por bandas de drift:
+El largo plazo trabaja con rebalanceo semanal por bandas de drift:
 
 - Parte de pesos objetivo definidos en policy/config.
 - Mide desvio entre peso actual y objetivo.
@@ -271,6 +271,16 @@ La IA se uso como acelerador de implementacion y exploracion, no como reemplazo 
 - Se exige validacion automatica y lectura critica humana antes de consolidar decisiones.
 
 En una defensa oral, el punto central es demostrar gobernanza: **la IA fue herramienta**, el sistema de decisiones siguio siendo ingenieria controlada.
+
+## 12.1) Ultimo cambio estructural: integracion del largo (ADR-044)
+
+ se arreglaron tres cosas que estaban rotas o a medias:
+
+**El guardrail del largo no funcionaba.** El sistema tenia un limite de perdida diaria del -1.5% para el sleeve largo, pero en la practica nunca se activaba. El codigo buscaba un dato (`long_daily_return`) que nadie calculaba, asi que siempre valia 0.0 y el limite nunca disparaba. Ahora el ledger calcula ese retorno diario de verdad (comparando equity largo hoy vs ayer) y el runner largo lo usa para decidir si bloquea rebalanceos.
+
+**El motor largo no corria en paper-live.** El orquestador diario (`run_paper_live.py`) solo ejecutaba el pipeline corto. Ahora puede correr ambos — primero el corto, luego el largo sobre el mismo ledger — con un flag `--enable-long-engine`. Si algo sale mal, se apaga el flag y se vuelve a solo-corto sin tocar codigo.
+
+**La logica de riesgo corto estaba duplicada.** Habia dos lugares en el codigo con los mismos 4 checks de riesgo copiados a mano (calidad de datos, ventana no-trade, kill switch, limite diario). Si se cambiaba uno, habia que acordarse de cambiar el otro. Ahora uno llama al otro — una sola fuente de verdad.
 
 ## 13) Trabajo pendiente
 

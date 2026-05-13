@@ -13,7 +13,9 @@ from core_sim.long_term_engine import (
     build_long_term_orders_intent,
     current_weights_mtm,
     drift_per_line_pp,
+    is_first_us_trading_day_of_week,
     is_first_us_trading_day_of_month,
+    is_rebalance_day_by_rule,
     long_term_engine_config_from_policy_dict,
     should_rebalance_long,
     target_weights,
@@ -40,7 +42,21 @@ def test_repo_policy_long_term_block_is_consistent():
     assert set(tw) == {"SPY", "IWM", "QQQ"}
 
 
-def test_is_first_us_trading_day_of_month_picks_earliest_session_in_month():
+def test_is_first_us_trading_day_of_week_picks_earliest_session_in_week():
+    sessions = frozenset(
+        {
+            date(2026, 4, 6),  # Monday
+            date(2026, 4, 7),
+            date(2026, 4, 13),  # next Monday
+            date(2026, 4, 14),
+        }
+    )
+    assert is_first_us_trading_day_of_week(date(2026, 4, 6), sessions) is True
+    assert is_first_us_trading_day_of_week(date(2026, 4, 7), sessions) is False
+    assert is_first_us_trading_day_of_week(date(2026, 4, 13), sessions) is True
+
+
+def test_is_rebalance_day_by_rule_handles_weekly_and_monthly():
     sessions = frozenset(
         {
             date(2026, 4, 1),
@@ -49,8 +65,16 @@ def test_is_first_us_trading_day_of_month_picks_earliest_session_in_month():
             date(2026, 5, 4),
         }
     )
-    assert is_first_us_trading_day_of_month(date(2026, 4, 1), sessions) is True
-    assert is_first_us_trading_day_of_month(date(2026, 4, 2), sessions) is False
+    assert is_rebalance_day_by_rule(
+        trading_day=date(2026, 4, 1),
+        us_sessions=sessions,
+        rebalance_rule="first_us_trading_day_of_calendar_month",
+    ) is True
+    assert is_rebalance_day_by_rule(
+        trading_day=date(2026, 4, 2),
+        us_sessions=sessions,
+        rebalance_rule="first_us_trading_day_of_calendar_month",
+    ) is False
     assert is_first_us_trading_day_of_month(date(2026, 5, 3), sessions) is True
 
 
@@ -62,7 +86,7 @@ def test_should_rebalance_requires_day_and_band_breach():
     assert should_rebalance_long(is_rebalance_day=True, drift_pp_by_symbol=drift_bad, drift_threshold_pp=2.0) is True
 
 
-def test_on_rebalance_day_within_drift_band_emits_no_orders():
+def test_on_weekly_rebalance_day_within_drift_band_emits_no_orders():
     cfg = _lt_from_repo()
     us = frozenset({date(2026, 4, 1), date(2026, 4, 2)})
     day = date(2026, 4, 1)
@@ -85,7 +109,7 @@ def test_on_rebalance_day_within_drift_band_emits_no_orders():
     assert any(s.get("reason") == "within_drift_band" for s in skips)
 
 
-def test_on_rebalance_day_out_of_band_generates_sell_and_buy_intents():
+def test_on_weekly_rebalance_day_out_of_band_generates_sell_and_buy_intents():
     cfg = _lt_from_repo()
     us = frozenset({date(2026, 4, 1)})
     day = date(2026, 4, 1)
@@ -167,7 +191,7 @@ def test_turnover_cap_scales_trade_sizes_down():
         satellite_limits=SatelliteLimits(0.20, 0.15, 3),
         drift_rebalance_threshold_pp=1.0,
         drift_convention="per_line",
-        rebalance_rule="first_us_trading_day_of_calendar_month",
+        rebalance_rule="first_us_trading_day_of_calendar_week",
         max_long_rebalance_turnover_pct=0.05,
         satellite_markets=frozenset(["US"]),
     )

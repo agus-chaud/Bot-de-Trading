@@ -13,7 +13,7 @@ Este proyecto busca resolver eso con una tesis simple: **si quieres ganar plata 
 - Priorizar `paper trading` con datos reales antes de cualquier integración live.
 - Separar motores por horizonte:
   - `short_term_engine` (diario, 30% objetivo)
-  - `long_term_engine` (mensual, 70% objetivo)
+  - `long_term_engine` (semanal, 70% objetivo)
 - Centralizar controles críticos en un núcleo común: `risk_guardrails`, `allocator`, `paper_broker_sim`, `ledger`.
 - Mantener trazabilidad y auditabilidad de decisiones de riesgo y ejecución.
 
@@ -145,7 +145,7 @@ La transición a real está planteada como gate, no como salto de fe:
 - `short_term_engine` + `short_term_day_runner`: motor diario de corto plazo (momentum + filtros de liquidez/volatilidad + top-K + sizing por riesgo); integra `risk_guardrails` en pipeline.
 - `pending_order_queue`: cola para modo semi_auto, permite validación manual antes de ejecutar.
 - `short_term_pre_gate`: walk-forward OOS automático del bloque corto antes de habilitar más capital.
-- `long_term_engine` + `long_term_monthly_runner`: motor mensual del sleeve largo (pesos objetivo, bandas de drift, intents de rebalanceo); integra `check_long_risk()`.
+- `long_term_engine` + `long_term_monthly_runner`: motor semanal del sleeve largo (pesos objetivo, bandas de drift, intents de rebalanceo); integra `check_long_risk()`.
 - `validation/wf_windows` + `validation/wf_runner` + `validation/wf_long_report`: pipeline WF del bloque largo (ventanas rolling -> stage por ventana -> agregados globales + JSON).
 - `reporting/kpi_v0` + `scripts/report_kpis.py`: informe JSON/Markdown según `docs/kpi_report_spec.v1.md` (lectura post-corrida del export equity + fills).
 - `kpi_oos_gate` + `reporting/kpi_walk_forward` + `scripts/report_kpis_walk_forward.py`: varias ventanas OOS sobre la misma serie, mismo informe v3 por tramo, tabla maestra y gate reproducible opcional (**ADR-034**).

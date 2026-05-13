@@ -60,7 +60,7 @@ def _policy_with_kpi_gate(tmp_path: Path) -> Path:
         "long_term_engine": {
             "drift_rebalance_threshold_pp": 2.0,
             "drift_convention": "per_line",
-            "rebalance_rule": "first_us_trading_day_of_calendar_month",
+            "rebalance_rule": "first_us_trading_day_of_calendar_week",
             "max_long_rebalance_turnover_pct": None,
             "satellite_markets": ["US"],
             "core_lines": [

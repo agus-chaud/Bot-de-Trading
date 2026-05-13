@@ -43,7 +43,7 @@ def _make_policy(lookback: int = 90) -> dict:
         "long_term_engine": {
             "drift_rebalance_threshold_pp": 2.0,
             "drift_convention": "per_line",
-            "rebalance_rule": "first_us_trading_day_of_calendar_month",
+            "rebalance_rule": "first_us_trading_day_of_calendar_week",
             "max_long_rebalance_turnover_pct": None,
             "satellite_markets": ["US"],
             "core_lines": [

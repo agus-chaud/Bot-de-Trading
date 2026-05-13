@@ -192,7 +192,7 @@ El **sleeve largo** es la fracción de cartera asignada al horizonte largo dentr
 
 - **Cantidad de líneas core:** entre **2 y 3** símbolos US, cada uno con `target_weight` explícito en `config/policy.v1.yaml` → `long_term_engine.core_lines`.
 - **Criterio de baja redundancia (v1 por defecto):** combinar **beta amplia large-cap** (`SPY`, S&P 500) con **exposición small-cap US** (`IWM`, Russell 2000) para no duplicar solo capa large-cap. El satélite (`QQQ`) aporta sesgo **growth / mega-cap tech** con tope propio; solape SPY–QQQ es consciente y **acotado por peso** del satélite.
-- **Cambios de universo core:** solo en **fecha de rebalance mensual** salvo **procedimiento manual documentado** (commit + nota operativa) para cambios off-cycle.
+- **Cambios de universo core:** solo en **fecha de rebalance semanal** salvo **procedimiento manual documentado** (commit + nota operativa) para cambios off-cycle.
 
 ### 10.2 Satélite (lista acotada)
 
@@ -210,7 +210,7 @@ Parámetros en YAML bajo `long_term_engine.satellite_limits` y líneas en `satel
 
 ### 10.3 Calendario y disparador de rebalanceo
 
-- **Día de revisión:** **primer día de sesión US** (`XNYS` / calendario versionado) de cada **mes calendario** (`rebalance_rule: first_us_trading_day_of_calendar_month`).
+- **Día de revisión:** **primer día de sesión US** (`XNYS` / calendario versionado) de cada **semana calendario** (`rebalance_rule: first_us_trading_day_of_calendar_week`).
 - **Bandas anti-turnover:** convención **por línea** (`drift_convention: per_line`). Para cada símbolo del universo largo, \( \text{drift\_pp} = |\,w_{\text{obj}} - w_{\text{MTM}}\,| \times 100 \). Solo se considera emitir órdenes si **es día de rebalance** **y** existe al menos una línea con `drift_pp` **estrictamente mayor** que `drift_rebalance_threshold_pp`.
 - **halt / datos incompletos / sesión no US:** si el ciclo largo no puede valorar de forma fiable el universo (p. ej. `halt_on_data_quality`, sesión no válida, o **precio faltante o no finito** para cualquier símbolo del universo en el día de rebalance), la política v1 es **no operar el ciclo completo** y registrar motivo estructurado (`missing_or_invalid_price_abort_cycle`, etc.) — **sin** rebalanceo parcial a ciegas.
 
@@ -228,7 +228,7 @@ Cada intent incluye al menos: `symbol`, `market`, `bucket: long`, `side`, `qty`,
 |-----------|-------------------|-----|
 | `drift_rebalance_threshold_pp` | **2,0** | Umbral en puntos porcentuales por línea. |
 | `drift_convention` | **per_line** | Drift por símbolo vs objetivo. |
-| `rebalance_rule` | **first_us_trading_day_of_calendar_month** | Día de revisión mensual. |
+| `rebalance_rule` | **first_us_trading_day_of_calendar_week** | Día de revisión semanal. |
 | `max_long_rebalance_turnover_pct` | **null** | Sin tope de sum(|Δw|) en engine v1 si es `null`. |
 
 **Regla de gobernanza:** mismos valores y semántica en `POLICY.md` y `config/policy.v1.yaml` en un único commit.
@@ -288,7 +288,7 @@ Lista cerrada de umbrales que cada ventana OOS del walk-forward debe cumplir **a
 | Max drawdown total | **≥ -18 %** | Peor caso razonable: largo 0,70 × -25 % ≈ -17,5 % + corto 0,30 × -8 % ≈ -2,4 %. Un piso de -18 % detecta fallas estructurales sin disparar falsos positivos por bear market moderado. |
 | Max drawdown bucket corto | **≥ -10 %** | Kill switch congela a -8 % mensual pero se auto-resetea a inicio de mes; en una ventana OOS de ~3 meses puede acumular dos activaciones. -10 % da 2 pp de margen. |
 | Max drawdown bucket largo | **≥ -25 %** | Sleeve pasivo ETFs broad market. SPY cayó -25 % en 2022 y -34 % en 2020. El umbral detecta errores de rebalanceo, no ciclos de mercado. |
-| Turnover mensual largo (último) | **≤ 8 %** | Con bandas de drift 2,0 pp y rebalanceo mensual, el turnover esperado es 1–5 %. Un techo de 8 % detecta bugs de churn sin penalizar meses volátiles puntuales. |
+| Turnover mensual largo (último) | **≤ 8 %** | Con bandas de drift 2,0 pp y rebalanceo semanal, el turnover esperado sube vs mensual; el techo de 8 % sigue como guardrail para detectar churn anómalo. |
 | Alpha simple vs benchmark 20/80 (total) | **≥ -2 %** | El alpha real viene del 30 % corto (momentum v1). Pedir α > 0 en v1 es optimista; -2 % dice "no destruyas más de 2 pp anuales respecto al benchmark pasivo". Si pierde más, el bloque corto no justifica su costo operativo. |
 
 ### 13.3 Métricas informativas (sin umbral bloqueante en v1)

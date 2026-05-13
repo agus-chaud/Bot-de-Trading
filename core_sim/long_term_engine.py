@@ -31,7 +31,7 @@ class LongTermEngineConfig:
     satellite_limits: SatelliteLimits
     drift_rebalance_threshold_pp: float
     drift_convention: str  # v1: "per_line" only (see POLICY.md)
-    rebalance_rule: str  # v1: "first_us_trading_day_of_calendar_month"
+    rebalance_rule: str  # v1: calendar rule (monthly/weekly)
     max_long_rebalance_turnover_pct: float | None
     satellite_markets: frozenset[str]  # v1 default: US only
 
@@ -45,6 +45,34 @@ def is_first_us_trading_day_of_month(trading_day: date, us_sessions: Iterable[da
     if not month_sessions:
         return False
     return trading_day == min(month_sessions)
+
+
+def is_first_us_trading_day_of_week(trading_day: date, us_sessions: Iterable[date]) -> bool:
+    """True when `trading_day` is the earliest US session date in its ISO calendar week."""
+    sessions = frozenset(us_sessions)
+    if trading_day not in sessions:
+        return False
+    iso_year, iso_week, _ = trading_day.isocalendar()
+    week_sessions = [
+        d for d in sessions if d.isocalendar()[:2] == (iso_year, iso_week)
+    ]
+    if not week_sessions:
+        return False
+    return trading_day == min(week_sessions)
+
+
+def is_rebalance_day_by_rule(
+    *,
+    trading_day: date,
+    us_sessions: Iterable[date],
+    rebalance_rule: str,
+) -> bool:
+    """Evaluate rebalance day according to configured calendar rule."""
+    if rebalance_rule == "first_us_trading_day_of_calendar_month":
+        return is_first_us_trading_day_of_month(trading_day, us_sessions)
+    if rebalance_rule == "first_us_trading_day_of_calendar_week":
+        return is_first_us_trading_day_of_week(trading_day, us_sessions)
+    raise ValueError(f"unsupported rebalance_rule: {rebalance_rule}")
 
 
 def _targets_from_config(config: LongTermEngineConfig) -> dict[str, float]:
@@ -81,6 +109,17 @@ def validate_long_term_engine_config(config: LongTermEngineConfig) -> None:
 
     if config.drift_rebalance_threshold_pp <= 0:
         raise ValueError("drift_rebalance_threshold_pp must be positive")
+
+    valid_rules = {
+        "first_us_trading_day_of_calendar_month",
+        "first_us_trading_day_of_calendar_week",
+    }
+    if config.rebalance_rule not in valid_rules:
+        raise ValueError(
+            "long_term_engine v1 rebalance_rule must be one of: "
+            "first_us_trading_day_of_calendar_month, "
+            "first_us_trading_day_of_calendar_week"
+        )
 
     for m in config.satellite_markets:
         if str(m).upper() != "US":
@@ -122,7 +161,7 @@ def should_rebalance_long(
     drift_pp_by_symbol: Mapping[str, float],
     drift_threshold_pp: float,
 ) -> bool:
-    """Monthly gate: rebalance day AND any line drift exceeds threshold (per_line convention)."""
+    """Calendar gate: rebalance day AND any line drift exceeds threshold (per_line convention)."""
     if not is_rebalance_day:
         return False
     if not drift_pp_by_symbol:
@@ -169,9 +208,18 @@ def build_long_term_orders_intent(
     skips: list[dict[str, str]] = []
     metrics: dict[str, object] = {
         "trading_day": trading_day.isoformat(),
-        "is_first_us_trading_day_of_month": is_first_us_trading_day_of_month(trading_day, us_sessions),
+        "rebalance_rule": config.rebalance_rule,
+        "is_long_rebalance_day": is_rebalance_day_by_rule(
+            trading_day=trading_day,
+            us_sessions=us_sessions,
+            rebalance_rule=config.rebalance_rule,
+        ),
         "intents_generated": 0,
     }
+    # Backward-compat metric key kept for old downstream consumers.
+    metrics["is_first_us_trading_day_of_month"] = is_first_us_trading_day_of_month(
+        trading_day, us_sessions
+    )
 
     if halt_long_engine:
         skips.append({"symbol": "*", "reason": "halt_long_engine"})
@@ -193,7 +241,7 @@ def build_long_term_orders_intent(
             skips.append({"symbol": "*", "reason": f"symbol_not_whitelisted:{sym}"})
             return [], skips, metrics
 
-    is_day = is_first_us_trading_day_of_month(trading_day, us_sessions)
+    is_day = bool(metrics["is_long_rebalance_day"])
     if not is_day:
         skips.append({"symbol": "*", "reason": "not_long_rebalance_day"})
         return [], skips, metrics

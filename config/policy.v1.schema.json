@@ -63,7 +63,7 @@
       "required": ["short", "long"],
       "properties": {
         "short": { "type": "string", "enum": ["daily"] },
-        "long": { "type": "string", "enum": ["monthly"] }
+        "long": { "type": "string", "enum": ["weekly", "monthly"] }
       }
     },
     "execution_mode": {
@@ -168,8 +168,11 @@
         },
         "rebalance_rule": {
           "type": "string",
-          "minLength": 1,
-          "description": "Regla inequívoca de día de revisión mensual (v1: primer día de sesión US del mes)."
+          "enum": [
+            "first_us_trading_day_of_calendar_week",
+            "first_us_trading_day_of_calendar_month"
+          ],
+          "description": "Regla inequívoca de día de revisión (v1: primer día de sesión US de la semana o del mes)."
         },
         "max_long_rebalance_turnover_pct": {
           "type": ["number", "null"],

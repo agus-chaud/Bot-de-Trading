@@ -20,7 +20,7 @@ short_kill_switch_monthly_dd: -0.08
 # Cadencia de decisión por motor
 cadence:
   short: daily
-  long: monthly
+  long: weekly
 
 # semi_auto: órdenes pasan a cola pending hasta confirmación; auto: pipeline sin gate humano
 execution_mode: semi_auto
@@ -58,7 +58,7 @@ risk:
 long_term_engine:
   drift_rebalance_threshold_pp: 2.0          # umbral por línea (pp) — convención per_line (POLICY §11)
   drift_convention: per_line
-  rebalance_rule: first_us_trading_day_of_calendar_month
+  rebalance_rule: first_us_trading_day_of_calendar_week
   max_long_rebalance_turnover_pct: null     # opcional: tope a sum(|Δw|) del sleeve; null = sin tope en engine v1
   satellite_markets:
     - US

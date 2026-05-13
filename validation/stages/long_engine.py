@@ -1,7 +1,7 @@
 """Long engine validation stage for the validation workflow.
 
 This stage is purely informational — it NEVER blocks GO (v1).
-It runs the monthly long-term pipeline over the given trading days and measures:
+It runs the long-term pipeline over the given trading days and measures:
   - max_drift_observed_pp: maximum drift (pp) observed before any rebalance
   - total_rebalance_cost: cumulative broker fees across all rebalances in the period
   - monthly_drawdown_long: worst monthly drawdown of the long bucket
@@ -21,7 +21,7 @@ from core_sim.long_term_engine import (
     LongTermEngineConfig,
     current_weights_mtm,
     drift_per_line_pp,
-    is_first_us_trading_day_of_month,
+    is_rebalance_day_by_rule,
     long_term_engine_config_from_policy_dict,
     target_weights,
 )
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 _STAGE_NAME = "long_engine"
 _VENUE_US = "XNYS"
-_MIN_MONTHS_REQUIRED = 2  # need at least 2 months to observe one rebalance + drawdown
+_MIN_REBALANCE_UNITS_REQUIRED = 2  # need at least 2 units (weeks/months) to observe behavior
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +78,14 @@ def _months_in_period(trading_days: list[date]) -> int:
         return 0
     months = {(d.year, d.month) for d in trading_days}
     return len(months)
+
+
+def _iso_weeks_in_period(trading_days: list[date]) -> int:
+    """Count distinct ISO calendar weeks covered by trading days."""
+    if not trading_days:
+        return 0
+    weeks = {(d.isocalendar().year, d.isocalendar().week) for d in trading_days}
+    return len(weeks)
 
 
 def _compute_long_bucket_mtm(
@@ -146,18 +154,27 @@ def run_long_engine_stage(
         logger.info('{"event": "long_engine_stage_skipped", "reason": "no_trading_days"}')
         return _skipped_result
 
-    months = _months_in_period(trading_days)
-    if months < _MIN_MONTHS_REQUIRED:
-        logger.info(
-            '{"event": "long_engine_stage_skipped", "reason": "insufficient_months", "months": %d}',
-            months,
-        )
-        return _skipped_result
-
     # Extract long-engine config and symbols from policy
     lt_cfg: LongTermEngineConfig = long_term_engine_config_from_policy_dict(
         policy_doc["long_term_engine"]
     )
+    if lt_cfg.rebalance_rule == "first_us_trading_day_of_calendar_week":
+        units = _iso_weeks_in_period(trading_days)
+        if units < _MIN_REBALANCE_UNITS_REQUIRED:
+            logger.info(
+                '{"event": "long_engine_stage_skipped", "reason": "insufficient_weeks", "weeks": %d}',
+                units,
+            )
+            return _skipped_result
+    else:
+        units = _months_in_period(trading_days)
+        if units < _MIN_REBALANCE_UNITS_REQUIRED:
+            logger.info(
+                '{"event": "long_engine_stage_skipped", "reason": "insufficient_months", "months": %d}',
+                units,
+            )
+            return _skipped_result
+
     symbols: list[str] = sorted(
         [sym for sym, _ in (*lt_cfg.core_lines, *lt_cfg.satellite_lines)]
     )
@@ -194,9 +211,13 @@ def run_long_engine_stage(
     monthly_long_equity: dict[tuple[int, int], list[float]] = {}
 
     # Run the pipeline day by day, but only on rebalance-candidate days
-    # (first US trading day of each month) to keep it efficient
+    # according to policy rebalance_rule to keep it efficient.
     for trading_day in trading_days:
-        is_rebalance_day = is_first_us_trading_day_of_month(trading_day, us_sessions)
+        is_rebalance_day = is_rebalance_day_by_rule(
+            trading_day=trading_day,
+            us_sessions=us_sessions,
+            rebalance_rule=lt_cfg.rebalance_rule,
+        )
 
         daily_bars = _load_daily_bars_for_day(db, trading_day, symbols)
         if not daily_bars:

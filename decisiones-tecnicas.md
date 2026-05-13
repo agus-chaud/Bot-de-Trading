@@ -991,6 +991,35 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-045 — Rebalanceo del motor largo: de mensual a semanal
+
+- **Fecha**: 2026-05-13
+- **Estado**: aceptada (actualiza ADR-017 en lo referente a `rebalance_rule`)
+- **Contexto**: El motor largo usaba `rebalance_rule: first_us_trading_day_of_calendar_month`, evaluando drift y ejecutando rebalanceos solo una vez al mes. En mercados volátiles (ej. crash arancelario Feb–Abr 2026, SPY -6.3%), un mes de latencia puede acumular desvíos significativos antes de corregir. Además, el guardrail `check_long_risk()` (-1.5% diario) solo se evaluaba cuando el motor largo corría, es decir, una vez al mes.
+- **Decisión**:
+  - Cambiar `rebalance_rule` a `first_us_trading_day_of_calendar_week` en `config/policy.v1.yaml`.
+  - Cambiar `cadence.long` de `monthly` a `weekly`.
+  - Implementar `is_first_us_trading_day_of_week()` y `is_rebalance_day_by_rule()` en `core_sim/long_term_engine.py` como funciones puras que resuelven el día de rebalanceo según regla configurada.
+  - Actualizar `validate_long_term_engine_config()` para aceptar ambas reglas (`week` y `month`).
+  - Actualizar `config/policy.v1.schema.json`: `cadence.long` acepta `["weekly", "monthly"]`; `rebalance_rule` pasa a enum explícito.
+  - Actualizar `validation/stages/long_engine.py` para evaluar suficiencia temporal según la regla (semanas para weekly, meses para monthly).
+  - Actualizar `POLICY.md` §10.3 y tabla §10.6 para reflejar rebalanceo semanal.
+- **Por qué**:
+  - Semanal reduce la latencia de corrección de drift de ~22 días hábiles a ~5, atrapando desvíos grandes antes de que se acumulen.
+  - El guardrail `check_long_risk()` pasa de evaluarse ~1x/mes a ~4x/mes, mejorando la protección real del sleeve largo.
+  - Con ETFs pasivos y bandas de drift de 2pp, la mayoría de las semanas seguirá siendo un no-op (drift dentro de banda); el costo operativo extra es marginal.
+- **Consecuencias**:
+  - El turnover mensual del largo puede subir levemente respecto de mensual puro; el techo de 8% en `kpi_oos_gate` sigue como guardrail.
+  - La función `is_first_us_trading_day_of_month()` se mantiene para backward-compat y métricas legacy, pero ya no controla el gate de rebalanceo.
+  - Tests y fixtures de `test_long_term_engine.py`, `test_validation_runner.py` y `test_kpi_walk_forward.py` actualizados a la nueva regla.
+- **Alternativas consideradas**:
+  - **Mantener mensual**: descartada — demasiada latencia en mercados volátiles; el guardrail largo se evaluaba muy poco.
+  - **Diario**: descartada — genera ruido operativo (29/30 días no-op) y logs innecesarios sin beneficio real para ETFs pasivos.
+  - **Bandas de drift más estrechas con cadencia mensual**: descartada — no resuelve la baja frecuencia de evaluación del guardrail.
+- **Archivos**: `core_sim/long_term_engine.py`, `core_sim/__init__.py`, `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `POLICY.md`, `validation/stages/long_engine.py`, `AGENTS.md`, `README.md`, `docs/project-overview.md`, tests correspondientes.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
