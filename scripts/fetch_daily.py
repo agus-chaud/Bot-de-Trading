@@ -42,7 +42,7 @@ def _load_symbols_from_policy() -> tuple[list[str], list[str]]:
         if us_file:
             with open(base / us_file) as f:
                 data = yaml.safe_load(f)
-            for key in ("etfs", "stocks"):
+            for key in ("etfs", "stocks", "adrs"):
                 us_symbols.extend(data.get(key, []))
 
         ar_symbols: list[str] = []

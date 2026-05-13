@@ -19,7 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from data.schema import OHLCVRow
 from data.storage import MarketDB
-from scripts.run_paper_live import compute_trading_days_gap, main, run_catch_up
+from scripts.run_paper_live import compute_trading_days_gap, main, run_catch_up, _build_long_pipeline_context
 
 import yaml
 
@@ -328,3 +328,55 @@ class TestIdempotency:
         fills_count_2 = len(db.get_paper_fills("paper_live"))
 
         assert fills_count_1 == fills_count_2
+
+
+# ===========================================================================
+# 3.6 — Long engine feature flag
+# ===========================================================================
+
+
+class TestLongEngineFeatureFlag:
+    """enable_long_engine flag controls long sleeve execution."""
+
+    def test_flag_off_produces_same_result_as_before(self, tmp_path: Path, policy_doc):
+        """With enable_long_engine=False (default), short-only behavior is identical."""
+        db_path = tmp_path / "test.db"
+        db = MarketDB(str(db_path))
+
+        symbols = ["SPY", "QQQ"]
+        days = _weekdays_from(date(2026, 2, 1), 80)
+        _seed_ohlcv(db, symbols, days)
+
+        target = date(2026, 4, 15)
+        run_catch_up(db, [target], policy_doc, initial_cash=1000.0, enable_long_engine=False)
+
+        assert db.get_last_snapshot_day("paper_live") == target
+        cursor = db._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM paper_snapshots WHERE mode = 'paper_live'"
+        )
+        assert cursor.fetchone()["cnt"] == 1
+
+        fills = db.get_paper_fills("paper_live")
+        for fill in fills:
+            assert fill.get("bucket") == "short", (
+                "With long engine off, only short fills expected"
+            )
+
+    def test_flag_on_runs_both_sleeves(self, tmp_path: Path, policy_doc):
+        """With enable_long_engine=True, the pipeline processes both sleeves without error."""
+        db_path = tmp_path / "test.db"
+        db = MarketDB(str(db_path))
+
+        symbols = ["SPY", "QQQ"]
+        days = _weekdays_from(date(2026, 2, 1), 80)
+        _seed_ohlcv(db, symbols, days)
+
+        target = date(2026, 4, 15)
+        run_catch_up(db, [target], policy_doc, initial_cash=1000.0, enable_long_engine=True)
+
+        assert db.get_last_snapshot_day("paper_live") == target
+        snap_row = db._conn.execute(
+            "SELECT equity_total FROM paper_snapshots WHERE mode = 'paper_live'"
+        ).fetchone()
+        assert snap_row is not None
+        assert float(snap_row["equity_total"]) > 0

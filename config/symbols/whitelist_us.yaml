@@ -12,3 +12,9 @@ stocks:
   - WMT
   - JNJ
   - PG
+# ADRs argentinos listados en NYSE/NASDAQ
+adrs:
+  - MELI
+  - YPF
+  - TGS
+  - GGAL

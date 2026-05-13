@@ -19,7 +19,7 @@ Los siguientes valores son **defaults** para un perfil **moderado**; deben versi
 | Máx. % nocional por **un solo ticker** (sobre equity paper del bucket o cartera según configuración del allocator) | **8 %** | Por operación o exposición agregada en ese símbolo: usar la definición del allocator; si ambas existen, prevalece la **más restrictiva**. |
 | Máx. concentración por **sector GICS** (o taxonomía equivalente si no hay GICS) | **25 %** del valor de mercado del bucket afectado | Si falta clasificación sectorial, tratar como **dato faltante** (ver sección 6). |
 | Máx. **pérdida diaria** — bucket **corto plazo** | **-2,0 %** del equity inicial del día del bucket | Medido sobre P&L diario realizado + no realizado del bucket corto. |
-| Máx. **pérdida diaria** — bucket **largo plazo** | **-1,5 %** del equity inicial del día del bucket | Idem para bucket largo. |
+| Máx. **pérdida diaria** — bucket **largo plazo** | **-1,5 %** del equity inicial del día del bucket | Idem para bucket largo. Implementado en `check_long_risk()` con insumo `long_daily_return` real desde `long_bucket` del ledger (**ADR-044**). |
 | Máx. **pérdida diaria** — **cartera total** (paper) | **-3,0 %** del equity inicial del día total | Dispara acción más severa si se viola antes que los límites por bucket (ver matriz §5). |
 | Máx. **pérdida mensual** — bucket **corto plazo** | **-8,0 %** | Alineado con el *kill switch* mensual del plan (`short_kill_switch_monthly_dd`: **-8 %**). |
 | Máx. **pérdida mensual** — bucket **largo plazo** | **-6,0 %** | Menor tolerancia relativa a volatilidad típica de posiciones más largas en perfil moderado. |
@@ -155,6 +155,8 @@ Comportamiento **determinístico** ante datos faltantes: sin excepciones silenci
 - A inicio del mes siguiente, el motor puede reanudarse **solo si** no hay flags `data_quality_halt` y el operador no ha dejado bloqueo administrativo activo.
 
 En ambos modos, el **largo plazo** y el **allocator** no deben **incrementar** indirectamente el riesgo del bucket corto (no hay “bypass” por otros componentes).
+
+**Nota de implementación (ADR-044):** en `run_paper_live.py`, el orden de ejecución es **short → long** con feature flag `--enable-long-engine` (default `false`). El largo consume la caja que quedó después del corto. El guardrail largo (`check_long_risk`) recibe `long_daily_return` real desde el ledger. El flag permite rollback inmediato a short-only sin cambio de código.
 
 ---
 

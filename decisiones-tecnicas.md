@@ -939,6 +939,58 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-043 — ADRs argentinos en whitelist US con precedencia de market tag
+
+- **Fecha**: 2026-05-13
+- **Estado**: aceptada
+- **Contexto**: Los tickers MELI, YPF, TGS y GGAL estaban solo en `whitelist_ar.yaml` como acciones BYMA. Sin embargo, son ADRs listados en NYSE/NASDAQ y el sistema debería poder operarlos como instrumentos US (sesión NYSE, costos US, horario US). Además, `fetch_daily.py` solo leía las claves `etfs` y `stocks` del YAML US, por lo que una nueva categoría sería ignorada sin fix.
+- **Decisión**:
+  - Agregar sección **`adrs`** en `config/symbols/whitelist_us.yaml` con MELI, YPF, TGS y GGAL.
+  - Extender la tupla de buckets en `load_merged_whitelist` (`short_term_day_runner.py`) y en `_load_symbols_from_policy` (`fetch_daily.py`) de `("etfs", "stocks")` a `("etfs", "stocks", "adrs")`.
+  - **Invertir el orden de carga** en `load_merged_whitelist`: AR se carga primero, US después. Esto asegura que para tickers presentes en ambas listas, el tag US (ADR) tiene precedencia (last-write-wins).
+  - No se modificó `whitelist_ar.yaml`: los mismos tickers siguen presentes como acciones BYMA para el caso en que se quieran operar localmente en el futuro con tickers diferenciados (e.g. `GGAL.BA`).
+- **Por qué**:
+  - Los ADRs operan en horario US, con costos US y sesión NYSE — tagearlos como "AR" haría que el sistema les aplique sesión AR, costos AR y horario AR, lo cual es incorrecto.
+  - El orden anterior de carga (US primero, AR después) hacía que AR sobrescribiera el tag US para tickers duplicados, anulando silenciosamente el efecto de agregar ADRs al whitelist US.
+  - Separar la categoría `adrs` del `stocks` hace explícita la naturaleza del instrumento y facilita filtrados futuros (e.g. reportes por tipo de instrumento).
+- **Consecuencias**:
+  - Los 4 tickers quedan como `"US"` en el dict `merged`. El motor corto les aplica sesión US, el risk los evalúa con fallback stop-loss US, y el allocator los cuenta dentro del headroom geo US.
+  - Si en el futuro se quieren operar las versiones locales BYMA en paralelo, se necesitarán tickers diferenciados en `whitelist_ar.yaml` (e.g. `GGAL.BA` vs `GGAL`).
+  - `long_term_monthly_runner.py` no requirió cambio porque reutiliza `load_merged_whitelist` del day runner.
+- **Alternativas consideradas**:
+  - **Agregar los ADRs directamente en `stocks` del US whitelist**: descartada — mezcla la categoría y pierde la distinción semántica entre acciones US nativas y ADRs argentinos.
+  - **Eliminar los tickers de `whitelist_ar.yaml`**: descartada — preservarlos permite operar versiones BYMA en el futuro con tickers diferenciados sin perder la configuración.
+  - **Mantener el orden original de carga (US antes que AR)**: descartada — hacía que los ADRs fueran sobrescritos como "AR", anulando el propósito del cambio.
+- **Archivos**: `config/symbols/whitelist_us.yaml`, `core_sim/short_term_day_runner.py`, `scripts/fetch_daily.py`, `tests/test_short_term_day_runner.py`
+
+---
+
+## ADR-044 — Integración largo en paper-live, guardrail largo efectivo, dedup riesgo corto
+
+- **Fecha**: 2026-05-13
+- **Estado**: aceptada
+- **Contexto**: Tres brechas operativas: (1) el motor largo no estaba integrado en el loop diario paper-live, (2) `check_long_risk` era no-op porque el runner pasaba el snapshot completo como scoreboard (key `long_daily_return` ausente, default 0.0), y (3) `_check_risk_with_optional_db` duplicaba los 4 pasos de `check_short_risk` manualmente.
+- **Decisión**:
+  1. **Ledger**: agregar `_long_eod_by_trading_date` y `_attach_long_daily_return()` para computar el daily return del sleeve largo, incluyendo `long_bucket` en el return de `mark_to_market`.
+  2. **long_term_monthly_runner**: `propose_orders` y `risk_check` extraen `snap["long_bucket"]` y pasan ese dict a `check_long_risk` (no el snapshot completo).
+  3. **run_paper_live**: cablear `create_long_term_monthly_backtester` con feature flag `--enable-long-engine` (default false). Orden fijo: short → long. Fills combinados. Snapshot final post-ambos sleeves. DB y calendar_store inyectados al short backtester.
+  4. **Dedup riesgo corto**: `_check_risk_with_optional_db` refactorizado a orquestador liviano: reutiliza `check_short_risk` con config override para data_quality+no_trade, luego `check_and_persist_kill_switch`, luego `check_short_risk` para daily_loss.
+- **Por qué**:
+  - Sin `long_daily_return` el guardrail largo nunca disparaba — riesgo silencioso.
+  - La duplicación de la cadena de 4 pasos hacía que cualquier cambio en `check_short_risk` requiriera sincronización manual en `_check_risk_with_optional_db`.
+  - El flag `enable_long_engine=false` permite rollback inmediato a short-only sin cambios de código.
+- **Consecuencias**:
+  - `mark_to_market` ahora retorna `long_bucket` con `long_daily_return` y `long_equity`.
+  - Orden de ejecución short→long fijo; el largo consume la caja que quedó después del corto.
+  - El flag es CLI (`--enable-long-engine`); desactivación inmediata sin deploy.
+- **Alternativas consideradas**:
+  - **Exponer long_daily_return desde un snap genérico**: descartada — el snapshot no tenía esa key, forzaba al caller a calcular manualmente.
+  - **Feature flag en YAML de policy**: descartada por ahora — un flag CLI es más simple para paper-live y evita tocar el schema de policy.
+  - **No deduplicar el riesgo corto (mantener copia)**: descartada — violaría la regla de single source of truth para la cadena de riesgo.
+- **Archivos**: `core_sim/ledger.py`, `core_sim/long_term_monthly_runner.py`, `core_sim/short_term_day_runner.py`, `scripts/run_paper_live.py`, tests correspondientes.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

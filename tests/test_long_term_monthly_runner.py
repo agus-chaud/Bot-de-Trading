@@ -414,6 +414,57 @@ def test_split_adjusted_qty_leaves_weights_stable_at_runner_level():
 
 
 # ---------------------------------------------------------------------------
+# 6. check_long_risk blocks on real daily breach (Fase 0/1)
+# ---------------------------------------------------------------------------
+
+
+def test_long_risk_guardrail_blocks_on_real_daily_loss():
+    """When the long sleeve loses > 1.5% in a day, propose_orders must block.
+
+    Strategy: seed a long position, MTM day 1 at high price, MTM day 2 at lower price
+    so the ledger computes a real long_daily_return < -0.015.  The runner must use
+    that value (from long_bucket) instead of defaulting to 0.0.
+    """
+    policy = _policy_doc()
+    ledger = _make_ledger(cash=200_000.0)
+
+    ledger.apply_fills(
+        date(2026, 3, 30),
+        [{"symbol": "SPY", "side": "BUY", "qty": 1500.0, "price": 100.0,
+          "market": "US", "bucket": "long", "fee": 0.0}],
+    )
+    ledger.mark_to_market(date(2026, 3, 31), {"SPY": {"close": 100.0}})
+    snap_after_drop = ledger.mark_to_market(date(2026, 4, 1), {"SPY": {"close": 96.0}})
+
+    long_bucket = snap_after_drop.get("long_bucket") or {}
+    assert long_bucket.get("long_daily_return", 0.0) < -0.015, (
+        "Precondition: long_daily_return should be < -1.5% after a ~4% drop on 75% position"
+    )
+
+    h = create_long_term_pipeline_handlers(policy, REPO_ROOT, ledger)
+
+    daily_bars_dropped = {
+        "SPY": {"close": 96.0, "volume": 1_000_000},
+        "IWM": {"close": 50.0, "volume": 500_000},
+        "QQQ": {"close": 300.0, "volume": 200_000},
+    }
+    ctx = _base_ctx(
+        trading_day=_REBALANCE_DAY,
+        positions_qty_long=dict(_QTY_OUT_OF_BAND),
+    )
+    ctx["daily_bars"] = daily_bars_dropped
+
+    signals = h["generate_signals"](**ctx)
+    proposed = h["propose_orders"](**{**ctx, "signals": signals})
+
+    assert proposed["orders_intent"] == [], "Long risk guardrail should have blocked all intents"
+    halt_reason = proposed.get("long_metrics", {}).get("halt_reason", "")
+    assert halt_reason == "long_daily_loss_limit", (
+        f"Expected halt_reason='long_daily_loss_limit', got '{halt_reason}'"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Gap 2 — us_sessions auto-derivación desde calendar_store
 # ---------------------------------------------------------------------------
 

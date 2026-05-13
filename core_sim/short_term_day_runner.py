@@ -49,11 +49,11 @@ def load_merged_whitelist(repo_root: Path, policy_doc: dict[str, Any]) -> dict[s
     with ar_path.open(encoding="utf-8") as f:
         ar_doc = yaml.safe_load(f) or {}
 
-    for bucket in ("etfs", "stocks"):
-        for raw in us_doc.get(bucket, []) or []:
-            merged[str(raw).strip().upper()] = "US"
     for raw in ar_doc.get("stocks", []) or []:
         merged[str(raw).strip().upper()] = "AR"
+    for bucket in ("etfs", "stocks", "adrs"):
+        for raw in us_doc.get(bucket, []) or []:
+            merged[str(raw).strip().upper()] = "US"
     return merged
 
 
@@ -328,6 +328,8 @@ def create_short_term_pipeline_handlers(
 
     from .risk_guardrails import GuardrailResult
 
+    _KILL_DD_DISABLED = -100.0
+
     def _check_risk_with_optional_db(
         sb: dict,
         flags: dict,
@@ -335,56 +337,33 @@ def create_short_term_pipeline_handlers(
         now_minutes_from_open: int | None,
         trading_day: date,
     ) -> "GuardrailResult":
-        """When db is available, replace the stateless kill switch check with the persisted one.
+        """Lightweight orchestrator: reuses check_short_risk for common checks,
+        injects check_and_persist_kill_switch when db is available.
 
-        Checks run in the same order as check_short_risk:
-        data_quality → no_trade_window → kill_switch → daily_loss.
-        The only difference is that kill_switch uses check_and_persist_kill_switch when db is set.
+        Order: data_quality → no_trade_window → kill_switch → daily_loss.
+        Without DB: delegates entirely to check_short_risk (stateless kill switch).
+        With DB: replaces the stateless kill switch step with the persisted one.
         """
         if db is None:
             return check_short_risk(sb, flags, risk_config, now_minutes_from_open)
 
-        # data_quality
-        halt_on_dq = bool(flags.get("halt_on_data_quality", True))
-        data_ok = bool(flags.get("data_quality_ok", True))
-        if halt_on_dq and not data_ok:
-            return GuardrailResult(
-                allowed=False,
-                reason="halt_data_quality",
-                meta={"halt_on_data_quality": halt_on_dq, "data_quality_ok": data_ok},
-            )
+        pre_config = {**risk_config, "kill_dd": _KILL_DD_DISABLED, "max_daily_short": 0.0}
+        pre = check_short_risk(sb, flags, pre_config, now_minutes_from_open)
+        if not pre.allowed:
+            return pre
 
-        # no_trade_window
-        no_trade_first = int(risk_config.get("no_trade_first", 0))
-        no_trade_last = int(risk_config.get("no_trade_last", 0))
-        if now_minutes_from_open is not None and in_no_trade_window(
-            no_trade_first=no_trade_first,
-            no_trade_last=no_trade_last,
-            session_minutes_from_open=now_minutes_from_open,
-            session_length_minutes=us_regular_session_length_minutes(),
-        ):
-            return GuardrailResult(
-                allowed=False,
-                reason="no_trade_window",
-                meta={"now_minutes_from_open": now_minutes_from_open},
-            )
-
-        # kill_switch — persisted path
         ks_result = check_and_persist_kill_switch(sb, risk_config, db, engine="short", today=trading_day)
         if not ks_result.allowed:
             return ks_result
 
-        # daily_loss
-        max_daily_short = float(risk_config.get("max_daily_short", -0.02))
-        daily_ret = float(sb.get("daily_return", 0.0))
-        if max_daily_short < 0.0 and daily_ret < max_daily_short:
-            return GuardrailResult(
-                allowed=False,
-                reason="short_daily_loss_limit",
-                meta={"daily_return": daily_ret, "limit": max_daily_short},
-            )
+        daily_config = {**risk_config, "kill_dd": _KILL_DD_DISABLED}
+        daily_flags = {"halt_on_data_quality": False, "data_quality_ok": True}
+        post = check_short_risk(sb, daily_flags, daily_config, None)
+        if not post.allowed:
+            return post
 
         monthly_dd = float(sb.get("monthly_drawdown", 0.0))
+        daily_ret = float(sb.get("daily_return", 0.0))
         return GuardrailResult(allowed=True, reason="ok", meta={"monthly_drawdown": monthly_dd, "daily_return": daily_ret})
 
     def generate_signals(**ctx: Any) -> dict[str, Any]:

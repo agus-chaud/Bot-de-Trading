@@ -63,7 +63,7 @@ Si una regla bloquea, no se ejecutan entradas nuevas. La salida de cada evaluaci
 
 ### Guardrails del bloque largo
 
-`check_long_risk()` aplica un limite diario del sleeve largo y evita rebalanceos cuando el contexto excede el riesgo permitido.
+`check_long_risk()` aplica un limite diario del sleeve largo (-1.5% del equity largo) y evita rebalanceos cuando el contexto excede el riesgo permitido. El insumo `long_daily_return` se calcula en el `PortfolioLedger` (comparacion contra MTM del dia habil anterior) y se expone via `long_bucket` en el snapshot de `mark_to_market`. El runner largo extrae esta key explicitamente — no depende de un default implicito 0.0.
 
 ### Stop loss por instrumento
 
@@ -125,6 +125,7 @@ El largo plazo trabaja con rebalanceo mensual por bandas de drift:
 - Mide desvio entre peso actual y objetivo.
 - Solo rebalancea si es dia valido de calendario y el drift supera el umbral.
 - En v1, el satelite esta acotado y controlado por limites explicitos.
+- **Guardrail efectivo**: `check_long_risk()` recibe `long_daily_return` real desde `long_bucket` del ledger. Si el sleeve largo pierde mas de 1.5% en el dia, se bloquean nuevos rebalanceos.
 
 Este bloque apunta a estabilidad de cartera y menor rotacion relativa, complementando al motor corto que es mas tactico.
 
@@ -165,7 +166,8 @@ El `PortfolioLedger` centraliza:
 - Estado de posiciones.
 - PnL realizado/no realizado.
 - Curva de equity.
-- Drawdown mensual del bucket corto.
+- Drawdown mensual del bucket corto (`short_bucket`).
+- **Daily return del sleeve largo** (`long_bucket` con `long_daily_return` y `long_equity`), calculado como variacion vs MTM del dia habil anterior.
 
 ```mermaid
 flowchart LR
@@ -181,12 +183,14 @@ flowchart LR
 
 ### Orquestador diario
 
-`scripts/run_paper_live.py` ejecuta el pipeline corto dia a dia contra OHLCV real en SQLite:
+`scripts/run_paper_live.py` ejecuta el pipeline dia a dia contra OHLCV real en SQLite:
 
 - Detecta el ultimo dia procesado y hace catch-up idempotente de los dias faltantes.
 - Aplica politica F3: si el gap supera 3 dias habiles, exit(2) y requiere intervencion manual.
 - Persiste fills y snapshots en `data/market.db` bajo mode `paper_live`.
 - Replay de ledger desde fills anteriores para mantener estado coherente.
+- **Soporte para ambos sleeves**: con `--enable-long-engine` se ejecuta el pipeline corto primero y luego el largo sobre el mismo ledger/broker. Los fills de ambos sleeves se persisten juntos. Sin el flag (default), el flujo es solo corto — rollback inmediato sin cambio de codigo.
+- Orden fijo **short → long**: el largo consume la caja que quedo despues del corto.
 
 ### Workflow automatizado
 
@@ -232,11 +236,11 @@ La estrategia de testing prioriza comportamiento observable:
 - Regresion de KPI con fixtures golden.
 - Validation stages (data quality, risk audit, kill switch history, motores corto/largo).
 
-El repo cuenta con ~39 archivos de test, abarcando unitarios, integracion y regresion. El objetivo no es "testear por cobertura", sino reducir riesgo de regresiones en decisiones de negocio (riesgo, sizing, ejecucion y validacion).
+El repo cuenta con ~44 archivos de test, abarcando unitarios, integracion y regresion. El objetivo no es "testear por cobertura", sino reducir riesgo de regresiones en decisiones de negocio (riesgo, sizing, ejecucion y validacion).
 
 ## 11) Decisiones tecnicas clave
 
-Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (42 ADRs a la fecha). Los ejes principales son:
+Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (43 ADRs a la fecha). Los ejes principales son:
 
 - Paper-first como estrategia de construccion.
 - Riesgo deterministico y centralizado.
@@ -245,6 +249,8 @@ Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (42 ADRs
 - Gate KPI OOS con umbrales pre-registrados y ramp-up gradual en 5 escalones (**ADR-041**).
 - RSI(14) como filtro de entrada y señal de salida del motor corto (**ADR-042**): mejoro avg max drawdown de -0.134% a -0.098% y redujo turnover de 1.69 a 1.26 en walk-forward 180d.
 - Modelo de branches `main` / `paper-live-data` con LFS y notificaciones (**ADR-040**).
+- ADRs argentinos (MELI, YPF, TGS, GGAL) incorporados al whitelist US con precedencia de tag y categoría `adrs` separada (**ADR-043**).
+- Integración del largo en paper-live con guardrail efectivo, dedup de riesgo corto y feature flag de rollback (**ADR-044**).
 
 Para defensa oral, esta seccion muestra que la arquitectura no salio de una implementacion improvisada, sino de decisiones acumuladas y justificadas.
 
@@ -268,13 +274,14 @@ En una defensa oral, el punto central es demostrar gobernanza: **la IA fue herra
 
 ## 13) Trabajo pendiente
 
-El proyecto esta funcional en paper-first con pipeline corto operativo diario y gate KPI OOS activo. Frentes abiertos:
+El proyecto esta funcional en paper-first con ambos sleeves (corto y largo) integrados en el loop diario. Gate KPI OOS activo. Frentes abiertos:
 
 1. **Acumular datos paper-live**: el gate KPI OOS requiere minimo 312 dias habiles (~15 meses); hoy hay ~120 dias historicos. El workflow diario esta activo y acumulando.
-2. Completar integracion operativa plena del bloque largo en el flujo diario de paper-live (`long_term_monthly_runner` en `event_engine`).
+2. **Activar `--enable-long-engine` en produccion**: el largo esta cableado y testeado, pero el flag esta apagado por defecto. Activar tras validar en paper que el snapshot final refleja ambos sleeves correctamente.
 3. Cerrar brechas entre policy y ejecucion en puntos puntuales (por ejemplo, controles de concentracion sectorial en runtime si se habilitan como bloqueantes).
 4. Explorar indicadores complementarios al RSI si el drawdown mensual del bucket corto sigue siendo cuello de botella (4/13 windows passed en walk-forward 180d).
 5. Extender controles CI de cobertura y regresion a modulos fuera de `core_sim` con la misma disciplina (especialmente `validation/` y `reporting/`).
+6. Agregar observabilidad explicita para operacion diaria del largo: metricas minimas por dia (`fills_long_count`, `long_risk_block_count`, `snapshot_long_equity_present`).
 
 Este capitulo existe para evitar una narrativa "cerrada". El sistema se presenta como una base robusta en evolucion, con backlog tecnico explicitado.
 
@@ -293,6 +300,6 @@ Documentos complementarios:
 - Politica operativa: `POLICY.md`
 - Contrato parseable: `config/policy.v1.yaml`
 - Validacion estructural: `config/policy.v1.schema.json`
-- Registro de decisiones: `decisiones-tecnicas.md` (42 ADRs)
+- Registro de decisiones: `decisiones-tecnicas.md` (44 ADRs)
 - KPI spec: `docs/kpi_report_spec.v1.md`
-- Listas blancas: `config/symbols/whitelist_us.yaml`, `config/symbols/whitelist_ar.yaml`
+- Listas blancas: `config/symbols/whitelist_us.yaml` (ETFs, stocks, ADRs), `config/symbols/whitelist_ar.yaml`

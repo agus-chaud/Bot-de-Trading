@@ -107,6 +107,36 @@ def test_check_long_risk_missing_key_defaults_to_zero():
     assert result.reason == "ok"
 
 
+def test_check_long_risk_blocks_on_real_breach():
+    """check_long_risk must block when long_daily_return breaches the real threshold,
+    not just pass because the key is absent and defaults to 0.0.
+
+    This test validates the contract: callers must provide long_daily_return explicitly.
+    """
+    sb = {"long_daily_return": -0.016}
+    result = check_long_risk(sb, _LONG_CONFIG)
+    assert not result.allowed
+    assert result.reason == "long_daily_loss_limit"
+    assert result.meta["long_daily_return"] == pytest.approx(-0.016)
+    assert result.meta["limit"] == pytest.approx(-0.015)
+
+
+def test_check_long_risk_at_exact_threshold_allows():
+    """Boundary: exactly at -0.015 must allow (uses strict <, consistent with short)."""
+    sb = {"long_daily_return": -0.015}
+    result = check_long_risk(sb, _LONG_CONFIG)
+    assert result.allowed
+    assert result.reason == "ok"
+
+
+def test_check_long_risk_just_below_threshold_blocks():
+    """One tick below threshold must block."""
+    sb = {"long_daily_return": -0.0151}
+    result = check_long_risk(sb, _LONG_CONFIG)
+    assert not result.allowed
+    assert result.reason == "long_daily_loss_limit"
+
+
 # ---------------------------------------------------------------------------
 # log_risk_cycle
 # ---------------------------------------------------------------------------

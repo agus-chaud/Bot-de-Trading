@@ -34,9 +34,9 @@ Usar roles para **acotar** qué toca cada subagente o PR. Solapamiento mínimo.
 | Rol | Responsabilidad | Rutas típicas |
 |-----|-----------------|---------------|
 | **Spec / policy** | `POLICY.md`, `config/*.yaml`, `config/symbols/*`, schema JSON | `POLICY.md`, `config/` |
-| **Core sim** | Paper broker, ledger, costos, event engine | `core_sim/paper_broker_sim.py`, `core_sim/ledger.py`, `core_sim/event_engine.py`, `core_sim/cost_model.py` |
+| **Core sim** | Paper broker, ledger (short_bucket + long_bucket), costos, event engine | `core_sim/paper_broker_sim.py`, `core_sim/ledger.py`, `core_sim/event_engine.py`, `core_sim/cost_model.py` |
 | **Data** | Snapshot OHLCV + historial, whitelist, calendario en `MarketOpen`, corporate actions v1 | `core_sim/short_term_day_runner.py`, `core_sim/long_term_engine.py` (input contract), `core_sim/calendar_store.py` |
-| **Engines** | Señales → intents; integración diaria corta; motor largo mensual por bandas; pre-gate walk-forward OOS | `core_sim/short_term_engine.py`, `core_sim/short_term_day_runner.py`, `core_sim/long_term_engine.py`, `core_sim/short_term_pre_gate.py`, `scripts/run_short_term_pre_gate.py` |
+| **Engines** | Señales → intents; integración diaria corta; motor largo mensual por bandas; pre-gate walk-forward OOS; orquestación paper-live short→long | `core_sim/short_term_engine.py`, `core_sim/short_term_day_runner.py`, `core_sim/long_term_engine.py`, `core_sim/long_term_monthly_runner.py`, `core_sim/short_term_pre_gate.py`, `scripts/run_short_term_pre_gate.py`, `scripts/run_paper_live.py` |
 | **Risk** | Guardrails centralizados en `risk_guardrails.py`: fail-fast data quality, ventanas no-trade, kill switch mensual corto, pérdida diaria bucket corto, stop loss ATR por ticker; allocator 30/70 + 20/80 en sizing; gestión de riesgo motor largo (-1.5% diario) | `core_sim/risk_guardrails.py`, `core_sim/short_term_day_runner.py` (handlers `propose_orders` / `risk_check`), `core_sim/long_term_monthly_runner.py`, `config/policy.v1.yaml` → `risk`, `weights`, `geo`, `stop_loss` |
 | **QA / CI** | Tests por **comportamiento** (ver *Smart testing*), schema policy, cobertura `core_sim` en CI | `tests/`, `.github/workflows/ci.yml` |
 
@@ -53,8 +53,9 @@ El módulo `core_sim/risk_guardrails.py` es el **punto centralizado de decisione
   4. Límite de pérdida diaria bucket corto.
   - Retorna `GuardrailResult` con decisión binaria (trade / no-trade) y motivo. **No ejecuta**, solo recomienda.
 
-- **`check_long_risk()`**: guardrail simplificado para motor largo:
-  - Límite diario del sleeve largo (-1.5% del equity).
+- **`check_long_risk()`**: guardrail efectivo para motor largo:
+  - Límite diario del sleeve largo (-1.5% del equity largo).
+  - Recibe `long_daily_return` real desde `long_bucket` del snapshot de `mark_to_market` — no depende del default 0.0.
   - Retorna `GuardrailResult` análogo.
 
 - **`check_stop_loss()` + `compute_atr()`**: evaluación de stop loss por ticker:
@@ -65,8 +66,8 @@ El módulo `core_sim/risk_guardrails.py` es el **punto centralizado de decisione
 - **`log_risk_cycle()`**: JSON estructurado con decisión, flags, métricas de MTM y timestamp para auditoría.
 
 **Aclaración arquitectónica**: `risk_guardrails` NO es un ejecutor — es un **componente de recomendación**. El executor real está en:
-- `short_term_day_runner.py` (handlers `propose_orders` y `risk_check`): verifica recomendaciones de `check_short_risk()` + `check_stop_loss()` y decide si bloquea la orden o permite ejecución.
-- `long_term_monthly_runner.py` (handler de rebalanceo): verifica `check_long_risk()` antes de generar intents.
+- `short_term_day_runner.py` (handlers `propose_orders` y `risk_check`): `_check_risk_with_optional_db` es un orquestador liviano que reutiliza `check_short_risk()` para data_quality + no_trade + daily_loss e inyecta `check_and_persist_kill_switch()` cuando hay DB. Sin DB, delega directo a `check_short_risk()`.
+- `long_term_monthly_runner.py` (handler de rebalanceo): extrae `snap["long_bucket"]` y pasa `long_daily_return` explícito a `check_long_risk()`.
 
 Esto permite auditar "por qué no se ejecutó" separando la lógica de decisión (guardrails) del flujo operativo (runners).
 
@@ -96,6 +97,15 @@ El proyecto usa dos ramas con responsabilidades distintas:
 - **Git LFS**: `data/*.db` en `paper-live-data` se trackea con LFS (`.gitattributes`); en `main` la DB está gitignoreada.
 - **Notificación de fallos**: el workflow crea un issue GitHub automáticamente si algún step falla (detección temprana, evita violar F3).
 - Decisión registrada en `decisiones-tecnicas.md` (**ADR-040**).
+
+## Integración largo en paper-live (ADR-044)
+
+- `run_paper_live.py` soporta `--enable-long-engine` (default `false`).
+- Con flag activo: ejecuta short primero, luego long sobre el mismo ledger/broker. Fills combinados. Snapshot final post-ambos sleeves.
+- Sin flag: flujo idéntico al anterior (solo corto). **Rollback inmediato** sin cambio de código.
+- `PortfolioLedger.mark_to_market` retorna `long_bucket` con `long_daily_return` real.
+- `check_long_risk()` recibe ese `long_daily_return` explícitamente (no default 0.0).
+- `_check_risk_with_optional_db` en el runner corto es un orquestador liviano: reutiliza `check_short_risk` + inyecta `check_and_persist_kill_switch` con DB (sin duplicar la cadena de 4 checks).
 
 ## Convenciones
 

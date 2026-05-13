@@ -53,6 +53,8 @@ class PortfolioLedger:
         self._short_monthly_drawdown = 0.0
         # short MV por fecha (última escritura gana) para `daily_return` con varias MTM en un día
         self._short_eod_by_trading_date: dict[date, float] = {}
+        # long equity por fecha para daily return del sleeve largo
+        self._long_eod_by_trading_date: dict[date, float] = {}
 
     def apply_fills(
         self,
@@ -145,6 +147,11 @@ class PortfolioLedger:
             short_equity=short_equity,
         )
 
+        long_daily_return, long_bucket = self._attach_long_daily_return(
+            trading_day=trading_day,
+            long_equity=equity_long,
+        )
+
         return {
             "trading_day": trading_day.isoformat(),
             "cash": self.cash,
@@ -157,6 +164,7 @@ class PortfolioLedger:
             "costs_day": costs_day,
             "equity_curve_points": list(self.equity_curve_points),
             "short_bucket": short_bucket,
+            "long_bucket": long_bucket,
         }
 
     def update_day(
@@ -342,3 +350,19 @@ class PortfolioLedger:
         out: dict[str, float] = dict(short_bucket)
         out["daily_return"] = float(daily)
         return float(daily), out
+
+    def _attach_long_daily_return(
+        self,
+        trading_day: date,
+        long_equity: float,
+    ) -> tuple[float, dict[str, float]]:
+        """Daily return del sleeve largo vs. última MTM con fecha estrictamente anterior a `trading_day`."""
+        prior_dates = [d for d in self._long_eod_by_trading_date if d < trading_day]
+        if not prior_dates:
+            daily = 0.0
+        else:
+            d_prev = max(prior_dates)
+            prev = float(self._long_eod_by_trading_date[d_prev])
+            daily = 0.0 if prev <= 0.0 else (float(long_equity) - prev) / prev
+        self._long_eod_by_trading_date[trading_day] = float(long_equity)
+        return float(daily), {"long_daily_return": float(daily), "long_equity": float(long_equity)}

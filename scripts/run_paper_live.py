@@ -23,8 +23,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core_sim.calendar_store import TradingCalendarStore  # noqa: E402
 from core_sim.cost_model import CostModel, MarketCostConfig  # noqa: E402
 from core_sim.ledger import PortfolioLedger  # noqa: E402
+from core_sim.long_term_monthly_runner import create_long_term_monthly_backtester  # noqa: E402
 from core_sim.paper_broker_sim import PaperBrokerSim  # noqa: E402
 from core_sim.short_term_day_runner import create_short_term_daily_backtester  # noqa: E402
 from core_sim.short_term_pre_gate import build_history_before_day  # noqa: E402
@@ -96,19 +98,51 @@ def _build_history_from_db(
 _VENUE_MAP: dict[str, str] = {"US": "XNYS", "AR": "XBUE"}
 
 
+def _build_long_pipeline_context(
+    ledger: PortfolioLedger,
+    snap: dict[str, Any],
+    calendar_store: TradingCalendarStore | None,
+) -> dict[str, Any]:
+    """Build pipeline_context keys required by the long-term engine from current ledger state."""
+    positions_qty_long: dict[str, float] = {}
+    for sym, pos_data in (snap.get("positions") or {}).items():
+        if str(pos_data.get("bucket")) == "long":
+            positions_qty_long[sym] = float(pos_data.get("qty", 0.0))
+
+    ctx: dict[str, Any] = {
+        "long_bucket_mtm": float(snap.get("equity_long", 0.0)),
+        "long_cash": float(snap.get("cash", 0.0)) - float(getattr(ledger, "short_cash", 0.0)),
+        "positions_qty_long": positions_qty_long,
+    }
+    if calendar_store is not None:
+        ctx["us_sessions"] = calendar_store.us_sessions
+    return ctx
+
+
 def run_catch_up(
     db: MarketDB,
     gap_days: list[date],
     policy_doc: dict[str, Any],
     initial_cash: float,
+    *,
+    enable_long_engine: bool = False,
 ) -> None:
-    """Process each gap day sequentially: replay → load bars → run pipeline → persist."""
+    """Process each gap day sequentially: replay → load bars → run pipeline → persist.
+
+    When enable_long_engine=True, runs short pipeline first, then long pipeline
+    on the same ledger/broker. Fills from both sleeves are persisted together.
+    """
     mode = "paper_live"
     momentum = int(policy_doc["short_term_engine"]["momentum_lookback_days"])
     history_cap = max(momentum + 30, 60)
 
     from core_sim.short_term_day_runner import load_merged_whitelist
     merged_whitelist = load_merged_whitelist(REPO_ROOT, policy_doc)
+
+    calendar_store: TradingCalendarStore | None = None
+    cal_path = REPO_ROOT / "config" / "calendars" / "trading_days.v1.yaml"
+    if cal_path.exists():
+        calendar_store = TradingCalendarStore.from_yaml(str(cal_path))
 
     for day in gap_days:
         existing = db.get_last_snapshot_day(mode)
@@ -119,13 +153,14 @@ def run_catch_up(
         ledger = db.replay_ledger_from_fills(mode, starting_cash=initial_cash)
         cost_model = _cost_model_from_policy(policy_doc)
         broker = PaperBrokerSim(ledger=ledger, cost_model=cost_model)
-        backtester = create_short_term_daily_backtester(
+        short_backtester = create_short_term_daily_backtester(
             policy_doc=policy_doc,
             repo_root=REPO_ROOT,
             ledger=ledger,
             broker=broker,
-            calendar_store=None,
+            calendar_store=calendar_store,
             corporate_actions_store=None,
+            db=db,
         )
 
         daily_bars: dict[str, dict[str, float]] = {}
@@ -154,19 +189,43 @@ def run_catch_up(
                 db, sym, day, venue, lookback_days=history_cap
             )
 
-        events = backtester.run_day(
+        short_events = short_backtester.run_day(
             trading_day=day,
             daily_bars=daily_bars,
             pipeline_context={"history_by_symbol": history_by_symbol},
         )
 
-        fills = events[4].payload
-        snap = events[-1].payload
+        short_fills = short_events[4].payload
+        all_fills: list[dict] = list(short_fills) if isinstance(short_fills, list) else []
+        long_fills_count = 0
 
+        if enable_long_engine:
+            short_snap = ledger.mark_to_market(trading_day=day, daily_bars=daily_bars)
+            long_ctx = _build_long_pipeline_context(ledger, short_snap, calendar_store)
+
+            long_backtester = create_long_term_monthly_backtester(
+                policy_doc=policy_doc,
+                repo_root=REPO_ROOT,
+                ledger=ledger,
+                broker=broker,
+                calendar_store=calendar_store,
+                db=db,
+            )
+            long_events = long_backtester.run_day(
+                trading_day=day,
+                daily_bars=daily_bars,
+                pipeline_context=long_ctx,
+            )
+            long_fills = long_events[4].payload
+            if isinstance(long_fills, list) and long_fills:
+                all_fills.extend(long_fills)
+                long_fills_count = len(long_fills)
+
+        snap = ledger.mark_to_market(trading_day=day, daily_bars=daily_bars)
         run_id = f"paper_live_{day.isoformat()}_{uuid.uuid4().hex[:8]}"
 
-        if isinstance(fills, list) and fills:
-            db.persist_fills(run_id, mode, day, fills)
+        if all_fills:
+            db.persist_fills(run_id, mode, day, all_fills)
 
         if isinstance(snap, dict):
             short_cash = float(snap.get("cash", 0.0)) * float(
@@ -180,10 +239,15 @@ def run_catch_up(
                 kill_switch_active=bool(
                     snap.get("short_bucket", {}).get("kill_switch_active", False)
                 ),
-                num_fills_today=len(fills) if isinstance(fills, list) else 0,
+                num_fills_today=len(all_fills),
             )
 
-        logger.info("Day %s processed — run_id=%s, fills=%d", day, run_id, len(fills) if isinstance(fills, list) else 0)
+        logger.info(
+            "Day %s processed — run_id=%s, short_fills=%d, long_fills=%d",
+            day, run_id,
+            len(all_fills) - long_fills_count,
+            long_fills_count,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +289,12 @@ def main() -> int:
         type=str,
         default=str(REPO_ROOT / "config" / "policy.v1.yaml"),
         help="Path to policy YAML.",
+    )
+    parser.add_argument(
+        "--enable-long-engine",
+        action="store_true",
+        default=False,
+        help="Enable long-term sleeve execution (default: disabled for short-only rollback).",
     )
     args = parser.parse_args()
 
@@ -283,7 +353,10 @@ def main() -> int:
     )
 
     try:
-        run_catch_up(db, gap_days, policy_doc, args.initial_cash)
+        run_catch_up(
+            db, gap_days, policy_doc, args.initial_cash,
+            enable_long_engine=args.enable_long_engine,
+        )
     except Exception as exc:
         logger.exception("Runtime error during paper-live run: %s", exc)
         return 1

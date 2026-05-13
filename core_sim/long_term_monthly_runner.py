@@ -164,8 +164,8 @@ def create_long_term_pipeline_handlers(
             return _empty_proposal("invalid_signals")
 
         snap = ledger.mark_to_market(trading_day=ctx["trading_day"], daily_bars=ctx["daily_bars"])
-        sb = snap or {}
-        guardrail = check_long_risk(sb, {"max_daily_long": max_daily_long})
+        long_bucket = snap.get("long_bucket") or {}
+        guardrail = check_long_risk(long_bucket, {"max_daily_long": max_daily_long})
         if not guardrail.allowed:
             log_risk_cycle(
                 engine="long",
@@ -208,8 +208,8 @@ def create_long_term_pipeline_handlers(
             broker_orders = list(proposed)
 
         snap = ledger.mark_to_market(trading_day=ctx["trading_day"], daily_bars=ctx["daily_bars"])
-        sb = snap or {}
-        guardrail = check_long_risk(sb, {"max_daily_long": max_daily_long})
+        long_bucket = snap.get("long_bucket") or {}
+        guardrail = check_long_risk(long_bucket, {"max_daily_long": max_daily_long})
         if not guardrail.allowed:
             return []
 

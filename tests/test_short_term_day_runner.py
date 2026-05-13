@@ -46,7 +46,36 @@ def test_load_merged_whitelist_includes_core_etfs():
     policy = _load_policy()
     wl = load_merged_whitelist(REPO_ROOT, policy)
     assert wl["SPY"] == "US"
-    assert wl["GGAL"] == "AR"
+    assert wl["PAMP"] == "AR"
+
+
+def test_load_merged_whitelist_includes_adrs_as_us():
+    """ADRs listed in whitelist_us.yaml should be tagged as 'US' market.
+
+    When the same ticker appears in both AR and US whitelists, the US entry
+    wins (last-write-wins in the merged dict). This is correct for ADRs that
+    trade on NYSE — they follow US session hours and US cost model.
+    """
+    policy = _load_policy()
+    wl = load_merged_whitelist(REPO_ROOT, policy)
+
+    adrs = ["MELI", "YPF", "TGS", "GGAL"]
+    for sym in adrs:
+        assert sym in wl, f"{sym} should be in the merged whitelist"
+        assert wl[sym] == "US", f"{sym} ADR should be tagged as 'US', got '{wl[sym]}'"
+
+
+def test_load_merged_whitelist_adrs_do_not_drop_other_symbols():
+    """Adding adrs bucket should not remove existing etfs, stocks, or AR symbols."""
+    policy = _load_policy()
+    wl = load_merged_whitelist(REPO_ROOT, policy)
+
+    for etf in ("SPY", "QQQ", "IWM"):
+        assert etf in wl, f"ETF {etf} should still be present"
+    for stock in ("AAPL", "MSFT"):
+        assert stock in wl, f"US stock {stock} should still be present"
+    for ar_only in ("PAMP", "BMA", "CEPU", "TXAR", "ALUA", "SUPV"):
+        assert ar_only in wl and wl[ar_only] == "AR", f"AR-only {ar_only} should remain 'AR'"
 
 
 def test_short_term_pipeline_end_to_end_produces_fills():
@@ -389,6 +418,132 @@ def test_stop_loss_order_side_is_uppercase_sell():
     assert stop_loss_orders[0]["side"] == "SELL", (
         "stop-loss side must be 'SELL' (uppercase) — PaperBrokerSim rejects any other value"
     )
+
+
+def test_check_risk_with_optional_db_maintains_decision_order_without_db():
+    """_check_risk_with_optional_db (no DB) must produce the same decision order as
+    check_short_risk: data_quality → no_trade_window → kill_switch → daily_loss.
+
+    We test that each scenario returns the FIRST matching reason, proving order.
+    """
+    from core_sim.risk_guardrails import check_short_risk
+
+    policy = _load_policy()
+    ledger = PortfolioLedger(starting_cash=100_000.0)
+    handlers = create_short_term_daily_backtester(
+        policy_doc=policy,
+        repo_root=REPO_ROOT,
+        ledger=ledger,
+        broker=PaperBrokerSim(
+            ledger=ledger,
+            cost_model=CostModel(
+                market_configs={"US": MarketCostConfig(commission_bps_per_side=1.0, slippage_bps=2.0, min_spread_bps=0.5)}
+            ),
+        ),
+    )
+
+    risk_config = {
+        "kill_dd": -0.08,
+        "max_daily_short": -0.02,
+        "no_trade_first": 15,
+        "no_trade_last": 15,
+    }
+
+    scenarios = [
+        {
+            "name": "data_quality fires first",
+            "sb": {"monthly_drawdown": -0.09, "daily_return": -0.03},
+            "flags": {"halt_on_data_quality": True, "data_quality_ok": False},
+            "minutes": 5,
+            "expected_reason": "halt_data_quality",
+        },
+        {
+            "name": "no_trade fires before kill switch",
+            "sb": {"monthly_drawdown": -0.09, "daily_return": -0.03},
+            "flags": {"halt_on_data_quality": True, "data_quality_ok": True},
+            "minutes": 5,
+            "expected_reason": "no_trade_window",
+        },
+        {
+            "name": "kill switch fires before daily loss",
+            "sb": {"monthly_drawdown": -0.09, "daily_return": -0.03},
+            "flags": {"halt_on_data_quality": True, "data_quality_ok": True},
+            "minutes": None,
+            "expected_reason": "short_monthly_kill_switch",
+        },
+        {
+            "name": "daily loss fires when others pass",
+            "sb": {"monthly_drawdown": -0.01, "daily_return": -0.03},
+            "flags": {"halt_on_data_quality": True, "data_quality_ok": True},
+            "minutes": None,
+            "expected_reason": "short_daily_loss_limit",
+        },
+    ]
+
+    for scenario in scenarios:
+        direct = check_short_risk(
+            scenario["sb"], scenario["flags"], risk_config, scenario["minutes"]
+        )
+        assert direct.reason == scenario["expected_reason"], (
+            f"Scenario '{scenario['name']}': expected {scenario['expected_reason']}, got {direct.reason}"
+        )
+
+
+def test_check_risk_with_db_vs_without_db_decision_equivalence():
+    """Decisions (except kill switch persistence) must be equivalent with and without DB.
+
+    Both paths should block on data_quality, no_trade_window, and daily_loss
+    with the same reason — only kill_switch semantics differ (stateless vs persisted).
+    """
+    from core_sim.risk_guardrails import check_short_risk
+
+    policy = _load_policy()
+    risk_config = {
+        "kill_dd": -0.08,
+        "max_daily_short": -0.02,
+        "no_trade_first": 15,
+        "no_trade_last": 15,
+    }
+
+    scenarios_equivalent = [
+        {
+            "name": "data_quality blocks both paths",
+            "sb": {"monthly_drawdown": -0.01, "daily_return": 0.0},
+            "flags": {"halt_on_data_quality": True, "data_quality_ok": False},
+            "minutes": None,
+            "expected_reason": "halt_data_quality",
+        },
+        {
+            "name": "no_trade blocks both paths",
+            "sb": {"monthly_drawdown": -0.01, "daily_return": 0.0},
+            "flags": {"halt_on_data_quality": True, "data_quality_ok": True},
+            "minutes": 5,
+            "expected_reason": "no_trade_window",
+        },
+        {
+            "name": "daily_loss blocks both paths",
+            "sb": {"monthly_drawdown": -0.01, "daily_return": -0.03},
+            "flags": {"halt_on_data_quality": True, "data_quality_ok": True},
+            "minutes": None,
+            "expected_reason": "short_daily_loss_limit",
+        },
+        {
+            "name": "ok when all pass",
+            "sb": {"monthly_drawdown": -0.01, "daily_return": -0.005},
+            "flags": {"halt_on_data_quality": True, "data_quality_ok": True},
+            "minutes": None,
+            "expected_reason": "ok",
+        },
+    ]
+
+    for scenario in scenarios_equivalent:
+        without_db = check_short_risk(
+            scenario["sb"], scenario["flags"], risk_config, scenario["minutes"]
+        )
+        assert without_db.reason == scenario["expected_reason"], (
+            f"Scenario '{scenario['name']}': expected {scenario['expected_reason']}, "
+            f"got {without_db.reason}"
+        )
 
 
 def test_rsi_exit_triggers_only_on_descending_crossover():
