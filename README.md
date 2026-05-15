@@ -90,7 +90,7 @@ La transición a real está planteada como gate, no como salto de fe:
   - `validation/wf_runner.py` — ejecución por ventana de `run_long_engine_stage` (corridas independientes)
   - `validation/wf_long_report.py` — agregación global y serialización JSON del reporte WF largo
   - `scripts/run_long_engine_wf.py` — CLI para producir `validation_reports/long_engine_wf_*.json`
-  - `validation/stages/long_engine.py` — `run_long_engine_stage(..., return_details=True)` devuelve tupla `(StageResult, StageDetails | None)` con curva diaria del sleeve largo, fills y posiciones finales (default: solo `StageResult` vía desempaquetado en callers)
+  - `validation/stages/long_engine.py` — `run_long_engine_stage(..., return_details=True)` devuelve tupla `(StageResult, StageDetails | None)` con curva diaria del sleeve largo, fills y posiciones finales (default: solo `StageResult` vía desempaquetado en callers). Para policy **AR**: fechas efectivas y barras desde **XBUE**; el stage **no depende** de tener calendario **XNYS** en la DB; `CostModel` del broker del stage usa solo el mercado del sleeve (`AR`/`US`). `TradingCalendarStore` opcional desde `config/calendars/trading_days.v1.yaml`.
   - `notebooks/wf_long_comparison.ipynb` — comparación empírica ADR-045/046: WF por ventanas (3m/1m) + gráficos + corrida continua sin reset; ejecutar todas las celdas desde `notebooks/` (**ADR-046**)
   - tests en `tests/test_wf_windows.py`, `tests/test_wf_runner.py`, `tests/test_wf_long_report.py`, `tests/test_validation_long_engine.py`
 - **Informe KPI (smoke, `rpt_kpi.v1`)**:
@@ -114,12 +114,13 @@ La transición a real está planteada como gate, no como salto de fe:
 
 - **Paper-live daily orchestrator**:
   - `scripts/run_paper_live.py` — CLI que ejecuta el pipeline día a día contra OHLCV real en SQLite, con catch-up automático y política F3 (gap > 3 días hábiles → exit(2), intervención manual).
-  - **Soporte para ambos sleeves**: con `--enable-long-engine` se ejecuta short → long sobre el mismo ledger/broker. Fills de ambos sleeves se persisten juntos; snapshot final refleja ambos. Sin el flag (default), flujo solo corto — rollback inmediato sin cambio de código.
+  - Con `--enable-long-engine`, tras el **corto** se construye una copia de `daily_bars` y se **sobrescriben** los precios de las líneas del **`long_term_engine`** con OHLCV **XBUE** cuando el policy usa calendario **AR**, de modo que CEDEAR/pesos (p. ej. `SPY`) no usen cierres **XNYS** por el merge global — ver **ADR-048**.
+  - **Soporte para ambos sleeves**: con ese flag se ejecuta short → long sobre el mismo ledger/broker; fills combinados y snapshot final con MTM usando la copia de barras cuando el largo está activo. Sin flag (default), solo corto.
   - `data/storage.py` — `get_last_snapshot_day(mode)` para detectar último día procesado.
   - `.github/workflows/paper_live_daily.yml` — cron Lun–Vie 10:00 UTC (post-cierre US) + `workflow_dispatch`; opera sobre branch `paper-live-data` y commitea la DB tras cada corrida. Incluye step de **fetch OHLCV** previo al pipeline (`fetch_daily.py --lookback 5`) y **notificación automática** (issue GitHub) ante fallos.
   - **Branch `paper-live-data`**: rama dedicada para datos operativos diarios (DB + fills + snapshots); `main` se mantiene limpio para evolución de código. Git LFS para `data/*.db` evita inflación del repo por commits binarios diarios.
   - Tests en `tests/test_storage.py` y `tests/test_run_paper_live.py` (gap detection, F3 exit code, single/multi-day integration, idempotencia, **feature flag long on/off**).
-  - Decisiones registradas en `decisiones-tecnicas.md` (**ADR-040**, **ADR-044**).
+  - Decisiones registradas en `decisiones-tecnicas.md` (**ADR-040**, **ADR-044**, **ADR-048**).
 
 - **Gate KPI OOS activo** (Fase 5, gate-ramp):
   - `kpi_oos_gate.enabled: true` en `config/policy.v1.yaml` con 7 umbrales bloqueantes pre-registrados (2026-05-11): Sharpe ≥ 0.30, Sortino ≥ 0.40, DD total ≥ -18%, DD corto ≥ -10%, DD largo ≥ -25%, turnover largo ≤ 8%, alpha ≥ -2%.
@@ -153,7 +154,7 @@ La transición a real está planteada como gate, no como salto de fe:
 - `reporting/kpi_v0` + `scripts/report_kpis.py`: informe JSON/Markdown según `docs/kpi_report_spec.v1.md` (lectura post-corrida del export equity + fills).
 - `kpi_oos_gate` + `reporting/kpi_walk_forward` + `scripts/report_kpis_walk_forward.py`: varias ventanas OOS sobre la misma serie, mismo informe v3 por tramo, tabla maestra y gate reproducible opcional (**ADR-034**).
 - `tests/fixtures/kpi_golden` + `tests/test_kpi_regression_golden.py`: regresión con dataset fijo de 60 días y JSON golden en CI (**ADR-035**).
-- `scripts/run_paper_live.py`: orquestador diario paper-live de ambos sleeves — gap detection (F3), catch-up idempotente, replay de ledger, persistencia de fills/snapshots bajo mode `paper_live`. Flag `--enable-long-engine` (default off) activa ejecución short → long con fills combinados.
+- `scripts/run_paper_live.py`: orquestador diario paper-live de ambos sleeves — gap detection (F3), catch-up idempotente, replay de ledger, persistencia de fills/snapshots bajo mode `paper_live`. Flag `--enable-long-engine` (default off) activa ejecución short → long con **overlay de precios XBUE** para el universo del largo AR (**ADR-048**), fills combinados y MTM consistente con CEDEAR/pesos.
 - `.github/workflows/paper_live_daily.yml`: cron + dispatch sobre branch `paper-live-data`; fetch OHLCV + pipeline + commit DB + issue on failure.
 - `event_engine`: orquestador diario con soporte para `execution_mode` (auto/semi_auto) y bypass de stop loss en semi_auto.
 - Flujo completo: Data -> Engines -> `risk_guardrails` -> Allocator -> `paper_broker_sim` -> `ledger`; ambos motores convergen en el mismo núcleo para mantener consistencia y auditoría.

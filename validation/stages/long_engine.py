@@ -16,6 +16,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from core_sim.calendar_store import TradingCalendarStore
 from core_sim.cost_model import CostModel, MarketCostConfig, SlippageMode
 from core_sim.ledger import PortfolioLedger
 from core_sim.long_term_engine import (
@@ -23,6 +24,8 @@ from core_sim.long_term_engine import (
     current_weights_mtm,
     drift_per_line_pp,
     is_rebalance_day_by_rule,
+    long_rebalance_calendar_from_rule,
+    long_sleeve_trade_market,
     long_term_engine_config_from_policy_dict,
     target_weights,
 )
@@ -35,7 +38,21 @@ logger = logging.getLogger(__name__)
 
 _STAGE_NAME = "long_engine"
 _VENUE_US = "XNYS"
+_VENUE_AR = "XBUE"
 _MIN_REBALANCE_UNITS_REQUIRED = 2  # need at least 2 units (weeks/months) to observe behavior
+
+
+def _ar_business_days_in_span(db: MarketDB, span_start: date, span_end: date) -> list[date]:
+    """Ordered AR business dates from calendars (XBUE) within [start, end]."""
+    cursor = db._conn.execute(
+        """
+        SELECT ts FROM calendars
+        WHERE venue = ? AND ts BETWEEN ? AND ?
+        ORDER BY ts ASC
+        """,
+        (_VENUE_AR, span_start.isoformat(), span_end.isoformat()),
+    )
+    return [date.fromisoformat(row[0]) for row in cursor.fetchall()]
 
 
 @dataclass
@@ -52,30 +69,54 @@ class StageDetails:
 # ---------------------------------------------------------------------------
 
 
-def _build_broker(ledger: PortfolioLedger, policy_doc: dict[str, Any]) -> PaperBrokerSim:
-    """Build a PaperBrokerSim from the policy doc cost config."""
-    markets_cfg: dict[str, Any] = policy_doc.get("markets", {})
-    us_cfg_raw: dict[str, Any] = markets_cfg.get("US", {})
-    commission_bps = float(us_cfg_raw.get("commission_bps_per_side", 1.0))
-    slippage_bps = float(us_cfg_raw.get("slippage_bps", 2.0))
-    us_market_cfg = MarketCostConfig(
-        commission_bps_per_side=commission_bps,
-        slippage_bps=slippage_bps,
-        slippage_mode=SlippageMode.FIXED_BPS,
+def _market_cost_config_from_policy(policy_doc: dict[str, Any], *, market_tag: str) -> MarketCostConfig:
+    """Lee ``markets.US`` o ``markets.AR`` del policy (alineado a ``run_paper_live._cost_model_from_policy``)."""
+    mk = market_tag.upper()
+    raw_markets: dict[str, Any] = policy_doc.get("markets", {})
+    cfg_raw: dict[str, Any] = raw_markets.get(mk, {})
+    defaults = (
+        {"commission_bps_per_side": 15.0, "slippage_bps": 5.0}
+        if mk == "AR"
+        else {"commission_bps_per_side": 1.0, "slippage_bps": 2.0}
     )
-    cost_model = CostModel(market_configs={"US": us_market_cfg})
-    return PaperBrokerSim(ledger=ledger, cost_model=cost_model)
+    return MarketCostConfig(
+        commission_bps_per_side=float(cfg_raw.get("commission_bps_per_side", defaults["commission_bps_per_side"])),
+        slippage_bps=float(cfg_raw.get("slippage_bps", defaults["slippage_bps"])),
+        slippage_mode=SlippageMode.FIXED_BPS,
+        min_spread_bps=float(cfg_raw.get("min_spread_bps", 0.5)),
+    )
+
+
+def _build_broker_for_long_sleeve(
+    ledger: PortfolioLedger,
+    policy_doc: dict[str, Any],
+    *,
+    long_trade_market: str,
+) -> PaperBrokerSim:
+    """PaperBrokerSim con costos sólo del mercado del sleeve largo (AR o US).
+
+    Las órdenes del motor largo llevan ``market == long_sleeve_trade_market``; el cost model
+    debe exponer exactamente esa clave para evitar mezclar fee US en simulaciones BYMA y
+    viceversa (``PaperBrokerSim`` / ``CostModel`` resuelven fee por ``order['market']``).
+    """
+    mk = str(long_trade_market).strip().upper()
+    if mk not in {"AR", "US"}:
+        raise ValueError(f"long_trade_market must be AR or US, got {long_trade_market!r}")
+    single = _market_cost_config_from_policy(policy_doc, market_tag=mk)
+    return PaperBrokerSim(ledger=ledger, cost_model=CostModel(market_configs={mk: single}))
 
 
 def _load_daily_bars_for_day(
     db: MarketDB,
     trading_day: date,
     symbols: list[str],
+    *,
+    venue: str,
 ) -> dict[str, dict[str, float]]:
     """Load close prices from the DB for the given day and symbols."""
     bars: dict[str, dict[str, float]] = {}
     for sym in symbols:
-        rows = db.get_ohlcv(sym, trading_day, trading_day, _VENUE_US)
+        rows = db.get_ohlcv(sym, trading_day, trading_day, venue)
         if rows:
             row = rows[0]
             bars[sym] = {"close": row.close, "volume": row.volume}
@@ -141,7 +182,8 @@ def run_long_engine_stage(
 
     Args:
         db: MarketDB instance to query OHLCV data.
-        trading_days: Ordered list of US trading days for the lookback period.
+        trading_days: Lista de días de sesión (US o AR) del lookback; puede remapearse internamente
+            al calendario AR (XBUE) cuando el policy usa reglas ``first_ar_*``.
         policy_doc: Parsed policy.v1.yaml as a dict.
         repo_root: Repository root path (used to load whitelists).
         starting_cash: Starting portfolio cash for the simulation.
@@ -173,8 +215,27 @@ def run_long_engine_stage(
     lt_cfg: LongTermEngineConfig = long_term_engine_config_from_policy_dict(
         policy_doc["long_term_engine"]
     )
-    if lt_cfg.rebalance_rule == "first_us_trading_day_of_calendar_week":
-        units = _iso_weeks_in_period(trading_days)
+    cal_kind = long_rebalance_calendar_from_rule(lt_cfg.rebalance_rule)
+    venue_long = _VENUE_AR if cal_kind == "AR" else _VENUE_US
+
+    span_start, span_end = trading_days[0], trading_days[-1]
+    if cal_kind == "AR":
+        trading_days_eff = _ar_business_days_in_span(db, span_start, span_end)
+    else:
+        trading_days_eff = list(trading_days)
+
+    if len(trading_days_eff) < _MIN_REBALANCE_UNITS_REQUIRED:
+        logger.info(
+            '{"event": "long_engine_stage_skipped", "reason": "insufficient_calendar_days", "have": %d}',
+            len(trading_days_eff),
+        )
+        return _skipped_result, None
+
+    if lt_cfg.rebalance_rule in (
+        "first_us_trading_day_of_calendar_week",
+        "first_ar_business_day_of_calendar_week",
+    ):
+        units = _iso_weeks_in_period(trading_days_eff)
         if units < _MIN_REBALANCE_UNITS_REQUIRED:
             logger.info(
                 '{"event": "long_engine_stage_skipped", "reason": "insufficient_weeks", "weeks": %d}',
@@ -182,7 +243,7 @@ def run_long_engine_stage(
             )
             return _skipped_result, None
     else:
-        units = _months_in_period(trading_days)
+        units = _months_in_period(trading_days_eff)
         if units < _MIN_REBALANCE_UNITS_REQUIRED:
             logger.info(
                 '{"event": "long_engine_stage_skipped", "reason": "insufficient_months", "months": %d}',
@@ -195,10 +256,10 @@ def run_long_engine_stage(
     )
     targets = target_weights(lt_cfg)
 
-    # Check that we have data in the DB for at least one symbol
-    period_start = trading_days[0]
-    period_end = trading_days[-1]
-    sample_rows = db.get_ohlcv(symbols[0], period_start, period_end, _VENUE_US) if symbols else []
+    # Check that we have data in the DB for at least one symbol (venue sleeve largo)
+    period_start = trading_days_eff[0]
+    period_end = trading_days_eff[-1]
+    sample_rows = db.get_ohlcv(symbols[0], period_start, period_end, venue_long) if symbols else []
     if not sample_rows:
         logger.info(
             '{"event": "long_engine_stage_skipped", "reason": "no_ohlcv_data", "symbol": "%s"}',
@@ -208,16 +269,23 @@ def run_long_engine_stage(
 
     # Set up simulation components
     ledger = PortfolioLedger(starting_cash=starting_cash)
-    broker = _build_broker(ledger, policy_doc)
+    trade_mkt = long_sleeve_trade_market(lt_cfg)
+    broker = _build_broker_for_long_sleeve(ledger, policy_doc, long_trade_market=trade_mkt)
+
+    cal_yaml = repo_root / "config" / "calendars" / "trading_days.v1.yaml"
+    calendar_store_bt: TradingCalendarStore | None = None
+    if cal_yaml.is_file():
+        calendar_store_bt = TradingCalendarStore.from_yaml(str(cal_yaml))
 
     backtester = create_long_term_monthly_backtester(
         policy_doc=policy_doc,
         repo_root=repo_root,
         ledger=ledger,
         broker=broker,
+        calendar_store=calendar_store_bt,
     )
 
-    us_sessions: frozenset[date] = frozenset(trading_days)
+    calendar_sessions: frozenset[date] = frozenset(trading_days_eff)
 
     # Tracking accumulators
     max_drift_pp: float = 0.0
@@ -229,14 +297,14 @@ def run_long_engine_stage(
 
     # Run the pipeline day by day, but only on rebalance-candidate days
     # according to policy rebalance_rule to keep it efficient.
-    for trading_day in trading_days:
+    for trading_day in trading_days_eff:
         is_rebalance_day = is_rebalance_day_by_rule(
             trading_day=trading_day,
-            us_sessions=us_sessions,
             rebalance_rule=lt_cfg.rebalance_rule,
+            calendar_sessions=calendar_sessions,
         )
 
-        daily_bars = _load_daily_bars_for_day(db, trading_day, symbols)
+        daily_bars = _load_daily_bars_for_day(db, trading_day, symbols, venue=venue_long)
         if not daily_bars:
             continue
 
@@ -281,7 +349,10 @@ def run_long_engine_stage(
             continue
 
         pipeline_context: dict[str, Any] = {
-            "us_sessions": us_sessions,
+            # Calendario de rebalance: US → us_sessions; AR (pesos/BYMA) → ar_business_days (span XBUE).
+            (
+                "ar_business_days" if cal_kind == "AR" else "us_sessions"
+            ): calendar_sessions,
             "long_bucket_mtm": long_bucket_mtm,
             "long_cash": long_cash,
             "positions_qty_long": {

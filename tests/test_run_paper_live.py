@@ -19,7 +19,13 @@ if str(REPO_ROOT) not in sys.path:
 
 from data.schema import OHLCVRow
 from data.storage import MarketDB
-from scripts.run_paper_live import compute_trading_days_gap, main, run_catch_up, _build_long_pipeline_context
+from scripts.run_paper_live import (
+    _build_long_pipeline_context,
+    _overlay_ar_long_sleeve_bars_from_db,
+    compute_trading_days_gap,
+    main,
+    run_catch_up,
+)
 
 import yaml
 
@@ -380,3 +386,55 @@ class TestLongEngineFeatureFlag:
         ).fetchone()
         assert snap_row is not None
         assert float(snap_row["equity_total"]) > 0
+
+
+# ===========================================================================
+# 3.7 — AR long sleeve: overlay XBUE over merge-US CEDEAR tickers
+# ===========================================================================
+
+
+class TestArLongXBUEOverlay:
+    """Long AR sleeve must price CEDEAR lines from XBUE even if merge etiqueta US."""
+
+    def test_overlay_replaces_merge_close_with_xbue_for_spy(self, tmp_path: Path, policy_doc):
+        """SPY aparece como US en el merge pero el largo opera CEDEAR — overlay usa XBUE."""
+        lt = policy_doc.get("long_term_engine") or {}
+        if not str(lt.get("rebalance_rule", "")).startswith("first_ar_business_day_of_"):
+            pytest.skip("policy fixture is not AR-calendar long sleeve")
+
+        db_path = tmp_path / "overlay.db"
+        db = MarketDB(str(db_path))
+        day = date(2026, 4, 15)
+
+        def row(sym: str, close: float, venue: str, cur: str) -> OHLCVRow:
+            return OHLCVRow(
+                symbol=sym,
+                ts=day,
+                open=close,
+                high=close,
+                low=close,
+                close=close,
+                volume=1_000_000.0,
+                currency=cur,
+                venue=venue,
+                imputed=False,
+            )
+
+        db.upsert_ohlcv(
+            [
+                row("SPY", 100.0, "XNYS", "USD"),
+                row("SPY", 777.0, "XBUE", "ARS"),
+            ]
+        )
+
+        daily_bars = {
+            "SPY": {
+                "open": 100.0,
+                "high": 100.0,
+                "low": 100.0,
+                "close": 100.0,
+                "volume": 1_000_000.0,
+            }
+        }
+        _overlay_ar_long_sleeve_bars_from_db(db, day, policy_doc, daily_bars)
+        assert daily_bars["SPY"]["close"] == 777.0

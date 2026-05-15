@@ -16,7 +16,7 @@ Plan maestro: `.cursor/plans/bot_trading_paper-first_155d6f04.plan.md`.
 | Gate KPI OOS (umbrales pre-registrados, ramp-up) | `POLICY.md` §13-14 + `config/policy.v1.yaml` → `kpi_oos_gate`, `ramp_stage` |
 | Contrato parseable (YAML) | `config/policy.v1.yaml` |
 | Validación estructural CI | `config/policy.v1.schema.json` + `tests/test_policy_schema.py` |
-| Listas de símbolos | `config/symbols/whitelist_us.yaml`, `whitelist_ar.yaml` |
+| Listas de símbolos | `config/symbols/whitelist_us.yaml`, `whitelist_ar.yaml`, `whitelist_cedear.yaml` (largo AR / CEDEAR; ver **ADR-048**) |
 
 Ante conflicto numérico entre `POLICY.md` y YAML, **actualizar ambos en el mismo cambio** y anotar el motivo en el commit.
 
@@ -36,9 +36,9 @@ Usar roles para **acotar** qué toca cada subagente o PR. Solapamiento mínimo.
 | **Spec / policy** | `POLICY.md`, `config/*.yaml`, `config/symbols/*`, schema JSON | `POLICY.md`, `config/` |
 | **Core sim** | Paper broker, ledger (short_bucket + long_bucket), costos, event engine | `core_sim/paper_broker_sim.py`, `core_sim/ledger.py`, `core_sim/event_engine.py`, `core_sim/cost_model.py` |
 | **Data** | Snapshot OHLCV + historial, whitelist, calendario en `MarketOpen`, corporate actions v1 | `core_sim/short_term_day_runner.py`, `core_sim/long_term_engine.py` (input contract), `core_sim/calendar_store.py` |
-| **Engines** | Señales → intents; integración diaria corta; motor largo semanal por bandas; pre-gate walk-forward OOS; orquestación paper-live short→long | `core_sim/short_term_engine.py`, `core_sim/short_term_day_runner.py`, `core_sim/long_term_engine.py`, `core_sim/long_term_monthly_runner.py`, `core_sim/short_term_pre_gate.py`, `scripts/run_short_term_pre_gate.py`, `scripts/run_paper_live.py` |
+| **Engines** | Señales → intents; integración diaria corta; motor largo semanal/mensual por bandas (calendario **AR** `ar_business_days` o **US** `us_sessions`); pre-gate walk-forward OOS; orquestación paper-live short→long (con **overlay XBUE** de precios para líneas del largo AR cuando el merge corto etiqueta CEDEAR como US) | `core_sim/short_term_engine.py`, `core_sim/short_term_day_runner.py`, `core_sim/long_term_engine.py`, `core_sim/long_term_monthly_runner.py`, `core_sim/short_term_pre_gate.py`, `scripts/run_short_term_pre_gate.py`, `scripts/run_paper_live.py` |
 | **Risk** | Guardrails centralizados en `risk_guardrails.py`: fail-fast data quality, ventanas no-trade, kill switch mensual corto, pérdida diaria bucket corto, stop loss ATR por ticker; allocator 30/70 + 20/80 en sizing; gestión de riesgo motor largo (-1.5% diario) | `core_sim/risk_guardrails.py`, `core_sim/short_term_day_runner.py` (handlers `propose_orders` / `risk_check`), `core_sim/long_term_monthly_runner.py`, `config/policy.v1.yaml` → `risk`, `weights`, `geo`, `stop_loss` |
-| **QA / CI** | Tests por **comportamiento** (ver *Smart testing*), schema policy, cobertura `core_sim` en CI | `tests/`, `.github/workflows/ci.yml` |
+| **QA / CI** | Tests por **comportamiento** (ver *Smart testing*), schema policy, cobertura `core_sim` en CI; regresión largo AR: `tests/test_long_term_engine.py`, `test_long_term_monthly_runner.py`, `test_validation_long_engine.py`, `test_policy_yaml.py` (rebalance primer hábil AR, stage sin depender de XNYS, SPY CEDEAR con `market: AR`) | `tests/`, `.github/workflows/ci.yml` |
 
 Un agente en rol **Spec** no debería implementar broker simulado; uno en rol **Core sim** no debería reescribir listas blancas sin coordinación con **Spec**.
 
@@ -102,10 +102,17 @@ El proyecto usa dos ramas con responsabilidades distintas:
 
 - `run_paper_live.py` soporta `--enable-long-engine` (default `false`).
 - Con flag activo: ejecuta short primero, luego long sobre el mismo ledger/broker. Fills combinados. Snapshot final post-ambos sleeves.
+- Con policy de **calendario AR**, tras el corto se aplican precios **XBUE** en una copia de `daily_bars` para todas las líneas de `long_term_engine` (**ADR-048**): coherencia CEDEAR/pesos vs. etiquetado US del merge del corto.
 - Sin flag: flujo idéntico al anterior (solo corto). **Rollback inmediato** sin cambio de código.
 - `PortfolioLedger.mark_to_market` retorna `long_bucket` con `long_daily_return` real.
 - `check_long_risk()` recibe ese `long_daily_return` explícitamente (no default 0.0).
 - `_check_risk_with_optional_db` en el runner corto es un orquestador liviano: reutiliza `check_short_risk` + inyecta `check_and_persist_kill_switch` con DB (sin duplicar la cadena de 4 checks).
+
+## Stage `long_engine` (validación offline, ADR-048)
+
+- Corre el pipeline largo sobre `MarketDB`: si la regla es `first_ar_*`, usa fechas y OHLCV **XBUE**; el stage **no** requiere filas de calendario **XNYS** para política AR.
+- `PaperBrokerSim` del stage lleva `CostModel` con **una sola clave** de mercado (`AR` o `US`) según `long_sleeve_trade_market`, leída de `policy["markets"]` (misma semántica que paper-live para comisión/slippage/spread mínimo).
+- Si existe `config/calendars/trading_days.v1.yaml`, se pasa `TradingCalendarStore` al backtester del largo (coherencia con paper-live para `ar_business_days` / `us_sessions`).
 
 ## Convenciones
 

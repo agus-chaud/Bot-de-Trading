@@ -33,7 +33,27 @@ class LongTermEngineConfig:
     drift_convention: str  # v1: "per_line" only (see POLICY.md)
     rebalance_rule: str  # v1: calendar rule (monthly/weekly)
     max_long_rebalance_turnover_pct: float | None
-    satellite_markets: frozenset[str]  # v1 default: US only
+    satellite_markets: frozenset[str]  # v1: ["US"] for US-listed sleeve or ["AR"] for BYMA pesos
+
+
+def long_sleeve_trade_market(config: LongTermEngineConfig) -> str:
+    """Return broker/ledger ``market`` tag for long intents (US or AR)."""
+    mk = frozenset(str(x).upper() for x in config.satellite_markets)
+    if mk == frozenset({"AR"}):
+        return "AR"
+    if mk == frozenset({"US"}):
+        return "US"
+    raise ValueError("long_term_engine v1 expects satellite_markets to be exactly [AR] or [US]")
+
+
+def long_rebalance_calendar_from_rule(rebalance_rule: str) -> str:
+    """``US`` or ``AR`` calendar driver for rebalance_rule."""
+    r = str(rebalance_rule)
+    if r.startswith("first_ar_business_day_of_"):
+        return "AR"
+    if r.startswith("first_us_trading_day_of_"):
+        return "US"
+    raise ValueError(f"unsupported rebalance_rule for calendar derivation: {rebalance_rule}")
 
 
 def is_first_us_trading_day_of_month(trading_day: date, us_sessions: Iterable[date]) -> bool:
@@ -61,17 +81,45 @@ def is_first_us_trading_day_of_week(trading_day: date, us_sessions: Iterable[dat
     return trading_day == min(week_sessions)
 
 
+def is_first_ar_business_day_of_month(trading_day: date, ar_business_days: Iterable[date]) -> bool:
+    """True when ``trading_day`` is the earliest AR business date in its calendar month."""
+    sessions = frozenset(ar_business_days)
+    if trading_day not in sessions:
+        return False
+    month_sessions = [d for d in sessions if d.year == trading_day.year and d.month == trading_day.month]
+    if not month_sessions:
+        return False
+    return trading_day == min(month_sessions)
+
+
+def is_first_ar_business_day_of_week(trading_day: date, ar_business_days: Iterable[date]) -> bool:
+    """True when ``trading_day`` is the earliest AR business date in its ISO calendar week."""
+    sessions = frozenset(ar_business_days)
+    if trading_day not in sessions:
+        return False
+    iso_year, iso_week, _ = trading_day.isocalendar()
+    week_sessions = [d for d in sessions if d.isocalendar()[:2] == (iso_year, iso_week)]
+    if not week_sessions:
+        return False
+    return trading_day == min(week_sessions)
+
+
 def is_rebalance_day_by_rule(
     *,
     trading_day: date,
-    us_sessions: Iterable[date],
     rebalance_rule: str,
+    calendar_sessions: Iterable[date],
 ) -> bool:
-    """Evaluate rebalance day according to configured calendar rule."""
+    """Evaluate rebalance day: pass US sessions or AR business days as *calendar_sessions*."""
+    sessions = calendar_sessions  # ergonomic alias
     if rebalance_rule == "first_us_trading_day_of_calendar_month":
-        return is_first_us_trading_day_of_month(trading_day, us_sessions)
+        return is_first_us_trading_day_of_month(trading_day, sessions)
     if rebalance_rule == "first_us_trading_day_of_calendar_week":
-        return is_first_us_trading_day_of_week(trading_day, us_sessions)
+        return is_first_us_trading_day_of_week(trading_day, sessions)
+    if rebalance_rule == "first_ar_business_day_of_calendar_month":
+        return is_first_ar_business_day_of_month(trading_day, sessions)
+    if rebalance_rule == "first_ar_business_day_of_calendar_week":
+        return is_first_ar_business_day_of_week(trading_day, sessions)
     raise ValueError(f"unsupported rebalance_rule: {rebalance_rule}")
 
 
@@ -113,17 +161,24 @@ def validate_long_term_engine_config(config: LongTermEngineConfig) -> None:
     valid_rules = {
         "first_us_trading_day_of_calendar_month",
         "first_us_trading_day_of_calendar_week",
+        "first_ar_business_day_of_calendar_month",
+        "first_ar_business_day_of_calendar_week",
     }
     if config.rebalance_rule not in valid_rules:
         raise ValueError(
             "long_term_engine v1 rebalance_rule must be one of: "
             "first_us_trading_day_of_calendar_month, "
-            "first_us_trading_day_of_calendar_week"
+            "first_us_trading_day_of_calendar_week, "
+            "first_ar_business_day_of_calendar_month, "
+            "first_ar_business_day_of_calendar_week"
         )
 
-    for m in config.satellite_markets:
-        if str(m).upper() != "US":
-            raise ValueError("long_term_engine v1 satellite_markets must be US-only")
+    cal = long_rebalance_calendar_from_rule(config.rebalance_rule)
+    mk = frozenset(str(x).upper() for x in config.satellite_markets)
+    if cal == "US" and mk != frozenset({"US"}):
+        raise ValueError("US rebalance_rule requires satellite_markets: [US]")
+    if cal == "AR" and mk != frozenset({"AR"}):
+        raise ValueError("AR rebalance_rule requires satellite_markets: [AR]")
 
 
 def target_weights(config: LongTermEngineConfig) -> dict[str, float]:
@@ -190,12 +245,12 @@ def build_long_term_orders_intent(
     config: LongTermEngineConfig,
     *,
     trading_day: date,
-    us_sessions: Iterable[date],
+    calendar_sessions: Iterable[date],
     long_bucket_mtm: float,
     long_cash: float,
     positions_qty: Mapping[str, float],
     prices: Mapping[str, float],
-    whitelist_us: frozenset[str],
+    whitelist_long: frozenset[str],
     halt_long_engine: bool = False,
     data_quality_halt: bool = False,
 ) -> tuple[list[dict[str, object]], list[dict[str, str]], dict[str, object]]:
@@ -206,20 +261,29 @@ def build_long_term_orders_intent(
     """
     validate_long_term_engine_config(config)
     skips: list[dict[str, str]] = []
+    cal_sessions_f = frozenset(calendar_sessions)
     metrics: dict[str, object] = {
         "trading_day": trading_day.isoformat(),
         "rebalance_rule": config.rebalance_rule,
         "is_long_rebalance_day": is_rebalance_day_by_rule(
             trading_day=trading_day,
-            us_sessions=us_sessions,
             rebalance_rule=config.rebalance_rule,
+            calendar_sessions=cal_sessions_f,
         ),
         "intents_generated": 0,
     }
-    # Backward-compat metric key kept for old downstream consumers.
-    metrics["is_first_us_trading_day_of_month"] = is_first_us_trading_day_of_month(
-        trading_day, us_sessions
-    )
+    rr = config.rebalance_rule
+    # Backward-compat metric key kept for older dashboards.
+    if rr == "first_us_trading_day_of_calendar_month":
+        metrics["is_first_us_trading_day_of_month"] = is_first_us_trading_day_of_month(
+            trading_day, cal_sessions_f
+        )
+    elif rr == "first_ar_business_day_of_calendar_month":
+        metrics["is_first_us_trading_day_of_month"] = is_first_ar_business_day_of_month(
+            trading_day, cal_sessions_f
+        )
+    else:
+        metrics["is_first_us_trading_day_of_month"] = False
 
     if halt_long_engine:
         skips.append({"symbol": "*", "reason": "halt_long_engine"})
@@ -237,7 +301,7 @@ def build_long_term_orders_intent(
     universe = sorted(targets.keys())
 
     for sym in universe:
-        if sym not in whitelist_us:
+        if sym not in whitelist_long:
             skips.append({"symbol": "*", "reason": f"symbol_not_whitelisted:{sym}"})
             return [], skips, metrics
 
@@ -284,6 +348,7 @@ def build_long_term_orders_intent(
         metrics["targets_scaled_for_turnover_cap"] = False
 
     sat_set = frozenset(sym for sym, _ in config.satellite_lines)
+    trade_mkt = long_sleeve_trade_market(config)
 
     deltas = {s: float(deltas_weights.get(s, 0.0)) for s in universe}
     intents: list[dict[str, object]] = []
@@ -314,7 +379,7 @@ def build_long_term_orders_intent(
         intents.append(
             {
                 "symbol": sym,
-                "market": "US",
+                "market": trade_mkt,
                 "bucket": "long",
                 "side": "SELL",
                 "qty": sell_qty,
@@ -357,7 +422,7 @@ def build_long_term_orders_intent(
         intents.append(
             {
                 "symbol": sym,
-                "market": "US",
+                "market": trade_mkt,
                 "bucket": "long",
                 "side": "BUY",
                 "qty": buy_qty,

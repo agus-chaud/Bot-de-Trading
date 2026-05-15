@@ -70,21 +70,21 @@ risk:
     fallback_pct_us: -0.05
     fallback_pct_ar: -0.08
 
-# Motor largo (sleeve 70%): core pasivo US + satélite acotado; pesos del bloque suman 1.0
+# Motor largo (sleeve 70%): BYMA en pesos (Merval + CEDEAR). SPY como CEDEAR benchmark. Pesos suman 1.0 en el sleeve.
 long_term_engine:
   drift_rebalance_threshold_pp: 2.0          # umbral por línea (pp) — convención per_line (POLICY §11)
   drift_convention: per_line
-  rebalance_rule: first_us_trading_day_of_calendar_week
+  rebalance_rule: first_ar_business_day_of_calendar_week
   max_long_rebalance_turnover_pct: null     # opcional: tope a sum(|Δw|) del sleeve; null = sin tope en engine v1
   satellite_markets:
-    - US
+    - AR
   core_lines:
-    - symbol: SPY
-      target_weight: 0.55
-    - symbol: IWM
-      target_weight: 0.30
+    - symbol: GGAL
+      target_weight: 0.42
+    - symbol: PAMP
+      target_weight: 0.43
   satellite_lines:
-    - symbol: QQQ
+    - symbol: SPY
       target_weight: 0.15
   satellite_limits:
     max_satellite_weight_total: 0.20

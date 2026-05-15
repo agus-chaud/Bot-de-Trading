@@ -119,13 +119,16 @@ flowchart TD
 
 ## 5) Motor de largo plazo
 
-El largo plazo trabaja con rebalanceo semanal por bandas de drift:
+El largo plazo trabaja con rebalanceo por bandas de drift en cadencia **semanal o mensual** según policy:
 
-- Parte de pesos objetivo definidos en policy/config.
+- Parte de pesos objetivo definidos en policy/config (`long_term_engine`).
+- En el **default del repo**: calendario **AR** (`first_ar_business_day_of_calendar_week` o mensual), datos diarios y calendario de validación en venue **XBUE** (BYMA / pesos), core en acciones locales y satélite en **CEDEAR** (p. ej. **SPY** como proxy del índice en ARS). Variante documentada: sleeve **US** con `first_us_trading_day_of_*` y **XNYS**.
 - Mide desvio entre peso actual y objetivo.
-- Solo rebalancea si es dia valido de calendario y el drift supera el umbral.
-- En v1, el satelite esta acotado y controlado por limites explicitos.
+- Solo rebalancea si es dia valido de calendario (sesiones AR o US según regla) y el drift supera el umbral.
+- En v1, el satelite esta acotado y controlado por limites explicitos cuando aplica (`satellite_limits`).
 - **Guardrail efectivo**: `check_long_risk()` recibe `long_daily_return` real desde `long_bucket` del ledger. Si el sleeve largo pierde mas de 1.5% en el dia, se bloquean nuevos rebalanceos.
+
+El **stage informativo** `validation/stages/long_engine.run_long_engine_stage` ejecuta ese pipeline sobre SQLite: para policy AR usa **solo** XBUE para fechas y OHLCV (no exige tabla `calendars` XNYS). En **paper-live** con `--enable-long-engine`, las barras que ve el largo AR se alinean a **XBUE** por ticker de policy aunque el merge del corto marque el mismo símbolo como US (**ADR-048**).
 
 Este bloque apunta a estabilidad de cartera y menor rotacion relativa, complementando al motor corto que es mas tactico.
 
@@ -202,6 +205,7 @@ flowchart LR
 - Persiste fills y snapshots en `data/market.db` bajo mode `paper_live`.
 - Replay de ledger desde fills anteriores para mantener estado coherente.
 - **Soporte para ambos sleeves**: con `--enable-long-engine` se ejecuta el pipeline corto primero y luego el largo sobre el mismo ledger/broker. Los fills de ambos sleeves se persisten juntos. Sin el flag (default), el flujo es solo corto — rollback inmediato sin cambio de codigo.
+- Tras el corto, si el largo esta activo y el policy usa calendario **AR**, una copia de `daily_bars` recibe precios **XBUE** por cada simbolo de `long_term_engine` (motor CEDEAR/pesos; **ADR-048**). El snapshot final usa esa copia para MTM cuando el flag esta encendido.
 - Orden fijo **short → long**: el largo consume la caja que quedo despues del corto.
 
 ### Workflow automatizado

@@ -224,9 +224,11 @@
           "type": "string",
           "enum": [
             "first_us_trading_day_of_calendar_week",
-            "first_us_trading_day_of_calendar_month"
+            "first_us_trading_day_of_calendar_month",
+            "first_ar_business_day_of_calendar_week",
+            "first_ar_business_day_of_calendar_month"
           ],
-          "description": "Regla inequívoca de día de revisión (v1: primer día de sesión US de la semana o del mes)."
+          "description": "Día de revisión: calendario US (XNYS) o calendario hábil AR (XBUE), semana o mes."
         },
         "max_long_rebalance_turnover_pct": {
           "type": ["number", "null"],
@@ -237,7 +239,8 @@
         "satellite_markets": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "enum": ["US"] }
+          "maxItems": 1,
+          "items": { "type": "string", "enum": ["US", "AR"] }
         },
         "core_lines": {
           "type": "array",

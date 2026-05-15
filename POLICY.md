@@ -188,13 +188,15 @@ Estos parámetros definen el comportamiento mínimo del motor corto en Fase 3 y 
 
 El **sleeve largo** es la fracción de cartera asignada al horizonte largo dentro del objetivo **30/70** global. Los **pesos objetivo declarados en esta sección suman 1,0 (100 %)** *solo dentro del sleeve largo*; el motor **no** recalcula el 30/70 ni el 20/80 (eso corresponde al `allocator`).
 
-### 10.1 Core pasivo (ETFs US broad market)
+En la configuración por defecto del repo, el sleeve largo opera en **BYMA en pesos (ARS)**: líneas **core** en **acciones locales** y **satélite** en **CEDEAR** (mismo segmento operativo IOL bCBA). El benchmark de referencia narrativa es **S&P 500 vía CEDEAR `SPY`**; el arranque de pesos en YAML es ilustrativo y gobernado en el mismo commit que esta sección.
 
-- **Cantidad de líneas core:** entre **2 y 3** símbolos US, cada uno con `target_weight` explícito en `config/policy.v1.yaml` → `long_term_engine.core_lines`.
-- **Criterio de baja redundancia (v1 por defecto):** combinar **beta amplia large-cap** (`SPY`, S&P 500) con **exposición small-cap US** (`IWM`, Russell 2000) para no duplicar solo capa large-cap. El satélite (`QQQ`) aporta sesgo **growth / mega-cap tech** con tope propio; solape SPY–QQQ es consciente y **acotado por peso** del satélite.
-- **Cambios de universo core:** solo en **fecha de rebalance semanal** salvo **procedimiento manual documentado** (commit + nota operativa) para cambios off-cycle.
+### 10.1 Core (acciones locales AR)
 
-### 10.2 Satélite (lista acotada)
+- **Cantidad de líneas core:** entre **2 y 3** símbolos con `target_weight` explícito en `config/policy.v1.yaml` → `long_term_engine.core_lines`, todos **operables en AR** (lista blanca `whitelist_ar.yaml` + política de símbolos).
+- **Criterio v1 por defecto:** diversificar con **dos líneas locales de alta liquidez** (p. ej. banca y energía en el YAML de ejemplo) sin solapar el mismo subsector de forma redundante; el detalle de tesis queda en nota operativa, no en el motor.
+- **Cambios de universo core:** solo en **fecha de rebalance** según `rebalance_rule`, salvo **procedimiento manual documentado** (commit + nota operativa) para cambios off-cycle.
+
+### 10.2 Satélite (CEDEAR, lista acotada)
 
 Parámetros en YAML bajo `long_term_engine.satellite_limits` y líneas en `satellite_lines`:
 
@@ -204,15 +206,17 @@ Parámetros en YAML bajo `long_term_engine.satellite_limits` y líneas en `satel
 | `max_weight_per_satellite_line` | Techo por línea satélite. |
 | `max_satellite_names` | Número máximo de tickers satélite simultáneos. |
 
-**Mercados v1:** satélite **solo US** (`satellite_markets: [US]`). Extensión AR quedaría explícita en versión futura de política + schema.
+**Mercado v1 (config actual):** `satellite_markets: [AR]` — el satélite son **CEDEAR** admitidos en `whitelist_cedear.yaml` (p. ej. `SPY` como proxy de índice). Una variante **solo US** sigue soportada en schema y código con `satellite_markets: [US]` y reglas `first_us_trading_day_of_*`.
 
 **Gobernanza off-cycle:** variar tickers o pesos del satélite fuera del día de rebalance solo con **cambio coordinado** de `POLICY.md`, YAML y revisión humana (no automático en v1).
 
 ### 10.3 Calendario y disparador de rebalanceo
 
-- **Día de revisión:** **primer día de sesión US** (`XNYS` / calendario versionado) de cada **semana calendario** (`rebalance_rule: first_us_trading_day_of_calendar_week`).
+- **Día de revisión (config actual):** **primer día hábil AR** del calendario versionado (BYMA / `XBUE` en OHLCV) de cada **semana calendario** (`rebalance_rule: first_ar_business_day_of_calendar_week`). Alternativa mensual: `first_ar_business_day_of_calendar_month`. Para sleeve **US**, equivalentes `first_us_trading_day_of_calendar_week` / `first_us_trading_day_of_calendar_month` sobre `XNYS`.
+- **Paper-live (motor largo AR, `--enable-long-engine`)**: el orquestador construye primero `daily_bars` según el merge del **corto**; para el largo en calendario AR se usa una **copia** de ese mapa donde los símbolos declarados en `long_term_engine` se **reemplazan** por cierres **XBUE** del mismo día. Así un CEDEAR (p. ej. `SPY`) no se valora ni se rebalancea contra el ETF **XNYS** cuando el merge global etiqueta el ticker como US. El **MTM** y el snapshot final del día usan esa copia cuando el largo está activo.
+- **Stage informativo de validación (`run_long_engine_stage`)** con policy AR: las fechas efectivas y el universo de barras se resuelven contra **`calendars` + OHLCV en venue `XBUE`**; **no** se exige calendario **XNYS** en la DB para que el stage corra. El broker simulado del stage usa **un solo bloque** de `CostModel` (`markets.AR` o `markets.US` del policy, según `satellite_markets`), alineado a las órdenes del largo (`market: AR` o `US`).
 - **Bandas anti-turnover:** convención **por línea** (`drift_convention: per_line`). Para cada símbolo del universo largo, \( \text{drift\_pp} = |\,w_{\text{obj}} - w_{\text{MTM}}\,| \times 100 \). Solo se considera emitir órdenes si **es día de rebalance** **y** existe al menos una línea con `drift_pp` **estrictamente mayor** que `drift_rebalance_threshold_pp`.
-- **halt / datos incompletos / sesión no US:** si el ciclo largo no puede valorar de forma fiable el universo (p. ej. `halt_on_data_quality`, sesión no válida, o **precio faltante o no finito** para cualquier símbolo del universo en el día de rebalance), la política v1 es **no operar el ciclo completo** y registrar motivo estructurado (`missing_or_invalid_price_abort_cycle`, etc.) — **sin** rebalanceo parcial a ciegas.
+- **halt / datos incompletos / sin sesión de mercado del sleeve:** si el ciclo largo no puede valorar de forma fiable el universo (p. ej. `halt_on_data_quality`, día fuera del calendario AR/US según regla, o **precio faltante o no finito** para cualquier símbolo del universo en el día de rebalance), la política v1 es **no operar el ciclo completo** y registrar motivo estructurado (`missing_or_invalid_price_abort_cycle`, etc.) — **sin** rebalanceo parcial a ciegas.
 
 ### 10.4 Corporate actions y pesos
 
@@ -228,7 +232,7 @@ Cada intent incluye al menos: `symbol`, `market`, `bucket: long`, `side`, `qty`,
 |-----------|-------------------|-----|
 | `drift_rebalance_threshold_pp` | **2,0** | Umbral en puntos porcentuales por línea. |
 | `drift_convention` | **per_line** | Drift por símbolo vs objetivo. |
-| `rebalance_rule` | **first_us_trading_day_of_calendar_week** | Día de revisión semanal. |
+| `rebalance_rule` | **first_ar_business_day_of_calendar_week** | Día de revisión semanal (calendario AR / BYMA). |
 | `max_long_rebalance_turnover_pct` | **null** | Sin tope de sum(|Δw|) en engine v1 si es `null`. |
 
 **Regla de gobernanza:** mismos valores y semántica en `POLICY.md` y `config/policy.v1.yaml` en un único commit.
@@ -283,11 +287,11 @@ Lista cerrada de umbrales que cada ventana OOS del walk-forward debe cumplir **a
 
 | Métrica | Umbral | Justificación |
 |---------|--------|---------------|
-| Sharpe anualizado (total) | **≥ 0,30** | 70 % del portfolio son ETFs pasivos (Sharpe histórico SPY ~0,4–0,5). Un piso de 0,30 exige no destruir valor ajustado por riesgo respecto del mercado. |
+| Sharpe anualizado (total) | **≥ 0,30** | 70 % del portfolio es sleeve largo menos activo; Sharpe de referencia amplia (p. ej. S&P vía CEDEAR) suele situarse ~0,4–0,5. Un piso de 0,30 evita destruir valor ajustado por riesgo frente a ese ancla. |
 | Sortino anualizado (total) | **≥ 0,40** | Con kill switch (-8 %) y límite diario (-2 % corto, -3 % total), el downside debería estar más acotado que el upside; Sortino > Sharpe es la expectativa. |
 | Max drawdown total | **≥ -18 %** | Peor caso razonable: largo 0,70 × -25 % ≈ -17,5 % + corto 0,30 × -8 % ≈ -2,4 %. Un piso de -18 % detecta fallas estructurales sin disparar falsos positivos por bear market moderado. |
 | Max drawdown bucket corto | **≥ -10 %** | Kill switch congela a -8 % mensual pero se auto-resetea a inicio de mes; en una ventana OOS de ~3 meses puede acumular dos activaciones. -10 % da 2 pp de margen. |
-| Max drawdown bucket largo | **≥ -25 %** | Sleeve pasivo ETFs broad market. SPY cayó -25 % en 2022 y -34 % en 2020. El umbral detecta errores de rebalanceo, no ciclos de mercado. |
+| Max drawdown bucket largo | **≥ -25 %** | Sleeve largo BYMA en pesos (core + CEDEAR). Referencia amplia: índice EE.UU. ~-25 % en 2022. El umbral detecta errores de rebalanceo, no solo shocks locales. |
 | Turnover mensual largo (último) | **≤ 8 %** | Con bandas de drift 2,0 pp y rebalanceo semanal, el turnover esperado sube vs mensual; el techo de 8 % sigue como guardrail para detectar churn anómalo. |
 | Alpha simple vs benchmark 20/80 (total) | **≥ -2 %** | El alpha real viene del 30 % corto (momentum v1). Pedir α > 0 en v1 es optimista; -2 % dice "no destruyas más de 2 pp anuales respecto al benchmark pasivo". Si pierde más, el bloque corto no justifica su costo operativo. |
 

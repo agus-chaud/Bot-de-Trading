@@ -53,6 +53,9 @@ def load_merged_whitelist(
 
     us_path = repo_root / str(sym_cfg["whitelist_us_file"])
     ar_path = repo_root / str(sym_cfg["whitelist_ar_file"])
+    ced_path_str = sym_cfg.get("whitelist_cedear_file")
+    ced_path = repo_root / str(ced_path_str) if ced_path_str else None
+
     with us_path.open(encoding="utf-8") as f:
         us_doc = yaml.safe_load(f) or {}
     with ar_path.open(encoding="utf-8") as f:
@@ -61,6 +64,13 @@ def load_merged_whitelist(
     if ar_operational_symbols is None:
         for raw in ar_doc.get("stocks", []) or []:
             merged[str(raw).strip().upper()] = "AR"
+        if ced_path and ced_path.is_file():
+            with ced_path.open(encoding="utf-8") as f:
+                ced_doc = yaml.safe_load(f) or {}
+            for raw in ced_doc.get("stocks", []) or []:
+                su = str(raw).strip().upper()
+                if su and merged.get(su) != "US":
+                    merged[su] = "AR"
     else:
         for sym in ar_operational_symbols:
             su = str(sym).strip().upper()

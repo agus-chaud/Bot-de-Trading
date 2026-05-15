@@ -26,6 +26,10 @@ if str(REPO_ROOT) not in sys.path:
 from core_sim.calendar_store import TradingCalendarStore  # noqa: E402
 from core_sim.cost_model import CostModel, MarketCostConfig  # noqa: E402
 from core_sim.ledger import PortfolioLedger  # noqa: E402
+from core_sim.long_term_engine import (  # noqa: E402
+    long_rebalance_calendar_from_rule,
+    long_term_engine_config_from_policy_dict,
+)
 from core_sim.long_term_monthly_runner import create_long_term_monthly_backtester  # noqa: E402
 from core_sim.paper_broker_sim import PaperBrokerSim  # noqa: E402
 from core_sim.short_term_day_runner import create_short_term_daily_backtester  # noqa: E402
@@ -98,6 +102,36 @@ def _build_history_from_db(
 _VENUE_MAP: dict[str, str] = {"US": "XNYS", "AR": "XBUE"}
 
 
+def _overlay_ar_long_sleeve_bars_from_db(
+    db: MarketDB,
+    day: date,
+    policy_doc: dict[str, Any],
+    daily_bars: dict[str, dict[str, float]],
+) -> None:
+    """In-place: precios BYMA (XBUE) para líneas del sleeve largo en pesos.
+
+    El merge global puede etiquetar un CEDEAR (p. ej. SPY) como US; el motor largo AR
+    debe ver cierres de ``whitelist_cedear``/BYMA, no XNYS.
+    """
+    lt_cfg = long_term_engine_config_from_policy_dict(policy_doc["long_term_engine"])
+    if long_rebalance_calendar_from_rule(lt_cfg.rebalance_rule) != "AR":
+        return
+    venue = _VENUE_MAP["AR"]
+    for sym, _ in (*lt_cfg.core_lines, *lt_cfg.satellite_lines):
+        su = str(sym).strip().upper()
+        rows = db.get_ohlcv(su, day, day, venue)
+        if not rows:
+            continue
+        bar = rows[0]
+        daily_bars[su] = {
+            "open": bar.open,
+            "high": bar.high,
+            "low": bar.low,
+            "close": bar.close,
+            "volume": bar.volume,
+        }
+
+
 def _build_long_pipeline_context(
     ledger: PortfolioLedger,
     snap: dict[str, Any],
@@ -116,6 +150,7 @@ def _build_long_pipeline_context(
     }
     if calendar_store is not None:
         ctx["us_sessions"] = calendar_store.us_sessions
+        ctx["ar_business_days"] = calendar_store.ar_business_days
     return ctx
 
 
@@ -199,9 +234,15 @@ def run_catch_up(
         all_fills: list[dict] = list(short_fills) if isinstance(short_fills, list) else []
         long_fills_count = 0
 
+        bars_for_long_and_mtm = daily_bars
         if enable_long_engine:
-            short_snap = ledger.mark_to_market(trading_day=day, daily_bars=daily_bars)
-            long_ctx = _build_long_pipeline_context(ledger, short_snap, calendar_store)
+            bars_for_long_and_mtm = dict(daily_bars)
+            _overlay_ar_long_sleeve_bars_from_db(db, day, policy_doc, bars_for_long_and_mtm)
+
+            snap_for_long = ledger.mark_to_market(
+                trading_day=day, daily_bars=bars_for_long_and_mtm
+            )
+            long_ctx = _build_long_pipeline_context(ledger, snap_for_long, calendar_store)
 
             long_backtester = create_long_term_monthly_backtester(
                 policy_doc=policy_doc,
@@ -213,7 +254,7 @@ def run_catch_up(
             )
             long_events = long_backtester.run_day(
                 trading_day=day,
-                daily_bars=daily_bars,
+                daily_bars=bars_for_long_and_mtm,
                 pipeline_context=long_ctx,
             )
             long_fills = long_events[4].payload
@@ -221,7 +262,9 @@ def run_catch_up(
                 all_fills.extend(long_fills)
                 long_fills_count = len(long_fills)
 
-        snap = ledger.mark_to_market(trading_day=day, daily_bars=daily_bars)
+        snap = ledger.mark_to_market(
+            trading_day=day, daily_bars=bars_for_long_and_mtm
+        )
         run_id = f"paper_live_{day.isoformat()}_{uuid.uuid4().hex[:8]}"
 
         if all_fills:

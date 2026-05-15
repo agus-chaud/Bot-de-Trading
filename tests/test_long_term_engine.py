@@ -13,8 +13,10 @@ from core_sim.long_term_engine import (
     build_long_term_orders_intent,
     current_weights_mtm,
     drift_per_line_pp,
-    is_first_us_trading_day_of_week,
+    is_first_ar_business_day_of_month,
+    is_first_ar_business_day_of_week,
     is_first_us_trading_day_of_month,
+    is_first_us_trading_day_of_week,
     is_rebalance_day_by_rule,
     long_term_engine_config_from_policy_dict,
     should_rebalance_long,
@@ -23,6 +25,11 @@ from core_sim.long_term_engine import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Precios de prueba para el bloque largo AR del policy.v1.yaml por defecto (GGAL / PAMP / SPY CEDEAR).
+_PX_GGAL = 1000.0
+_PX_PAMP = 500.0
+_PX_SPY = 200.0
 
 
 def _policy_cfg():
@@ -39,7 +46,7 @@ def test_repo_policy_long_term_block_is_consistent():
     validate_long_term_engine_config(cfg)
     tw = target_weights(cfg)
     assert abs(sum(tw.values()) - 1.0) < 1e-9
-    assert set(tw) == {"SPY", "IWM", "QQQ"}
+    assert set(tw) == {"GGAL", "PAMP", "SPY"}
 
 
 def test_is_first_us_trading_day_of_week_picks_earliest_session_in_week():
@@ -56,8 +63,8 @@ def test_is_first_us_trading_day_of_week_picks_earliest_session_in_week():
     assert is_first_us_trading_day_of_week(date(2026, 4, 13), sessions) is True
 
 
-def test_is_rebalance_day_by_rule_handles_weekly_and_monthly():
-    sessions = frozenset(
+def test_is_rebalance_day_by_rule_handles_weekly_and_monthly_us_and_ar():
+    us_days = frozenset(
         {
             date(2026, 4, 1),
             date(2026, 4, 2),
@@ -65,45 +72,112 @@ def test_is_rebalance_day_by_rule_handles_weekly_and_monthly():
             date(2026, 5, 4),
         }
     )
-    assert is_rebalance_day_by_rule(
-        trading_day=date(2026, 4, 1),
-        us_sessions=sessions,
-        rebalance_rule="first_us_trading_day_of_calendar_month",
-    ) is True
-    assert is_rebalance_day_by_rule(
-        trading_day=date(2026, 4, 2),
-        us_sessions=sessions,
-        rebalance_rule="first_us_trading_day_of_calendar_month",
-    ) is False
-    assert is_first_us_trading_day_of_month(date(2026, 5, 3), sessions) is True
+    assert (
+        is_rebalance_day_by_rule(
+            trading_day=date(2026, 4, 1),
+            rebalance_rule="first_us_trading_day_of_calendar_month",
+            calendar_sessions=us_days,
+        )
+        is True
+    )
+    assert (
+        is_rebalance_day_by_rule(
+            trading_day=date(2026, 4, 2),
+            rebalance_rule="first_us_trading_day_of_calendar_month",
+            calendar_sessions=us_days,
+        )
+        is False
+    )
+    assert is_first_us_trading_day_of_month(date(2026, 5, 3), us_days) is True
+
+    # Solo miércoles en la semana ISO del 2026-04-01 → primer hábil AR semanal es ese día.
+    ar_week = frozenset({date(2026, 4, 1), date(2026, 4, 2), date(2026, 4, 3)})
+    assert (
+        is_rebalance_day_by_rule(
+            trading_day=date(2026, 4, 1),
+            rebalance_rule="first_ar_business_day_of_calendar_week",
+            calendar_sessions=ar_week,
+        )
+        is True
+    )
+    assert (
+        is_rebalance_day_by_rule(
+            trading_day=date(2026, 4, 2),
+            rebalance_rule="first_ar_business_day_of_calendar_week",
+            calendar_sessions=ar_week,
+        )
+        is False
+    )
+    assert is_first_ar_business_day_of_week(date(2026, 4, 1), ar_week) is True
+
+
+def test_first_ar_business_day_of_month_triggers_monthly_rebalance_rule():
+    """Paso 5: el primer hábil AR del mes dispara ``first_ar_business_day_of_calendar_month``."""
+    ar_march = frozenset(
+        {
+            date(2026, 3, 2),
+            date(2026, 3, 3),
+            date(2026, 3, 4),
+        }
+    )
+    assert is_first_ar_business_day_of_month(date(2026, 3, 2), ar_march) is True
+    assert is_first_ar_business_day_of_month(date(2026, 3, 3), ar_march) is False
+    assert (
+        is_rebalance_day_by_rule(
+            trading_day=date(2026, 3, 2),
+            rebalance_rule="first_ar_business_day_of_calendar_month",
+            calendar_sessions=ar_march,
+        )
+        is True
+    )
+    assert (
+        is_rebalance_day_by_rule(
+            trading_day=date(2026, 3, 3),
+            rebalance_rule="first_ar_business_day_of_calendar_month",
+            calendar_sessions=ar_march,
+        )
+        is False
+    )
 
 
 def test_should_rebalance_requires_day_and_band_breach():
-    drift_ok = {"SPY": 1.0, "IWM": 1.0}
-    drift_bad = {"SPY": 5.0, "IWM": 0.5}
-    assert should_rebalance_long(is_rebalance_day=False, drift_pp_by_symbol=drift_bad, drift_threshold_pp=2.0) is False
-    assert should_rebalance_long(is_rebalance_day=True, drift_pp_by_symbol=drift_ok, drift_threshold_pp=2.0) is False
-    assert should_rebalance_long(is_rebalance_day=True, drift_pp_by_symbol=drift_bad, drift_threshold_pp=2.0) is True
+    drift_ok = {"GGAL": 1.0, "PAMP": 1.0}
+    drift_bad = {"GGAL": 5.0, "PAMP": 0.5}
+    assert (
+        should_rebalance_long(is_rebalance_day=False, drift_pp_by_symbol=drift_bad, drift_threshold_pp=2.0)
+        is False
+    )
+    assert (
+        should_rebalance_long(is_rebalance_day=True, drift_pp_by_symbol=drift_ok, drift_threshold_pp=2.0)
+        is False
+    )
+    assert (
+        should_rebalance_long(is_rebalance_day=True, drift_pp_by_symbol=drift_bad, drift_threshold_pp=2.0)
+        is True
+    )
 
 
 def test_on_weekly_rebalance_day_within_drift_band_emits_no_orders():
     cfg = _lt_from_repo()
-    us = frozenset({date(2026, 4, 1), date(2026, 4, 2)})
+    ar = frozenset({date(2026, 4, 1), date(2026, 4, 2), date(2026, 4, 3)})
     day = date(2026, 4, 1)
-    prices = {"SPY": 100.0, "IWM": 50.0, "QQQ": 300.0}
-    # MTM exactly on targets for a 100k long sleeve
+    prices = {"GGAL": _PX_GGAL, "PAMP": _PX_PAMP, "SPY": _PX_SPY}
     mtm = 100_000.0
-    qty = {"SPY": 0.55 * mtm / 100.0, "IWM": 0.30 * mtm / 50.0, "QQQ": 0.15 * mtm / 300.0}
-    wl = frozenset({"SPY", "IWM", "QQQ"})
+    qty = {
+        "GGAL": 0.42 * mtm / _PX_GGAL,
+        "PAMP": 0.43 * mtm / _PX_PAMP,
+        "SPY": 0.15 * mtm / _PX_SPY,
+    }
+    wl = frozenset({"GGAL", "PAMP", "SPY"})
     intents, skips, _metrics = build_long_term_orders_intent(
         cfg,
         trading_day=day,
-        us_sessions=us,
+        calendar_sessions=ar,
         long_bucket_mtm=mtm,
         long_cash=10_000.0,
         positions_qty=qty,
         prices=prices,
-        whitelist_us=wl,
+        whitelist_long=wl,
     )
     assert intents == []
     assert any(s.get("reason") == "within_drift_band" for s in skips)
@@ -111,47 +185,47 @@ def test_on_weekly_rebalance_day_within_drift_band_emits_no_orders():
 
 def test_on_weekly_rebalance_day_out_of_band_generates_sell_and_buy_intents():
     cfg = _lt_from_repo()
-    us = frozenset({date(2026, 4, 1)})
+    ar = frozenset({date(2026, 4, 1)})
     day = date(2026, 4, 1)
-    prices = {"SPY": 100.0, "IWM": 50.0, "QQQ": 300.0}
+    prices = {"GGAL": _PX_GGAL, "PAMP": _PX_PAMP, "SPY": _PX_SPY}
     mtm = 100_000.0
-    # Overweight SPY vs target 0.55
-    qty = {"SPY": 900.0, "IWM": 100.0, "QQQ": 50.0}
-    wl = frozenset({"SPY", "IWM", "QQQ"})
+    qty = {"GGAL": 900.0, "PAMP": 100.0, "SPY": 50.0}
+    wl = frozenset({"GGAL", "PAMP", "SPY"})
     intents, skips, metrics = build_long_term_orders_intent(
         cfg,
         trading_day=day,
-        us_sessions=us,
+        calendar_sessions=ar,
         long_bucket_mtm=mtm,
         long_cash=50_000.0,
         positions_qty=qty,
         prices=prices,
-        whitelist_us=wl,
+        whitelist_long=wl,
     )
     assert not any(s.get("reason") == "within_drift_band" for s in skips)
     assert metrics["intents_generated"] == len(intents) and len(intents) >= 1
     sides = {i["symbol"]: i["side"] for i in intents}
-    assert sides.get("SPY") == "SELL"
+    assert sides.get("GGAL") == "SELL"
     assert any(i["side"] == "BUY" for i in intents)
+    assert all(i.get("market") == "AR" for i in intents)
 
 
 def test_missing_price_aborts_whole_cycle_without_partial_rebalance():
     cfg = _lt_from_repo()
-    us = frozenset({date(2026, 4, 1)})
+    ar = frozenset({date(2026, 4, 1)})
     day = date(2026, 4, 1)
-    prices = {"SPY": 100.0, "IWM": 50.0}  # QQQ missing
+    prices = {"GGAL": _PX_GGAL, "PAMP": _PX_PAMP}
     mtm = 100_000.0
-    qty = {"SPY": 900.0, "IWM": 100.0, "QQQ": 50.0}
-    wl = frozenset({"SPY", "IWM", "QQQ"})
+    qty = {"GGAL": 900.0, "PAMP": 100.0, "SPY": 50.0}
+    wl = frozenset({"GGAL", "PAMP", "SPY"})
     intents, skips, _metrics = build_long_term_orders_intent(
         cfg,
         trading_day=day,
-        us_sessions=us,
+        calendar_sessions=ar,
         long_bucket_mtm=mtm,
         long_cash=50_000.0,
         positions_qty=qty,
         prices=prices,
-        whitelist_us=wl,
+        whitelist_long=wl,
     )
     assert intents == []
     assert any(s.get("reason") == "missing_or_invalid_price_abort_cycle" for s in skips)
@@ -160,26 +234,29 @@ def test_missing_price_aborts_whole_cycle_without_partial_rebalance():
 def test_split_adjusted_qty_and_price_leave_weights_stable_so_band_can_hold():
     """Corporate actions are applied before this engine; split-adjusted state should not invent drift."""
     cfg = _lt_from_repo()
-    us = frozenset({date(2026, 4, 1)})
+    ar = frozenset({date(2026, 4, 1)})
     day = date(2026, 4, 1)
     mtm = 100_000.0
-    pre_split_px = 100.0
-    # 2:1 split: double qty, halve price — MTM per line unchanged vs pre-split on-target book
-    qty = {"SPY": 0.55 * mtm / pre_split_px * 2.0, "IWM": 0.30 * mtm / 50.0, "QQQ": 0.15 * mtm / 300.0}
-    prices = {"SPY": pre_split_px / 2.0, "IWM": 50.0, "QQQ": 300.0}
-    wl = frozenset({"SPY", "IWM", "QQQ"})
+    pre_split_px = 1000.0
+    qty = {
+        "GGAL": 0.42 * mtm / pre_split_px * 2.0,
+        "PAMP": 0.43 * mtm / _PX_PAMP,
+        "SPY": 0.15 * mtm / _PX_SPY,
+    }
+    prices = {"GGAL": pre_split_px / 2.0, "PAMP": _PX_PAMP, "SPY": _PX_SPY}
+    wl = frozenset({"GGAL", "PAMP", "SPY"})
     cur = current_weights_mtm(long_bucket_mtm=mtm, positions_qty=qty, prices=prices, universe=target_weights(cfg))
     drift = drift_per_line_pp(target_weights(cfg), cur)
     assert should_rebalance_long(is_rebalance_day=True, drift_pp_by_symbol=drift, drift_threshold_pp=2.0) is False
     intents, _skips, _m = build_long_term_orders_intent(
         cfg,
         trading_day=day,
-        us_sessions=us,
+        calendar_sessions=ar,
         long_bucket_mtm=mtm,
         long_cash=10_000.0,
         positions_qty=qty,
         prices=prices,
-        whitelist_us=wl,
+        whitelist_long=wl,
     )
     assert intents == []
 
@@ -205,35 +282,35 @@ def test_turnover_cap_scales_trade_sizes_down():
     intents, _skips, metrics = build_long_term_orders_intent(
         cfg,
         trading_day=day,
-        us_sessions=us,
+        calendar_sessions=us,
         long_bucket_mtm=mtm,
         long_cash=80_000.0,
         positions_qty=qty,
         prices=prices,
-        whitelist_us=wl,
+        whitelist_long=wl,
     )
     assert metrics.get("targets_scaled_for_turnover_cap") is True
     traded = sum(float(i["intent_notional"]) for i in intents)
-    assert traded <= mtm * 0.05 + 1.0  # sum of notionals bounded by rough turnover proxy
+    assert traded <= mtm * 0.05 + 1.0
 
 
 def test_not_whitelisted_symbol_blocks_cycle():
     cfg = _lt_from_repo()
-    us = frozenset({date(2026, 4, 1)})
+    ar = frozenset({date(2026, 4, 1)})
     day = date(2026, 4, 1)
-    prices = {"SPY": 100.0, "IWM": 50.0, "QQQ": 300.0}
+    prices = {"GGAL": _PX_GGAL, "PAMP": _PX_PAMP, "SPY": _PX_SPY}
     mtm = 100_000.0
-    qty = {"SPY": 900.0, "IWM": 100.0, "QQQ": 50.0}
-    wl = frozenset({"SPY", "IWM"})  # QQQ missing from whitelist
+    qty = {"GGAL": 900.0, "PAMP": 100.0, "SPY": 50.0}
+    wl = frozenset({"GGAL", "PAMP"})
     intents, skips, _m = build_long_term_orders_intent(
         cfg,
         trading_day=day,
-        us_sessions=us,
+        calendar_sessions=ar,
         long_bucket_mtm=mtm,
         long_cash=50_000.0,
         positions_qty=qty,
         prices=prices,
-        whitelist_us=wl,
+        whitelist_long=wl,
     )
     assert intents == []
     assert any("symbol_not_whitelisted" in str(s.get("reason", "")) for s in skips)

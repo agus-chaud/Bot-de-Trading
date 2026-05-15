@@ -338,6 +338,8 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Rebalance parcial si falta un ticker**: descartada por riesgo de cartera inconsistente vs objetivos.
   - **Drift agregado solo sobre el bloque core**: descartada en v1 para evitar doble conteo y ambigüedad con satélite; se deja `per_line` como única convención schema.
 
+- **Nota (2026-05-15)**: el diseño original describe largo **solo US** y día de rebalance con sesiones US; la extensión **BYMA en pesos**, reglas `first_ar_*`, `satellite_markets: [AR]` y resolución whitelist CEDEAR frente al merge global quedan registradas en **ADR-048**.
+
 ---
 
 ## ADR-016 — Pre-gate walk-forward del bloque corto (costos, turnover, DD mensual)
@@ -1077,6 +1079,33 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Ranking con fallback Byma/yfinance**: descartada para selección — distorsiona métricas respecto del venue operativo IOL.
   - **Incluir holdings en pool de señales**: descartada — ensancha entradas tácticas; se prefiere mantener datos sin ampliar candidatos de entrada.
 - **Archivos**: `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `data/universe_selector.py`, `data/iol_api_meter.py`, `data/connectors/ar_connector.py`, `data/storage.py`, `scripts/fetch_daily.py`, `core_sim/short_term_day_runner.py`, tests citados, `README.md`, `docs/project-overview.md`.
+
+---
+
+## ADR-048 — Motor largo multi-mercado: calendario AR, BYMA pesos y whitelist CEDEAR (colisión SPY)
+
+- **Fecha**: 2026-05-15
+- **Estado**: aceptada (extiende **ADR-017** en calendario/universo del largo; **ADR-045** sigue vigente en la intención semanal del rebalanceo — el default del repo pasa a régimen **AR semanal**)
+- **Contexto**: El sleeve largo estaba modelado como core US + satélite US con `us_sessions` y `rebalance_rule` solo `first_us_trading_day_of_*`. Para operar el **70 % largo en pesos (BYMA)** con **CEDEAR** como satélite — p. ej. `SPY` como proxy de índice — hacía falta: (1) reglas de rebalanceo sobre **días hábiles AR**, (2) intents con `market: AR`, (3) OHLCV/`calendars` en **XBUE**, y (4) resolver la **colisión de ticker**: `SPY` aparece como ETF en `whitelist_us.yaml` (merge global → `US`) y como CEDEAR en `whitelist_cedear.yaml` (operación local).
+- **Decisión**:
+  1. **Policy + schema**: `rebalance_rule` admite `first_ar_business_day_of_calendar_week` y `first_ar_business_day_of_calendar_month`; `satellite_markets` admite `"US"` o `"AR"` (lista de un elemento). `config/policy.v1.yaml` de ejemplo: largo AR semanal, `satellite_markets: [AR]`, líneas **GGAL / PAMP / SPY** con pesos que suman 1.0 en el sleeve. `whitelist_cedear.yaml` incluye explícitamente **SPY** para alinear con la línea satélite.
+  2. **Engine (`core_sim/long_term_engine.py`)**: firma basada en `calendar_sessions` (US o AR según regla); `long_sleeve_trade_market(config)` → `US`/`AR`; validación cruzada `rebalance_rule` ↔ `satellite_markets` (reglas US exigen `[US]`; AR exigen `[AR]`).
+  3. **Runner largo (`core_sim/long_term_monthly_runner.py`)**: el contexto espera `ar_business_days` o `us_sessions` según política (o derivación desde `TradingCalendarStore`). **Whitelist operativa del largo AR**: intersección de los símbolos declarados en `long_term_engine` con la unión de listas **`whitelist_ar_file` ∪ `whitelist_cedear_file`**, sin usar solo `load_merged_whitelist` para AR — así **SPY CEDEAR** puede operarse en el largo aunque el merge corto etiquete `SPY` como US.
+  4. **Paper-live (`scripts/run_paper_live.py`)**: `_build_long_pipeline_context` inyecta `ar_business_days` además de `us_sessions` cuando existe `calendar_store`. Tras el pipeline **corto**, si el largo está activo y el calendario del largo es AR, **`_overlay_ar_long_sleeve_bars_from_db`** escribe sobre una **copia** de `daily_bars` los OHLCV **XBUE** de cada símbolo de `long_term_engine` (MTM final y ejecución del largo usan esa copia).
+  5. **Stage validación (`validation/stages/long_engine.py`)**: si la regla es AR, proyecto de fechas efectivas vía tabla `calendars` **XBUE** y barras `_load_daily_bars_for_day(..., venue=XBUE)`. **No** se requiere calendario **XNYS** en la DB para que el stage corra en política AR. El **`PaperBrokerSim`** del stage usa `CostModel` con **una sola clave** de mercado (`AR` o `US`) según `long_sleeve_trade_market`, leyendo `policy["markets"]` con defaults alineados a paper-live (`min_spread_bps` 0.5 si no viene en YAML). Opcionalmente se pasa **`TradingCalendarStore.from_yaml`** a `create_long_term_monthly_backtester` si existe `config/calendars/trading_days.v1.yaml`.
+  6. **Documentación**: `POLICY.md` §10 y tablas relacionadas sincronizadas con YAML (sleeve en pesos, calendario AR, variante US documentada como alternativa soportada en schema/código).
+  7. **Regresión (audit fase 1, tests)**: cobertura en `tests/test_long_term_engine.py` (rebalance mensual AR), `test_long_term_monthly_runner.py` (métrica `is_long_rebalance_day`, intents SPY con `market: AR`), `test_validation_long_engine.py` (stage con DB **solo XBUE**, fills SPY con `market: AR`), `test_policy_yaml.py` (`satellite_markets: [AR]`, SPY en `whitelist_cedear`).
+- **Por qué**:
+  - Un solo mapa `symbol → market` no puede representar bien el mismo ticker en NYSE vs panel bCBA sin romper corto US o largo AR.
+  - El largo debe auditar contra listas reguladas de liquidación/local y CEDEAR, no contra el etiquetado del merge destinado al pipeline corto.
+- **Consecuencias**:
+  - Nueva dependencia para el stage informative: debe existir calendario **XBUE** en DB cuando se valida política AR; sin filas AR, el stage puede omitirse por `insufficient_calendar_days`.
+  - Quien cambie símbolos en `long_term_engine` debe asegurarlos en **`whitelist_ar` o `whitelist_cedear`**; si no, el motor aborta con `symbol_not_whitelisted`.
+  - Tests y fixtures actualizados: `tests/test_long_term_engine.py`, `tests/test_long_term_monthly_runner.py`, `tests/test_validation_long_engine.py` (XBUE + `upsert_calendars`; DB sin XNYS; overlay y costos cubiertos en la misma suite), `tests/test_policy_yaml.py`, `tests/test_run_paper_live.py` (overlay XBUE sobre merge-US para líneas del largo).
+- **Alternativas consideradas**:
+  - **Forzar SPY exclusivamente US o exclusivamente AR en el merge global**: descartada — rompe corto largo combinado en paper-live con el mismo ticker en dos venues conceptuales.
+  - **Ticker distinto para CEDEAR vs ETF** (p. ej. `SPYD`): descartada por ahora — fricción operativa en IOL y en datos; el diseño por archivos separados evita renombrar.
+  - **Solo mensual AR**: descartada en el default repo — se mantiene cadencia semanal (**ADR-045**) para latencia de drift y guardrail diario largo.
 
 ---
 
