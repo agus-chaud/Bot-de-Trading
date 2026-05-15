@@ -33,8 +33,17 @@ from .short_term_engine import (
 )
 
 
-def load_merged_whitelist(repo_root: Path, policy_doc: dict[str, Any]) -> dict[str, str]:
-    """Return `symbol_upper -> market` for US and AR combined (+ inline lists)."""
+def load_merged_whitelist(
+    repo_root: Path,
+    policy_doc: dict[str, Any],
+    *,
+    ar_operational_symbols: list[str] | None = None,
+) -> dict[str, str]:
+    """Return `symbol_upper -> market` for US and AR combined (+ inline lists).
+
+    When *ar_operational_symbols* is set (dynamic universe / fetch ∪ holdings), AR tickers
+    are exactly that list (plus inline_ar), merged after US files so ADRs stay US.
+    """
     sym_cfg = policy_doc["symbols"]
     merged: dict[str, str] = {}
     for raw in sym_cfg.get("inline_us", []) or []:
@@ -49,8 +58,17 @@ def load_merged_whitelist(repo_root: Path, policy_doc: dict[str, Any]) -> dict[s
     with ar_path.open(encoding="utf-8") as f:
         ar_doc = yaml.safe_load(f) or {}
 
-    for raw in ar_doc.get("stocks", []) or []:
-        merged[str(raw).strip().upper()] = "AR"
+    if ar_operational_symbols is None:
+        for raw in ar_doc.get("stocks", []) or []:
+            merged[str(raw).strip().upper()] = "AR"
+    else:
+        for sym in ar_operational_symbols:
+            su = str(sym).strip().upper()
+            if not su:
+                continue
+            if merged.get(su) == "US":
+                continue
+            merged[su] = "AR"
     for bucket in ("etfs", "stocks", "adrs"):
         for raw in us_doc.get(bucket, []) or []:
             merged[str(raw).strip().upper()] = "US"
@@ -279,7 +297,16 @@ def create_short_term_pipeline_handlers(
     db: "MarketDB | None" = None,
 ) -> dict[str, Callable[..., Any]]:
     """Handlers listos para inyectar en `DailyEventBacktester` (signals/propose/risk)."""
-    merged = load_merged_whitelist(repo_root, policy_doc)
+    from data.universe_selector import resolve_ar_universe_for_short_pipeline
+
+    def _symbol_ctx() -> tuple[dict[str, str], frozenset[str] | None]:
+        ar_u = resolve_ar_universe_for_short_pipeline(policy_doc, repo_root, ledger, db)
+        merged_map = load_merged_whitelist(
+            repo_root,
+            policy_doc,
+            ar_operational_symbols=ar_u.symbols_ar_bars,
+        )
+        return merged_map, ar_u.ar_signal_symbols
     ste_raw = policy_doc["short_term_engine"]
     ste = ShortEngineConfig(
         momentum_lookback_days=int(ste_raw["momentum_lookback_days"]),
@@ -374,16 +401,24 @@ def create_short_term_pipeline_handlers(
         if not isinstance(sector_map, dict):
             sector_map = {}
 
+        merged_map, ar_signal_filter = _symbol_ctx()
         rows, skipped_whitelist = build_market_snapshot_rows(
             trading_day=ctx["trading_day"],
             daily_bars=ctx["daily_bars"],
             history_by_symbol=history_by_symbol,
-            merged_whitelist=merged,
+            merged_whitelist=merged_map,
             market_open=ctx["market_open"],
             ste_cfg=ste,
             sector_map=sector_map,
         )
-        candidates, skipped_signal = compute_signal_candidates(rows, ste)
+        rows_for_rank = rows
+        if ar_signal_filter is not None:
+            rows_for_rank = [
+                r
+                for r in rows
+                if str(r.get("market")) != "AR" or str(r["symbol"]) in ar_signal_filter
+            ]
+        candidates, skipped_signal = compute_signal_candidates(rows_for_rank, ste)
         selected = rank_top_k_by_market(candidates, ste.top_k_per_market)
         daily = ctx.get("daily_bars") or {}
         data_ok = bool(daily) and not _data_quality_broken(skipped_whitelist)
@@ -394,7 +429,7 @@ def create_short_term_pipeline_handlers(
             "skipped_signal": skipped_signal,
             "rsi_by_symbol": {str(row["symbol"]): float(row["rsi"]) for row in rows if "rsi" in row},
             "metrics": {
-                "whitelist_size": len(merged),
+                "whitelist_size": len(merged_map),
                 "snapshot_rows": len(rows),
                 "candidates": len(candidates),
                 "selected": len(selected),
@@ -591,13 +626,14 @@ def create_short_term_pipeline_handlers(
         }
         guardrail = _check_risk_with_optional_db(sb, flags, risk_config, ctx.get("session_minutes_from_open"), ctx["trading_day"])
 
+        merged_map, _ = _symbol_ctx()
         approved: list[dict[str, str | float]] = list(stop_loss_orders)
         if guardrail.allowed:
             for order in normal_orders:
                 sym = str(order["symbol"]).strip().upper()
-                if sym not in merged:
+                if sym not in merged_map:
                     continue
-                if merged[sym] != str(order.get("market", "")):
+                if merged_map[sym] != str(order.get("market", "")):
                     continue
                 approved.append(order)
         return approved

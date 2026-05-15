@@ -49,7 +49,8 @@ La transición a real está planteada como gate, no como salto de fe:
   - `data/normalizer.py` — outlier detection (rolling 5d median), forward-fill ≤3 días, `imputed=True`
   - `data/fetcher.py` — pipeline connector→normalize→upsert, FetchReport
   - `scripts/fetch_daily.py` — CLI diario con `--lookback`, `--db`, whitelist desde policy.v1.yaml
-  - 202 tests (unitarios + integración end-to-end)
+  - **Universo AR híbrido (V2, opcional via policy)**: listas candidatas Merval + CEDEAR (`whitelist_ar.yaml`, `whitelist_cedear.yaml`), ranking por volumen IOL en ventana fija, rebalanceo semanal configurable, persistencia en `universe_snapshots`; la lista efectiva de ingesta OHLCV es **top liquidez ∪ posiciones AR abiertas** (sticky holdings). Presupuesto de API IOL medido por tipo (`token` / `refresh` / `history` / `universe_volume`) con techo mensual y por corrida (`max_calls_per_job`). Resolución compartida con el corto en `data/universe_selector.py` (**ADR-047**).
+  - Suite `pytest tests/` — orden de **490** casos (unitarios + integración); cobertura mínima `core_sim` en CI.
 
 - **Risk kill switch persistente**:
   - `data/storage.py` — `KillSwitchState` + tabla `kill_switch_log` en MarketDB

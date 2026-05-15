@@ -62,8 +62,10 @@ def test_whitelist_files_exist_relative_to_repo():
     cfg = _load_policy()
     us_path = REPO_ROOT / cfg["symbols"]["whitelist_us_file"]
     ar_path = REPO_ROOT / cfg["symbols"]["whitelist_ar_file"]
+    ced_path = REPO_ROOT / cfg["symbols"]["whitelist_cedear_file"]
     assert us_path.is_file()
     assert ar_path.is_file()
+    assert ced_path.is_file()
     with us_path.open(encoding="utf-8") as f:
         us = yaml.safe_load(f)
     assert set(us["etfs"]) >= {"SPY", "QQQ", "IWM"}

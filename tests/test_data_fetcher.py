@@ -13,6 +13,7 @@ import pytest
 
 from data.fetcher import FetchReport, fetch_and_store
 from data.schema import OHLCVRow
+from data.universe_selector import merge_fetch_universe
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -270,6 +271,29 @@ class TestMixedReport:
             report = fetch_and_store(["SPY", "IWM"], [], START, END, db)
 
         assert set(report.fetched_us).isdisjoint(set(report.skipped_us))
+
+
+class TestArUniverseContractForFetcher:
+    def test_fetch_and_store_should_receive_ar_list_built_like_merge_fetch_universe(self):
+        """Ingesta AR usa la misma unión ordenada top_Merval ∪ top_CEDEAR ∪ holdings que expone el selector."""
+        top_m = ["BMA", "GGAL"]
+        top_c = ["AAPL"]
+        holdings = ["OLDPOS"]
+        symbols_ar = merge_fetch_universe(top_m, top_c, holdings)
+        db = _make_db()
+
+        def _fetch_side_effect(sym: str, start: date, end: date, **_):
+            return [_make_row(sym, START, venue="AR")]
+
+        with (
+            patch(_PATCH_BUILD_CAL),
+            patch(_PATCH_FETCH_AR, side_effect=_fetch_side_effect) as mock_ar,
+            patch(_PATCH_NORMALIZE, side_effect=lambda rows, _cal: rows),
+        ):
+            fetch_and_store([], symbols_ar, START, END, db)
+
+        fetched_symbols = {c.args[0] for c in mock_ar.call_args_list}
+        assert fetched_symbols == set(symbols_ar)
 
 
 class TestFetchReport:

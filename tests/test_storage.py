@@ -73,3 +73,88 @@ class TestGetLastSnapshotDay:
 
         assert db.get_last_snapshot_day("paper_live") == date(2026, 5, 7)
         assert db.get_last_snapshot_day("backtest") == date(2026, 5, 9)
+
+
+class TestUniverseSnapshots:
+    def test_replace_and_read_universe_roundtrip(self, db: MarketDB):
+        from data.schema import UniverseSnapshotRow
+
+        d = date(2026, 5, 1)
+        rows = [
+            UniverseSnapshotRow(
+                selection_date=d,
+                bucket="merval",
+                symbol="GGAL",
+                rank=1,
+                metric_value=1e6,
+                source="dynamic",
+                schema_version=1,
+            ),
+            UniverseSnapshotRow(
+                selection_date=d,
+                bucket="cedear",
+                symbol="AAPL",
+                rank=1,
+                metric_value=2e6,
+                source="dynamic",
+                schema_version=1,
+            ),
+        ]
+        db.replace_universe_snapshots(d, rows)
+        assert db.get_latest_universe_selection_date() == d
+        loaded = db.get_universe_snapshots_for_date(d)
+        assert len(loaded) == 2
+        assert loaded[0].symbol == "AAPL"
+        assert loaded[1].symbol == "GGAL"
+
+    def test_replace_clears_prior_rows_for_same_date(self, db: MarketDB):
+        from data.schema import UniverseSnapshotRow
+
+        d = date(2026, 5, 2)
+        db.replace_universe_snapshots(
+            d,
+            [
+                UniverseSnapshotRow(
+                    selection_date=d,
+                    bucket="merval",
+                    symbol="X",
+                    rank=1,
+                    metric_value=1.0,
+                    source="dynamic",
+                    schema_version=1,
+                )
+            ],
+        )
+        db.replace_universe_snapshots(d, [])
+        assert db.get_universe_snapshots_for_date(d) == []
+
+
+class TestIolApiUsageMonth:
+    """SQLite persistence for IOL call counters (monthly aggregation)."""
+
+    def test_increment_creates_row_and_accumulates(self, db: MarketDB):
+        db.increment_iol_api_usage(
+            "2026-05",
+            token=1,
+            refresh=0,
+            history=2,
+            universe_volume=3,
+        )
+        row = db.get_iol_api_usage_month("2026-05")
+        assert row["token_count"] == 1
+        assert row["history_count"] == 2
+        assert row["universe_volume_count"] == 3
+
+        db.increment_iol_api_usage("2026-05", history=1)
+        row2 = db.get_iol_api_usage_month("2026-05")
+        assert row2["token_count"] == 1
+        assert row2["history_count"] == 3
+
+    def test_noop_when_all_zero(self, db: MarketDB):
+        db.increment_iol_api_usage("2026-04", token=0, refresh=0, history=0, universe_volume=0)
+        assert db.get_iol_api_usage_month("2026-04") == {
+            "token_count": 0,
+            "refresh_count": 0,
+            "history_count": 0,
+            "universe_volume_count": 0,
+        }

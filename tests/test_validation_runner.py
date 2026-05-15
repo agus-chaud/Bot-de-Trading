@@ -66,8 +66,21 @@ def _make_policy(lookback: int = 90) -> dict:
         "symbols": {
             "whitelist_us_file": "",
             "whitelist_ar_file": "",
+            "whitelist_cedear_file": "config/symbols/whitelist_cedear.yaml",
             "inline_us": [],
             "inline_ar": [],
+            "universe_selection": {
+                "enabled": False,
+                "rebalance_frequency": "weekly",
+                "targets": {"merval_top_n": 10, "cedears_top_n": 20},
+                "volume_window_trading_days": 20,
+                "tiebreakers": ["avg_notional_desc", "symbol_asc"],
+                "api_budget": {
+                    "monthly_limit": 25000,
+                    "soft_limit_pct": 0.8,
+                    "max_calls_per_job": 2000,
+                },
+            },
         },
     }
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from data.schema import CorporateActionRow, OHLCVRow
+from data.schema import CorporateActionRow, OHLCVRow, UniverseSnapshotRow
 
 if TYPE_CHECKING:
     from core_sim.ledger import PortfolioLedger
@@ -146,6 +146,32 @@ CREATE TABLE IF NOT EXISTS paper_snapshots (
 );
 """
 
+_CREATE_UNIVERSE_SNAPSHOTS = """
+CREATE TABLE IF NOT EXISTS universe_snapshots (
+    selection_date TEXT NOT NULL,
+    bucket        TEXT NOT NULL,
+    symbol        TEXT NOT NULL,
+    rank          INTEGER NOT NULL,
+    metric_value  REAL,
+    source        TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    created_at    TEXT NOT NULL,
+    PRIMARY KEY (selection_date, bucket, symbol, source)
+);
+CREATE INDEX IF NOT EXISTS idx_universe_selection_date ON universe_snapshots(selection_date);
+"""
+
+_CREATE_IOL_API_USAGE = """
+CREATE TABLE IF NOT EXISTS iol_api_usage (
+    month_key               TEXT NOT NULL PRIMARY KEY,
+    token_count             INTEGER NOT NULL DEFAULT 0,
+    refresh_count           INTEGER NOT NULL DEFAULT 0,
+    history_count           INTEGER NOT NULL DEFAULT 0,
+    universe_volume_count   INTEGER NOT NULL DEFAULT 0,
+    updated_at              TEXT NOT NULL
+);
+"""
+
 
 class MarketDB:
     """Local SQLite store for OHLCV bars, corporate actions, and fetch audit logs."""
@@ -182,6 +208,8 @@ class MarketDB:
                 + _CREATE_KILL_SWITCH_LOG
                 + _CREATE_PAPER_FILLS
                 + _CREATE_PAPER_SNAPSHOTS
+                + _CREATE_UNIVERSE_SNAPSHOTS
+                + _CREATE_IOL_API_USAGE
             )
 
     # ------------------------------------------------------------------
@@ -276,6 +304,128 @@ class MarketDB:
         if row and row["last_ts"]:
             return date.fromisoformat(row["last_ts"])
         return None
+
+    # ------------------------------------------------------------------
+    # Universe snapshots (liquidity selection audit)
+    # ------------------------------------------------------------------
+
+    def replace_universe_snapshots(
+        self,
+        selection_date: date,
+        rows: list[UniverseSnapshotRow],
+    ) -> None:
+        """Replace all snapshot rows for *selection_date* (full re-write of that day)."""
+        created_at = datetime.now(tz=timezone.utc).isoformat()
+        d = selection_date.isoformat()
+        with self._conn:
+            self._conn.execute("DELETE FROM universe_snapshots WHERE selection_date = ?", (d,))
+            if not rows:
+                return
+            self._conn.executemany(
+                """
+                INSERT INTO universe_snapshots
+                    (selection_date, bucket, symbol, rank, metric_value, source, schema_version, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        r.selection_date.isoformat(),
+                        r.bucket,
+                        r.symbol,
+                        r.rank,
+                        r.metric_value,
+                        r.source,
+                        r.schema_version,
+                        created_at,
+                    )
+                    for r in rows
+                ],
+            )
+
+    def get_latest_universe_selection_date(self) -> date | None:
+        """Most recent selection_date present in universe_snapshots, or None."""
+        cursor = self._conn.execute("SELECT MAX(selection_date) AS d FROM universe_snapshots")
+        row = cursor.fetchone()
+        if row and row["d"]:
+            return date.fromisoformat(str(row["d"]))
+        return None
+
+    def get_universe_snapshots_for_date(self, selection_date: date) -> list[UniverseSnapshotRow]:
+        """Return persisted universe rows for *selection_date*, ordered by bucket and rank."""
+        cursor = self._conn.execute(
+            """
+            SELECT selection_date, bucket, symbol, rank, metric_value, source, schema_version
+            FROM universe_snapshots
+            WHERE selection_date = ?
+            ORDER BY bucket ASC, rank ASC, symbol ASC
+            """,
+            (selection_date.isoformat(),),
+        )
+        return [
+            UniverseSnapshotRow(
+                selection_date=date.fromisoformat(str(r["selection_date"])),
+                bucket=str(r["bucket"]),
+                symbol=str(r["symbol"]),
+                rank=int(r["rank"]),
+                metric_value=float(r["metric_value"]) if r["metric_value"] is not None else None,
+                source=str(r["source"]),
+                schema_version=int(r["schema_version"]),
+            )
+            for r in cursor.fetchall()
+        ]
+
+    def get_iol_api_usage_month(self, month_key: str) -> dict[str, int]:
+        """Return persisted IOL call counts for calendar month *month_key* (YYYY-MM)."""
+        cursor = self._conn.execute(
+            """
+            SELECT token_count, refresh_count, history_count, universe_volume_count
+            FROM iol_api_usage WHERE month_key = ?
+            """,
+            (month_key,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return {
+                "token_count": 0,
+                "refresh_count": 0,
+                "history_count": 0,
+                "universe_volume_count": 0,
+            }
+        return {
+            "token_count": int(row["token_count"]),
+            "refresh_count": int(row["refresh_count"]),
+            "history_count": int(row["history_count"]),
+            "universe_volume_count": int(row["universe_volume_count"]),
+        }
+
+    def increment_iol_api_usage(
+        self,
+        month_key: str,
+        *,
+        token: int = 0,
+        refresh: int = 0,
+        history: int = 0,
+        universe_volume: int = 0,
+    ) -> None:
+        """Atomically add successful IOL calls for *month_key* (creates row if missing)."""
+        if token == 0 and refresh == 0 and history == 0 and universe_volume == 0:
+            return
+        now = datetime.now(tz=timezone.utc).isoformat()
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO iol_api_usage
+                    (month_key, token_count, refresh_count, history_count, universe_volume_count, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(month_key) DO UPDATE SET
+                    token_count = token_count + excluded.token_count,
+                    refresh_count = refresh_count + excluded.refresh_count,
+                    history_count = history_count + excluded.history_count,
+                    universe_volume_count = universe_volume_count + excluded.universe_volume_count,
+                    updated_at = excluded.updated_at
+                """,
+                (month_key, token, refresh, history, universe_volume, now),
+            )
 
     # ------------------------------------------------------------------
     # Corporate actions

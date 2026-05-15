@@ -147,6 +147,18 @@ Esta seccion es critica porque sin calidad de datos no hay señal confiable ni r
 - Separa errores de red de errores de datos para diagnostico claro.
 - Mantiene pipeline reproducible: fetch -> normalize -> store (`data/fetcher.py` + `data/normalizer.py`).
 
+### Universo AR hibrido (liquidez + holdings)
+
+Cuando `symbols.universe_selection.enabled` esta activo en `config/policy.v1.yaml`:
+
+- **Ranking**: sobre candidatos Merval y CEDEAR (YAML dedicados), se ordena por volumen total en una ventana fija de dias habiles usando historia **solo IOL** (sin distorsion Byma/yfinance en la seleccion). Desempates deterministas: notional medio descendente (`close × volume`), luego ticker ascendente.
+- **Rebalanceo**: cadencia policy-driven (por defecto **semanal**): si la corrida no debe refrescar el ranking, se **reutiliza la ultima seleccion persistida** en `universe_snapshots` (fallback controlado frente a presupuesto o calendario).
+- **Ingesta OHLCV**: la lista AR que consume `fetch_and_store` no es solo el top por volumen: es **`merge(top_merval, top_cedear, holdings_AR_abiertos)`** ordenado y sin duplicados. Si un ticker sigue en cartera AR (`qty ≠ 0` replay desde fills en DB paper-live), **sigue descargandose aunque haya salido del top**, para MTM, riesgo y salidas coherentes.
+- **Motor corto vs barras**: `resolve_ar_universe_for_short_pipeline` alimenta `load_merged_whitelist(..., ar_operational_symbols=...)` con ese conjunto de barras; el ranking de candidatos puede limitarse al top de liquidez (`ar_signal_symbols`) para no ensanchar senales con ilícitos fuera del universo operativo.
+- **Presupuesto API**: contadores por tipo en SQLite (`iol_api_usage`), limite mensual (warning al pasar umbral soft, sin ranking nuevo si hard), y **tope duro por job** que aborta la seleccion dinamica y cae a ultimo snapshot o whitelist estatica.
+
+Detalle y fuentes en **ADR-047** (`decisiones-tecnicas.md`).
+
 ### Tratamiento de calidad
 
 - Deteccion de outliers (rolling 5d median) y forward-fill acotado (≤3 dias, marcado como `imputed=True`).

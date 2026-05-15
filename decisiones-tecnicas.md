@@ -1056,6 +1056,30 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-047 — Universo AR dinámico (Merval + CEDEAR), overlay de holdings y presupuesto IOL
+
+- **Fecha**: 2026-05-15
+- **Estado**: aceptada
+- **Contexto**: El sleeve corto AR necesita liquidez realista sin inflar llamadas a IOL ni divergir entre “lo que se descarga” y “lo que el ledger sigue marcando”. Un whitelist estático no replica rotación de volumen; ignorar posiciones abiertas fuera del top rompe datos para stops y MTM.
+- **Decisión**:
+  - **Modelo híbrido**: candidatos en YAML (`whitelist_ar.yaml`, `whitelist_cedear.yaml`) + selección dinámica por volumen en ventana `volume_window_trading_days`, con targets `merval_top_n` / `cedears_top_n`.
+  - **Fórmula de ranking (determinística)**: para cada candidato, sumar volumen en los últimos *N* días de barras disponibles (cola temporal ordenada); orden global `(−sum_volume, −avg(close×volume), symbol)` para empates por liquidez y ticker.
+  - **Fallback**: si no corresponde refrescar (cadencia semanal/mensual según policy), si el **tope mensual hard** bloquea dinámica, o si el **job** agota `max_calls_per_job`, no se recalcula el ranking en esa corrida y se usa **último snapshot** en `universe_snapshots`; si no hay snapshot, **whitelist estática** legacy (`inline_ar` ∪ stocks AR).
+  - **Overlay de holdings**: la lista efectiva de símbolos AR para ingesta OHLCV es `merge_fetch_universe(top_merval, top_cedear, open_ar_positions)` (orden lexicográfico, dedup). Las posiciones AR abiertas se obtienen de replay de fills en `MarketDB` en fetch diario y del ledger en el runner corto.
+  - **Barras vs señales**: misma resolución base (`symbols_ar_bars`) para whitelist operativa; en modo dinámico `ar_signal_symbols` restringe el universo pasado a `compute_signal_candidates` al top de liquidez persistido, sin perder barras de holdings fuera del top.
+  - **Metering / guardrails**: cada llamada IOL exitosa contabiliza `token`, `refresh`, `history` o `universe_volume` (`data/iol_api_meter.py` + `increment_iol_api_usage`). El total mensual incluye los cuatro contadores; por encima del umbral soft se degrada cadencia (rebalanceo efectivo mensual dentro del mes); por encima del hard no se ejecuta selección dinámica hasta el siguiente mes contable.
+- **Por qué**: una sola fuente de verdad para fetch y corto reduce drift operativo; el overlay de holdings acota sorpresas de datos en posiciones reales; presupuesto explícito evita incidentes de rate/costo y fuerza degradación auditable.
+- **Consecuencias**:
+  - Mayor complejidad en `scripts/fetch_daily.py` y dependencia de tablas `universe_snapshots` / `iol_api_usage`.
+  - Tests de comportamiento en `tests/test_universe_selector.py`, `tests/test_fetch_daily_universe_resolution.py`, `tests/test_iol_api_meter.py`, extensiones en `tests/test_data_ar_connector.py`, `tests/test_data_fetcher.py`, `tests/test_short_term_day_runner.py`.
+- **Alternativas consideradas**:
+  - **Solo whitelist estática**: descartada — no captura liquidez cambiante en BYMA/CEDEARs.
+  - **Ranking con fallback Byma/yfinance**: descartada para selección — distorsiona métricas respecto del venue operativo IOL.
+  - **Incluir holdings en pool de señales**: descartada — ensancha entradas tácticas; se prefiere mantener datos sin ampliar candidatos de entrada.
+- **Archivos**: `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `data/universe_selector.py`, `data/iol_api_meter.py`, `data/connectors/ar_connector.py`, `data/storage.py`, `scripts/fetch_daily.py`, `core_sim/short_term_day_runner.py`, tests citados, `README.md`, `docs/project-overview.md`.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

@@ -1,0 +1,23 @@
+# Candidatos CEDEAR (mismo mercado bCBA vía IOL; tickers habituales).
+# Ampliar según liquidez real; la selección dinámica reduce a top N por volumen.
+stocks:
+  - AAPL
+  - MSFT
+  - GOOGL
+  - AMZN
+  - META
+  - TSLA
+  - KO
+  - JPM
+  - DIS
+  - NVDA
+  - AMD
+  - XOM
+  - PFE
+  - BA
+  - MCD
+  - WMT
+  - VIST
+  - VALE
+  - BABA
+  - NKE

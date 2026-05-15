@@ -15,8 +15,10 @@ from core_sim import (
     PortfolioLedger,
     TradingCalendarStore,
     create_short_term_daily_backtester,
+    create_short_term_pipeline_handlers,
     load_merged_whitelist,
 )
+from data.universe_selector import ShortPipelineArUniverse
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -82,6 +84,46 @@ def test_load_merged_whitelist_adrs_do_not_drop_other_symbols():
         assert stock in wl, f"US stock {stock} should still be present"
     for ar_only in ("PAMP", "BMA", "CEPU", "TXAR", "ALUA", "SUPV"):
         assert ar_only in wl and wl[ar_only] == "AR", f"AR-only {ar_only} should remain 'AR'"
+
+
+def test_generate_signals_passes_resolver_ar_bars_into_load_merged_whitelist():
+    """Misma fuente que fetch: operational AR = resolve_ar_universe_for_short_pipeline(...).symbols_ar_bars."""
+    policy = _load_policy()
+    ledger = PortfolioLedger(starting_cash=100_000.0)
+    merged_calls: list[list[str] | None] = []
+
+    def fake_resolve(policy_doc, repo_root, led, database):
+        return ShortPipelineArUniverse(
+            symbols_ar_bars=["PIPE_AR_ONLY"],
+            ar_signal_symbols=None,
+            universe_meta={"mode": "test_double"},
+        )
+
+    def spy_whitelist(repo_root, policy_doc, *, ar_operational_symbols=None):
+        merged_calls.append(list(ar_operational_symbols) if ar_operational_symbols else None)
+        out = load_merged_whitelist(repo_root, policy_doc, ar_operational_symbols=ar_operational_symbols)
+        return out
+
+    daily_bars = {
+        "SPY": {"open": 129.0, "high": 131.0, "low": 128.0, "close": 130.0, "volume": 80_000_000.0},
+        "PIPE_AR_ONLY": {"open": 1.0, "high": 1.1, "low": 0.9, "close": 1.0, "volume": 1_000_000.0},
+    }
+    history = {
+        "SPY": _build_spy_history(),
+        "PIPE_AR_ONLY": _build_spy_history(),
+    }
+
+    with patch("data.universe_selector.resolve_ar_universe_for_short_pipeline", side_effect=fake_resolve):
+        with patch("core_sim.short_term_day_runner.load_merged_whitelist", side_effect=spy_whitelist):
+            handlers = create_short_term_pipeline_handlers(policy, REPO_ROOT, ledger, db=None)
+            handlers["generate_signals"](
+                trading_day=date(2026, 4, 15),
+                daily_bars=daily_bars,
+                market_open={"is_us_session": True, "is_ar_business_day": True},
+                history_by_symbol=history,
+            )
+
+    assert merged_calls and merged_calls[0] == ["PIPE_AR_ONLY"]
 
 
 def test_short_term_pipeline_end_to_end_produces_fills():
