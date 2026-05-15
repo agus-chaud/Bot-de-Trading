@@ -282,6 +282,117 @@ En una defensa oral, el punto central es demostrar gobernanza: **la IA fue herra
 
 **La logica de riesgo corto estaba duplicada.** Habia dos lugares en el codigo con los mismos 4 checks de riesgo copiados a mano (calidad de datos, ventana no-trade, kill switch, limite diario). Si se cambiaba uno, habia que acordarse de cambiar el otro. Ahora uno llama al otro — una sola fuente de verdad.
 
+## 12.2) LangChain, CrewAI y capas de confianza (probabilidad vs matematica fija)
+
+Esta seccion aclara por que el proyecto **no** usa frameworks de agentes LLM en el path de ejecucion, y como podrian complementar el sistema mas adelante sin romper la filosofia paper-first.
+
+### Que son (breve)
+
+- **LangChain** ([documentacion](https://docs.langchain.com/oss/python/langchain/overview)): framework open source para conectar modelos de lenguaje con datos externos, herramientas (tools) y flujos de agente. Su foco es estandarizar integraciones y orquestar pasos donde el LLM decide que herramienta usar (patron tipo ReAct).
+- **CrewAI** ([introduccion](https://docs.crewai.com/en/introduction)): framework orientado a **equipos de agentes** con rol, objetivo y colaboracion. Combina **Flows** (orquestacion y estado) con **Crews** (grupos de agentes que resuelven tareas delegadas).
+
+Ambos son utiles cuando el problema es **lenguaje natural, ambiguedad o investigacion abierta**. No reemplazan reglas de trading versionadas y testeables.
+
+### Ventajas que podrian aportar (fuera del nucleo)
+
+| Ventaja | Ejemplo de uso compatible con este repo |
+|---------|----------------------------------------|
+| Velocidad en tareas textuales | Resumir filings, notas o logs de paper-live para revision humana |
+| Multi-agente para research | Un crew "analista + revisor" que contrasta un borrador de `POLICY.md` o un diff de policy |
+| Integracion con muchas APIs | Prototipos de copiloto que leen fuentes heterogeneas sin cablear cada conector a mano |
+| Exploracion de hipotesis | Brainstorm de indicadores o escenarios en notebook, **sin** tocar `run_paper_live.py` |
+
+### Por que no se usan en ejecucion ni en riesgo
+
+La decision formal esta en **ADR-002** (`decisiones-tecnicas.md`): los limites de riesgo (kill switch, perdida diaria, ventanas sin operar, etc.) estan escritos como **reglas fijas en codigo**, no como instrucciones a un modelo de lenguaje.
+
+En una defensa oral conviene usar esta imagen: hay dos tipos de "empleados" en el sistema.
+
+| | **Capa que "opina"** (LLM / LangChain / CrewAI) | **Capa que "cuenta"** (reglas del bot) |
+|---|---|---|
+| Pregunta que responde | "Que significa este titular o este texto?" | "Con estos numeros de hoy, opero o no?" |
+| Misma situacion manana | Puede cambiar la redaccion o el enfasis | Debe dar la **misma** respuesta |
+| Si se equivoca | Perdes tiempo revisando un resumen | Podrias operar cuando no debias, o no frenar a tiempo |
+
+Por eso LangChain y CrewAI **no** van en el camino que termina en ordenes (ni siquiera en paper): solo sirven como **copiloto de investigacion**, nunca como caja fuerte.
+
+**Tres motivos, en lenguaje llano:**
+
+1. **Reproducibilidad** — El proyecto promete: mismos datos + misma politica = misma decision. Un modelo de lenguaje es probabilistico: puede responder distinto aunque los precios no cambien. Eso impide repetir un experimento con confianza y complica las pruebas automaticas (walk-forward, tests en CI).
+2. **Auditoria** — Si algo sale mal, hay que explicar *que regla* actuo. El bot deja motivos explicitos en logs (por ejemplo: "bloqueado por perdida diaria del bucket corto"). Decir "la IA lo interpreto asi" no es una auditoria defendible ante un jurado ni ante uno mismo seis meses despues.
+3. **Riesgo de interpretacion** — Los modelos son fuertes con texto ambiguo y debiles si no hay red de seguridad numerica: pueden confundir magnitudes, inventar un dato que no estaba en el mercado, o llamar mal a una herramienta externa. Un resumen mal hecho molesta; un error en tamano de posicion o en un freno de riesgo duele.
+
+Un cuarto motivo practico: **costo y tiempo** — un equipo de agentes hace muchas llamadas al modelo por dia; el pipeline paper-live debe ser rapido y estable.
+
+**Aclaracion:** los "roles" de `AGENTS.md` (Spec, Risk, Engines) organizan **como trabajamos en el repo** (humanos y asistente del IDE). No son agentes CrewAI corriendo cada manana en produccion.
+
+### Que capa confias a la probabilidad y cual a la matematica fija
+
+**Regla de oro para la defensa:** *el LLM propone ideas y texto; las reglas escritas y el codigo deciden el dinero* (aunque sea simulado en paper).
+
+#### Capa probabilistica — confias en la interpretacion, no en la ejecucion
+
+Aca va todo lo que **sugiere** y **ayuda a pensar**, siempre con revision humana antes de que pese en el sistema:
+
+- Leer y resumir noticias, informes o logs largos.
+- Proponer etiquetas ("macro", "resultados trimestrales", "riesgo regulatorio").
+- Ayudar a redactar o revisar la politica del proyecto.
+- Explorar hipotesis ("y si probamos otro filtro?") en chat o notebook.
+
+**Nada de esto mueve una orden** hasta que una persona lo traduce a reglas versionadas y testeadas.
+
+En el repo hoy: IA al construir el proyecto (seccion 12), notas en `knowledge-base/`, y en el futuro un posible copiloto de noticias **offline** (ver mas abajo).
+
+#### Capa matematica fija — confias en numeros y reglas, no en opiniones
+
+Aca va todo lo que **debe repetirse igual** cada dia y dejar rastro claro:
+
+- Politica y limites versionados (`POLICY.md`, `config/policy.v1.yaml`).
+- Calidad de los datos de mercado (precios, sesiones, alertas si faltan datos).
+- Senales del motor corto y largo (momentum, RSI, bandas de rebalanceo, etc.).
+- Frenos de riesgo centralizados (`risk_guardrails.py`): kill switch, limites diarios, ventanas sin operar.
+- Simulacion de compra/venta y contabilidad (`PaperBrokerSim`, `PortfolioLedger`).
+- Validacion global GO / NO-GO antes de confiar en el sistema.
+
+Si manana preguntas "por que no compro?", la respuesta debe ser un **umbral o una regla**, no "el modelo lo sintio".
+
+```mermaid
+flowchart TB
+  subgraph probabilidad["Capa que OPINA — copiloto, no ejecuta ordenes"]
+    L[LangChain / CrewAI opcional]
+    N[Noticias y resumenes]
+    K[Notas y borradores para humano]
+    L --> N --> K
+  end
+  subgraph fija["Capa que CUENTA — unica fuente de verdad operativa"]
+    P[Politica escrita y versionada]
+    D[Datos de mercado verificados]
+    E[Motores: reglas con numeros]
+    R[Frenos de riesgo]
+    X[Simulador y libro contable]
+    V[Validacion GO / NO-GO]
+    P --> D --> E --> R --> X --> V
+  end
+  K -. el humano revisa y solo entonces .-> P
+```
+
+| Para explicar en oral | Capa probabilistica | Capa matematica fija |
+|----------------------|---------------------|----------------------|
+| Analogia | Asistente de investigacion en el escritorio | Caja fuerte con combinacion en el contrato |
+| Que confias | Criterio sobre texto y prioridades para revisar | Umbrales, bloqueos, tamanos, simulacion, gates |
+| Donde vive en el repo | Seccion 12, `knowledge-base/`, futuro research LLM | Policy YAML, motores, `risk_guardrails`, broker paper, `validation/` |
+
+### Mejora futura posible (investigacion, sin senal directa)
+
+Escenario acotado, alineado a ADR-002:
+
+1. **Ingesta diaria** de titulares o notas (API/RSS/archivo), fuera del horario critico de `run_paper_live`.
+2. **Crew o agente LangChain** que resume eventos y propone etiquetas (`earnings`, `regulatorio`, `macro`, etc.) y una lectura cualitativa de posible impacto en sectores o tickers del whitelist.
+3. **Validacion humana obligatoria** antes de persistir: nada entra a motores ni a `policy.v1.yaml` sin revision y, si aplica, ADR + evidencia walk-forward.
+4. **Salida permitida**: entradas en `knowledge-base/`, issues de seguimiento o borradores de policy — **no** scores que muevan ranking RSI/momentum ni ordenes en el broker simulado.
+
+Si algun dia se quisiera que etiquetas influyan en senales, seria un **cambio de contrato** del motor, con pre-gate OOS y ADR dedicado; hoy queda fuera de alcance.
+
 ## 13) Trabajo pendiente
 
 El proyecto esta funcional en paper-first con ambos sleeves (corto y largo) integrados en el loop diario. Gate KPI OOS activo. Frentes abiertos:
@@ -292,6 +403,7 @@ El proyecto esta funcional en paper-first con ambos sleeves (corto y largo) inte
 4. Explorar indicadores complementarios al RSI si el drawdown mensual del bucket corto sigue siendo cuello de botella (4/13 windows passed en walk-forward 180d).
 5. Extender controles CI de cobertura y regresion a modulos fuera de `core_sim` con la misma disciplina (especialmente `validation/` y `reporting/`).
 6. Agregar observabilidad explicita para operacion diaria del largo: metricas minimas por dia (`fills_long_count`, `long_risk_block_count`, `snapshot_long_equity_present`).
+7. **Copiloto de noticias (investigacion)**: pipeline offline con LangChain/CrewAI para resumir eventos diarios y etiquetado **human-validated** hacia `knowledge-base/` — sin acoplar a motores ni a ejecucion (ver seccion 12.2).
 
 Este capitulo existe para evitar una narrativa "cerrada". El sistema se presenta como una base robusta en evolucion, con backlog tecnico explicitado.
 
@@ -302,7 +414,7 @@ Este capitulo existe para evitar una narrativa "cerrada". El sistema se presenta
 - Abrir con secciones 1 y 2 (problema + arquitectura) para marcar contexto.
 - Profundizar en 3, 4, 5 y 6 para explicar decisiones tecnicas de motores y datos.
 - Usar 8 y 9 para mostrar operacion diaria real (paper-live) y validacion automatica.
-- Usar 12 para explicar metodologia de construccion con IA.
+- Usar 12 para explicar metodologia de construccion con IA; 12.2 para delimitar LangChain/CrewAI (copiloto vs nucleo deterministico).
 - Cerrar con 13 para mostrar criterio, honestidad tecnica y roadmap.
 
 Documentos complementarios:
