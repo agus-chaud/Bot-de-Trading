@@ -220,11 +220,28 @@ Cada stage es independiente y retorna `StageResult` con metricas, violaciones y 
 
 1. **`data_quality`**: verifica integridad y frescura de datos OHLCV.
 2. **`short_pre_gate`**: ejecuta walk-forward OOS del bloque corto y evalua metricas contra umbrales.
-3. **`long_engine`**: valida comportamiento del motor largo (drift, rebalanceos, turnover).
+3. **`long_engine`**: valida comportamiento del motor largo (drift, rebalanceos, turnover). `run_long_engine_stage` retorna siempre `(StageResult, StageDetails | None)`; con `return_details=True` expone curva diaria de equity del **sleeve largo**, fills y posiciones finales para analisis fuera del JSON agregado (**ADR-046**).
 4. **`risk_audit`**: audita que los guardrails actuaron correctamente en la historia reciente.
 5. **`kill_switch_history`**: verifica historial de activaciones/resets del kill switch.
 
 El runner (`validation/runner.py`) orquesta las 5 etapas y agrega la decision global. Script: `scripts/run_validation_wf.py`.
+
+### Walk-forward del largo (CLI) vs comparacion en notebook
+
+| Artefacto | Proposito | Salida |
+|-----------|-----------|--------|
+| `validation/wf_runner.py` + `scripts/run_long_engine_wf.py` | Varias ventanas rolling; metricas agregadas por ventana y summary global | `validation_reports/long_engine_wf_*.json` (**ADR-027**) |
+| `notebooks/wf_long_comparison.ipynb` | Evidencia empirica de **ADR-045**: semanal vs mensual vs buy-and-hold SPY (abr-2025 → may-2026) | WF 3m/paso 1m + viz por ventana; corrida continua sin reset (`continuous_equity_df`) (**ADR-046**) |
+
+El CLI WF no cambia de contrato: `wf_runner` sigue consumiendo solo el `StageResult` (`[0]` de la tupla). El notebook pide detalle con `return_details=True` y, para la regla mensual, una copia del `policy_doc` con `rebalance_rule` sobrescrito por corrida.
+
+Flujo del notebook (**ADR-046**, pasos 3–4):
+
+1. Carga `data/market.db` y ventanas `generate_wf_windows(3, 1)` sobre calendario XNYS.
+2. Por ventana: stage largo semanal, mensual y curva SPY → `equity_df` + `windows_df`.
+3. Métricas por ventana: retorno total, Sharpe anualizado (√252), MDD desde equity diaria.
+4. Cuatro vistas: subplot grid base 100, tabla pivote, barra de retorno promedio, MDD agrupado por ventana.
+5. Corrida continua sobre todo el calendario (paso 5): tres curvas superpuestas en USD y en base 100.
 
 ## 10) Testing y calidad
 
@@ -240,7 +257,7 @@ El repo cuenta con ~44 archivos de test, abarcando unitarios, integracion y regr
 
 ## 11) Decisiones tecnicas clave
 
-Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (43 ADRs a la fecha). Los ejes principales son:
+Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (46 ADRs a la fecha). Los ejes principales son:
 
 - Paper-first como estrategia de construccion.
 - Riesgo deterministico y centralizado.
@@ -251,6 +268,7 @@ Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (43 ADRs
 - Modelo de branches `main` / `paper-live-data` con LFS y notificaciones (**ADR-040**).
 - ADRs argentinos (MELI, YPF, TGS, GGAL) incorporados al whitelist US con precedencia de tag y categoría `adrs` separada (**ADR-043**).
 - Integración del largo en paper-live con guardrail efectivo, dedup de riesgo corto y feature flag de rollback (**ADR-044**).
+- Rebalanceo largo semanal vs mensual: cambio operativo en policy (**ADR-045**); evidencia en notebook WF + corrida continua (**ADR-046**).
 
 Para defensa oral, esta seccion muestra que la arquitectura no salio de una implementacion improvisada, sino de decisiones acumuladas y justificadas.
 
@@ -300,7 +318,7 @@ Ambos son utiles cuando el problema es **lenguaje natural, ambiguedad o investig
 | Velocidad en tareas textuales | Resumir filings, notas o logs de paper-live para revision humana |
 | Multi-agente para research | Un crew "analista + revisor" que contrasta un borrador de `POLICY.md` o un diff de policy |
 | Integracion con muchas APIs | Prototipos de copiloto que leen fuentes heterogeneas sin cablear cada conector a mano |
-| Exploracion de hipotesis | Brainstorm de indicadores o escenarios en notebook, **sin** tocar `run_paper_live.py` |
+| Exploracion de hipotesis | Brainstorm de indicadores o escenarios en notebook, **sin** tocar `run_paper_live.py` (p. ej. `notebooks/wf_long_comparison.ipynb` para ADR-045/046) |
 
 ### Por que no se usan en ejecucion ni en riesgo
 

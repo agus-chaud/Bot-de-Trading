@@ -12,7 +12,7 @@ import yaml
 
 from data.schema import OHLCVRow
 from data.storage import MarketDB
-from validation.stages.long_engine import run_long_engine_stage
+from validation.stages.long_engine import StageDetails, run_long_engine_stage
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -102,7 +102,7 @@ def test_three_month_period_returns_four_metrics(tmp_path: Path) -> None:
     db = _make_db_with_data(tmp_path, trading_days)
     policy = _policy_doc()
 
-    result = run_long_engine_stage(
+    result, details = run_long_engine_stage(
         db=db,
         trading_days=trading_days,
         policy_doc=policy,
@@ -110,6 +110,7 @@ def test_three_month_period_returns_four_metrics(tmp_path: Path) -> None:
         starting_cash=200_000.0,
     )
 
+    assert details is None
     assert result.stage == "long_engine"
     assert result.passed is True
     assert result.skipped is False
@@ -149,7 +150,7 @@ def test_empty_trading_days_returns_skipped(tmp_path: Path) -> None:
     db = _make_db_empty(tmp_path)
     policy = _policy_doc()
 
-    result = run_long_engine_stage(
+    result, details = run_long_engine_stage(
         db=db,
         trading_days=[],
         policy_doc=policy,
@@ -157,6 +158,7 @@ def test_empty_trading_days_returns_skipped(tmp_path: Path) -> None:
         starting_cash=100_000.0,
     )
 
+    assert details is None
     assert result.stage == "long_engine"
     assert result.passed is True
     assert result.skipped is True
@@ -165,13 +167,19 @@ def test_empty_trading_days_returns_skipped(tmp_path: Path) -> None:
     assert result.metrics["rebalances_executed"] is None
 
 
-def test_single_month_returns_skipped(tmp_path: Path) -> None:
-    """Only 1 month of trading days → skipped=True (need at least 2 months)."""
-    trading_days = _generate_trading_days(2024, 3, 1)
+def test_single_week_returns_skipped(tmp_path: Path) -> None:
+    """Only 1 ISO week of trading days → skipped=True (policy uses weekly rebalance)."""
+    trading_days = [
+        date(2024, 3, 4),
+        date(2024, 3, 5),
+        date(2024, 3, 6),
+        date(2024, 3, 7),
+        date(2024, 3, 8),
+    ]
     db = _make_db_with_data(tmp_path, trading_days)
     policy = _policy_doc()
 
-    result = run_long_engine_stage(
+    result, _ = run_long_engine_stage(
         db=db,
         trading_days=trading_days,
         policy_doc=policy,
@@ -189,7 +197,7 @@ def test_no_ohlcv_in_db_returns_skipped(tmp_path: Path) -> None:
     db = _make_db_empty(tmp_path)  # no data inserted
     policy = _policy_doc()
 
-    result = run_long_engine_stage(
+    result, _ = run_long_engine_stage(
         db=db,
         trading_days=trading_days,
         policy_doc=policy,
@@ -231,7 +239,7 @@ def test_rebalance_detected_after_price_drift(tmp_path: Path) -> None:
     db.upsert_ohlcv(rows)
 
     policy = _policy_doc()
-    result = run_long_engine_stage(
+    result, _ = run_long_engine_stage(
         db=db,
         trading_days=trading_days,
         policy_doc=policy,
@@ -256,7 +264,7 @@ def test_stage_always_passed_and_no_violations(tmp_path: Path) -> None:
     db = _make_db_with_data(tmp_path, trading_days)
     policy = _policy_doc()
 
-    result = run_long_engine_stage(
+    result, _ = run_long_engine_stage(
         db=db,
         trading_days=trading_days,
         policy_doc=policy,
@@ -266,3 +274,32 @@ def test_stage_always_passed_and_no_violations(tmp_path: Path) -> None:
 
     assert result.passed is True
     assert result.violations == []
+
+
+# ---------------------------------------------------------------------------
+# Test 5 — return_details populates StageDetails
+# ---------------------------------------------------------------------------
+
+
+def test_return_details_populates_daily_equity_and_positions(tmp_path: Path) -> None:
+    """return_details=True returns StageDetails with long-sleeve equity series."""
+    trading_days = _generate_trading_days(2024, 1, 3)
+    db = _make_db_with_data(tmp_path, trading_days)
+    policy = _policy_doc()
+
+    result, details = run_long_engine_stage(
+        db=db,
+        trading_days=trading_days,
+        policy_doc=policy,
+        repo_root=REPO_ROOT,
+        starting_cash=200_000.0,
+        return_details=True,
+    )
+
+    assert result.skipped is False
+    assert isinstance(details, StageDetails)
+    assert len(details.daily_equity) > 0
+    assert all("date" in row and "equity" in row for row in details.daily_equity)
+    assert details.daily_equity[0]["equity"] > 0
+    assert isinstance(details.fills, list)
+    assert isinstance(details.final_positions, dict)

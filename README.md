@@ -89,7 +89,9 @@ La transición a real está planteada como gate, no como salto de fe:
   - `validation/wf_runner.py` — ejecución por ventana de `run_long_engine_stage` (corridas independientes)
   - `validation/wf_long_report.py` — agregación global y serialización JSON del reporte WF largo
   - `scripts/run_long_engine_wf.py` — CLI para producir `validation_reports/long_engine_wf_*.json`
-  - tests en `tests/test_wf_windows.py`, `tests/test_wf_runner.py`, `tests/test_wf_long_report.py`
+  - `validation/stages/long_engine.py` — `run_long_engine_stage(..., return_details=True)` devuelve tupla `(StageResult, StageDetails | None)` con curva diaria del sleeve largo, fills y posiciones finales (default: solo `StageResult` vía desempaquetado en callers)
+  - `notebooks/wf_long_comparison.ipynb` — comparación empírica ADR-045/046: WF por ventanas (3m/1m) + gráficos + corrida continua sin reset; ejecutar todas las celdas desde `notebooks/` (**ADR-046**)
+  - tests en `tests/test_wf_windows.py`, `tests/test_wf_runner.py`, `tests/test_wf_long_report.py`, `tests/test_validation_long_engine.py`
 - **Informe KPI (smoke, `rpt_kpi.v1`)**:
   - `docs/kpi_report_spec.v1.md` — definiciones operativas (fecha de congelación 2026-05-05).
   - `reporting/kpi_v0.py` — CSV diario §2.1 + fills/trades §2.2 (opcional si el equity trae `costs_day_short`/`costs_day_long`): retorno neto anualizado total §5, max drawdown §7, **Sharpe/Sortino** por segmento (equity total/corto/largo) §6, **hit rate y profit factor** por motor FIFO §8, **drift 30/70 y 20/80** §11, y v3 en bloque largo (**MDD_12m rolling**, **Calmar_12m**, **turnover_long_monthly**) + **alpha vs benchmark** §12.
@@ -146,7 +148,7 @@ La transición a real está planteada como gate, no como salto de fe:
 - `pending_order_queue`: cola para modo semi_auto, permite validación manual antes de ejecutar.
 - `short_term_pre_gate`: walk-forward OOS automático del bloque corto antes de habilitar más capital.
 - `long_term_engine` + `long_term_monthly_runner`: motor semanal del sleeve largo (pesos objetivo, bandas de drift, intents de rebalanceo); integra `check_long_risk()`.
-- `validation/wf_windows` + `validation/wf_runner` + `validation/wf_long_report`: pipeline WF del bloque largo (ventanas rolling -> stage por ventana -> agregados globales + JSON).
+- `validation/wf_windows` + `validation/wf_runner` + `validation/wf_long_report`: pipeline WF del bloque largo (ventanas rolling -> stage por ventana -> agregados globales + JSON). Series diarias del largo vía `return_details` en el stage; análisis comparativo semanal/mensual/SPY en `notebooks/wf_long_comparison.ipynb` (**ADR-046**).
 - `reporting/kpi_v0` + `scripts/report_kpis.py`: informe JSON/Markdown según `docs/kpi_report_spec.v1.md` (lectura post-corrida del export equity + fills).
 - `kpi_oos_gate` + `reporting/kpi_walk_forward` + `scripts/report_kpis_walk_forward.py`: varias ventanas OOS sobre la misma serie, mismo informe v3 por tramo, tabla maestra y gate reproducible opcional (**ADR-034**).
 - `tests/fixtures/kpi_golden` + `tests/test_kpi_regression_golden.py`: regresión con dataset fijo de 60 días y JSON golden en CI (**ADR-035**).
@@ -172,6 +174,8 @@ python -m pytest tests/ -v
 python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
 python scripts/run_short_term_pre_gate.py
 python scripts/run_long_engine_wf.py --window-months 6 --step-months 1
+# Notebook comparativo largo (ejecutar todas las celdas desde notebooks/):
+#   notebooks/wf_long_comparison.ipynb  → pasos 3–4: orquestador + gráficos ADR-045/046
 python scripts/report_kpis.py --equity path/to/equity.csv --trades path/to/fills.csv --benchmark-returns path/to/benchmark_returns.csv --out-json kpi.json --out-md kpi.md
 python scripts/report_kpis_walk_forward.py --equity path/to/equity.csv --trades path/to/fills.csv --out-json wf_kpi_oos.json
 # Si el CSV tiene pocos días y policy usa burn_in=252: --wf-burn-in 0 --wf-oos 60 --wf-step 60 (ajustar al largo real del CSV)

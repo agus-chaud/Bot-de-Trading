@@ -87,9 +87,9 @@ def test_runner_invokes_stage_once_per_window_with_correct_days(
     mock_stage: MagicMock,
 ) -> None:
     mock_stage.side_effect = [
-        _fake_stage_result(0),
-        _fake_stage_result(1),
-        _fake_stage_result(2),
+        (_fake_stage_result(0), None),
+        (_fake_stage_result(1), None),
+        (_fake_stage_result(2), None),
     ]
     w0 = [date(2024, 1, 2), date(2024, 1, 3)]
     w1 = [date(2024, 2, 1)]

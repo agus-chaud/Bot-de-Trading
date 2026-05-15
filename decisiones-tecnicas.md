@@ -1017,6 +1017,42 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Diario**: descartada — genera ruido operativo (29/30 días no-op) y logs innecesarios sin beneficio real para ETFs pasivos.
   - **Bandas de drift más estrechas con cadencia mensual**: descartada — no resuelve la baja frecuencia de evaluación del guardrail.
 - **Archivos**: `core_sim/long_term_engine.py`, `core_sim/__init__.py`, `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `POLICY.md`, `validation/stages/long_engine.py`, `AGENTS.md`, `README.md`, `docs/project-overview.md`, tests correspondientes.
+- **Validación empírica**: comparación semanal vs mensual vs SPY en walk-forward → **ADR-046** (`notebooks/wf_long_comparison.ipynb`; pasos 3–4 implementados; corrida continua 12m pendiente).
+
+---
+
+## ADR-046 — Notebook walk-forward comparativo del motor largo (evidencia ADR-045)
+
+- **Fecha**: 2026-05-15
+- **Estado**: aceptada (plan del notebook completo: pasos 1–5)
+- **Contexto**: **ADR-045** pasó el rebalanceo largo de mensual a semanal por argumentos de latencia de drift y frecuencia del guardrail diario, pero sin una corrida controlada que compare ambas reglas y un benchmark en las mismas ventanas, costos y datos. El pipeline WF del largo (**ADR-027**, `run_long_engine_wf.py`) agrega métricas por ventana (`max_drift_observed_pp`, costos, etc.) pero no exporta la **curva diaria de equity del sleeve largo**, necesaria para superponer estrategias y normalizar a base 100.
+- **Decisión**:
+  - Extender `validation/stages/long_engine.run_long_engine_stage` con parámetro opcional `return_details: bool = False` y dataclass `StageDetails`:
+    - `daily_equity`: lista de `{"date", "equity"}` por día hábil con barras (MTM del sleeve largo vía `_compute_long_bucket_mtm`);
+    - `fills`: fills acumulados de rebalanceos en el período;
+    - `final_positions`: cantidades finales por símbolo en bucket `long`.
+  - Retorno **siempre** tupla `(StageResult, StageDetails | None)`; si `return_details=False`, el segundo elemento es `None`. Callers existentes adaptados: `validation/runner.py` desempaqueta; `validation/wf_runner.py` usa solo `[0]` por ventana (comportamiento del CLI sin cambios).
+  - Notebook `notebooks/wf_long_comparison.ipynb`:
+    - Helper `spy_buy_and_hold_equity(bars, initial_cash)` → `equity_t = initial_cash × (close_t / close_0)`.
+    - **Orquestador (paso 3)**: calendario US abr-2025 → may-2026; `generate_wf_windows(3, 1)`; por ventana corre `run_long_engine_stage(..., return_details=True)` con `policy_with_rebalance_rule` (semanal vs mensual) + SPY; acumula `equity_df` y `windows_df`.
+    - **Visualizaciones (paso 4)**: grid de curvas base 100 por ventana; tabla pivote retorno % / Sharpe (252d) / MDD %; barra de retorno promedio cross-ventanas; barras agrupadas de MDD ventana a ventana.
+    - **Gráfico continuo (paso 5)**: una corrida sobre todo `trading_days` (sin reset entre ventanas WF); `continuous_equity_df` + panel dual (USD nominal y base 100).
+  - Costos reales del `cost_model` en policy (vía stage); equity solo del sleeve largo.
+- **Por qué**:
+  - Reutilizar el mismo stage que validation-wf y WF CLI evita duplicar simulación, broker y costos en un script ad hoc del notebook.
+  - Separar **métricas agregadas** (JSON `validation_reports/`, ADR-027) de **series temporales** (notebook) mantiene reportes livianos y trazables.
+  - La tupla obliga opt-in explícito al detalle sin romper el contrato `StageResult` usado por GO/NO-GO.
+  - Buy-and-hold SPY en la misma ventana y cash inicial es el piso de referencia mínimo para preguntar “¿valió la pena rebalancear?”.
+- **Consecuencias**:
+  - Paso 5 no sustituye paso 4: ventanas independientes miden estabilidad OOS; la corrida continua muestra compounding y costos acumulados en un solo capital.
+  - Sharpe en el notebook es **exploratorio** (retornos diarios simples × √252); no reemplaza `rpt_kpi.v1` ni el gate OOS.
+  - Para comparar `rebalance_rule` distintas, el notebook inyecta la regla en **copia** del `policy_doc` (no muta el YAML commiteado).
+  - `daily_equity` refleja sleeve largo, no equity total del portfolio (coherente con el scope del motor largo).
+- **Alternativas consideradas**:
+  - **Re-simular solo en el notebook**: descartada — riesgo de drift respecto al stage y de costos distintos.
+  - **Incluir `daily_equity` en `long_engine_wf_*.json`**: descartada en v1 por tamaño de artefacto y mezcla de responsabilidades con ADR-027.
+  - **Función separada `run_long_engine_stage_with_details`**: descartada — duplicaría firma y lógica; un flag es suficiente.
+- **Archivos**: `validation/stages/long_engine.py`, `validation/runner.py`, `validation/wf_runner.py`, `notebooks/wf_long_comparison.ipynb`, `tests/test_validation_long_engine.py`, `tests/test_validation_runner.py`, `tests/test_wf_runner.py`, `README.md`, `docs/project-overview.md`
 
 ---
 

@@ -37,7 +37,7 @@ def run_long_engine_wf_windows(
         Empty ``windows`` → empty list.
     """
     return [
-        run_long_engine_stage(db, window, policy_doc, repo_root, starting_cash)
+        run_long_engine_stage(db, window, policy_doc, repo_root, starting_cash)[0]
         for window in windows
     ]
 

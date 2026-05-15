@@ -11,6 +11,7 @@ It runs the long-term pipeline over the given trading days and measures:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,15 @@ logger = logging.getLogger(__name__)
 _STAGE_NAME = "long_engine"
 _VENUE_US = "XNYS"
 _MIN_REBALANCE_UNITS_REQUIRED = 2  # need at least 2 units (weeks/months) to observe behavior
+
+
+@dataclass
+class StageDetails:
+    """Optional per-run artifacts for walk-forward comparison (long sleeve only)."""
+
+    daily_equity: list[dict[str, Any]] = field(default_factory=list)
+    fills: list[dict[str, Any]] = field(default_factory=list)
+    final_positions: dict[str, float] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +132,9 @@ def run_long_engine_stage(
     policy_doc: dict[str, Any],
     repo_root: Path,
     starting_cash: float,
-) -> StageResult:
+    *,
+    return_details: bool = False,
+) -> tuple[StageResult, StageDetails | None]:
     """Run the long engine validation stage.
 
     Never blocks GO — passed is always True, violations is always [].
@@ -133,9 +145,12 @@ def run_long_engine_stage(
         policy_doc: Parsed policy.v1.yaml as a dict.
         repo_root: Repository root path (used to load whitelists).
         starting_cash: Starting portfolio cash for the simulation.
+        return_details: When True, return ``StageDetails`` with daily long-sleeve
+            equity, fills, and final positions.
 
     Returns:
-        StageResult with stage="long_engine", passed=True, and 4 metrics populated.
+        ``(StageResult, StageDetails | None)`` — details are None when
+        ``return_details`` is False.
     """
     _skipped_result = StageResult(
         stage=_STAGE_NAME,
@@ -152,7 +167,7 @@ def run_long_engine_stage(
 
     if not trading_days:
         logger.info('{"event": "long_engine_stage_skipped", "reason": "no_trading_days"}')
-        return _skipped_result
+        return _skipped_result, None
 
     # Extract long-engine config and symbols from policy
     lt_cfg: LongTermEngineConfig = long_term_engine_config_from_policy_dict(
@@ -165,7 +180,7 @@ def run_long_engine_stage(
                 '{"event": "long_engine_stage_skipped", "reason": "insufficient_weeks", "weeks": %d}',
                 units,
             )
-            return _skipped_result
+            return _skipped_result, None
     else:
         units = _months_in_period(trading_days)
         if units < _MIN_REBALANCE_UNITS_REQUIRED:
@@ -173,7 +188,7 @@ def run_long_engine_stage(
                 '{"event": "long_engine_stage_skipped", "reason": "insufficient_months", "months": %d}',
                 units,
             )
-            return _skipped_result
+            return _skipped_result, None
 
     symbols: list[str] = sorted(
         [sym for sym, _ in (*lt_cfg.core_lines, *lt_cfg.satellite_lines)]
@@ -189,7 +204,7 @@ def run_long_engine_stage(
             '{"event": "long_engine_stage_skipped", "reason": "no_ohlcv_data", "symbol": "%s"}',
             symbols[0] if symbols else "none",
         )
-        return _skipped_result
+        return _skipped_result, None
 
     # Set up simulation components
     ledger = PortfolioLedger(starting_cash=starting_cash)
@@ -209,6 +224,8 @@ def run_long_engine_stage(
     total_rebalance_cost: float = 0.0
     rebalances_executed: int = 0
     monthly_long_equity: dict[tuple[int, int], list[float]] = {}
+    daily_equity: list[dict[str, Any]] = []
+    all_fills: list[dict[str, Any]] = []
 
     # Run the pipeline day by day, but only on rebalance-candidate days
     # according to policy rebalance_rule to keep it efficient.
@@ -224,6 +241,11 @@ def run_long_engine_stage(
             continue
 
         long_bucket_mtm, long_cash = _compute_long_bucket_mtm(ledger, daily_bars, starting_cash)
+
+        if return_details:
+            daily_equity.append(
+                {"date": trading_day.isoformat(), "equity": round(long_bucket_mtm, 4)}
+            )
 
         # Compute current weights and drift BEFORE the rebalance
         if long_bucket_mtm > 0:
@@ -258,9 +280,6 @@ def run_long_engine_stage(
         if not is_rebalance_day:
             continue
 
-        # Capture broker fills before running to compute rebalance cost delta
-        fills_before = len(broker._fills)
-
         pipeline_context: dict[str, Any] = {
             "us_sessions": us_sessions,
             "long_bucket_mtm": long_bucket_mtm,
@@ -293,7 +312,8 @@ def run_long_engine_stage(
         fills = event_map.get("OrdersFilled") or []
         if fills:
             rebalances_executed += 1
-            # Sum all fees from fills in this rebalance
+            if return_details:
+                all_fills.extend(fills)
             for fill in fills:
                 total_rebalance_cost += float(fill.get("fee", 0.0))
 
@@ -316,14 +336,30 @@ def run_long_engine_stage(
                 if dd < worst_monthly_drawdown:
                     worst_monthly_drawdown = dd
 
-    return StageResult(
-        stage=_STAGE_NAME,
-        passed=True,
-        metrics={
-            "max_drift_observed_pp": round(max_drift_pp, 4),
-            "total_rebalance_cost": round(total_rebalance_cost, 4),
-            "monthly_drawdown_long": round(worst_monthly_drawdown, 6),
-            "rebalances_executed": rebalances_executed,
-        },
-        violations=[],
+    details: StageDetails | None = None
+    if return_details:
+        final_positions = {
+            sym: ledger.positions[sym].qty
+            for sym in symbols
+            if sym in ledger.positions and ledger.positions[sym].bucket == "long"
+        }
+        details = StageDetails(
+            daily_equity=daily_equity,
+            fills=all_fills,
+            final_positions=final_positions,
+        )
+
+    return (
+        StageResult(
+            stage=_STAGE_NAME,
+            passed=True,
+            metrics={
+                "max_drift_observed_pp": round(max_drift_pp, 4),
+                "total_rebalance_cost": round(total_rebalance_cost, 4),
+                "monthly_drawdown_long": round(worst_monthly_drawdown, 6),
+                "rebalances_executed": rebalances_executed,
+            },
+            violations=[],
+        ),
+        details,
     )
