@@ -76,7 +76,7 @@ def test_compute_signal_candidates_skips_when_rsi_overbought():
         top_k_per_market=2,
         risk_budget_trade_pct=0.005,
         rsi_lookback=14,
-        rsi_overbought_entry=70.0,
+        rsi_overbought_entry=80.0,
         rsi_exit_threshold=45.0,
     )
     market_snapshot = [
@@ -87,7 +87,7 @@ def test_compute_signal_candidates_skips_when_rsi_overbought():
             "close_n_days_ago": 100.0,
             "volume_percentile": 0.8,
             "vol_20d": 0.02,
-            "rsi": 75.0,
+            "rsi": 85.0,
             "session_valid": True,
         }
     ]

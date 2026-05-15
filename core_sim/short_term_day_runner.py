@@ -288,7 +288,7 @@ def create_short_term_pipeline_handlers(
         top_k_per_market=int(ste_raw["top_k_per_market"]),
         risk_budget_trade_pct=float(ste_raw["risk_budget_trade_pct"]),
         rsi_lookback=int(ste_raw.get("rsi_lookback", 14)),
-        rsi_overbought_entry=float(ste_raw.get("rsi_overbought_entry", 70.0)),
+        rsi_overbought_entry=float(ste_raw.get("rsi_overbought_entry", 80.0)),
         rsi_exit_threshold=float(ste_raw.get("rsi_exit_threshold", 45.0)),
         allow_leverage=bool(ste_raw.get("allow_leverage", False)),
     )
@@ -485,7 +485,22 @@ def create_short_term_pipeline_handlers(
             today_rsi = rsi_today_by_symbol.get(sym)
             if prev_rsi is None or today_rsi is None:
                 continue
-            if float(prev_rsi) >= ste.rsi_exit_threshold and float(today_rsi) < ste.rsi_exit_threshold:
+            prev_f = float(prev_rsi)
+            today_f = float(today_rsi)
+            if prev_f < ste.rsi_overbought_entry and today_f >= ste.rsi_overbought_entry:
+                rsi_exit_symbols.add(str(sym))
+                broker_orders.append(
+                    {
+                        "symbol": str(sym),
+                        "side": "SELL",
+                        "qty": qty,
+                        "market": str(pos.get("market", "US")),
+                        "bucket": "short",
+                        "reason": "rsi_overbought_reached",
+                    }
+                )
+                continue
+            if prev_f >= ste.rsi_exit_threshold and today_f < ste.rsi_exit_threshold:
                 rsi_exit_symbols.add(str(sym))
                 broker_orders.append(
                     {

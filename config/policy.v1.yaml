@@ -83,7 +83,7 @@ short_term_engine:
   top_k_per_market: 5                # K máximo por mercado en ranking diario
   risk_budget_trade_pct: 0.005       # presupuesto de riesgo por trade (0.5% del bucket corto)
   rsi_lookback: 14                   # RSI base para filtro de entrada/salida
-  rsi_overbought_entry: 70.0         # no comprar si RSI supera este umbral
+  rsi_overbought_entry: 80.0         # no comprar si RSI supera este umbral; vender al cruzar hacia arriba este nivel
   rsi_exit_threshold: 45.0           # vender por crossover descendente bajo este umbral
   allow_leverage: false              # v1: sin apalancamiento
 

@@ -16,7 +16,7 @@ class ShortEngineConfig:
     top_k_per_market: int
     risk_budget_trade_pct: float
     rsi_lookback: int = 14
-    rsi_overbought_entry: float = 70.0
+    rsi_overbought_entry: float = 80.0
     rsi_exit_threshold: float = 45.0
     allow_leverage: bool = False
 

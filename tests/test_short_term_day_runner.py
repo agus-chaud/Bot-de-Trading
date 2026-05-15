@@ -42,6 +42,12 @@ def _build_spy_history_rsi_down_cross() -> list[dict[str, float]]:
     return [{"close": c, "volume": 1_000_000.0} for c in closes]
 
 
+def _build_spy_history_rsi_up_cross() -> list[dict[str, float]]:
+    """Uptrend fuerte: RSI del día actual queda en zona de sobrecompra (>= 80)."""
+    closes = [float(100 + i) for i in range(25)]
+    return [{"close": c, "volume": 1_000_000.0} for c in closes]
+
+
 def test_load_merged_whitelist_includes_core_etfs():
     policy = _load_policy()
     wl = load_merged_whitelist(REPO_ROOT, policy)
@@ -544,6 +550,102 @@ def test_check_risk_with_db_vs_without_db_decision_equivalence():
             f"Scenario '{scenario['name']}': expected {scenario['expected_reason']}, "
             f"got {without_db.reason}"
         )
+
+
+def test_rsi_overbought_reached_triggers_sell_on_ascending_cross_to_80():
+    policy = _load_policy()
+    policy["short_term_engine"]["rsi_overbought_entry"] = 80.0
+    ledger = PortfolioLedger(starting_cash=100_000.0)
+    broker = PaperBrokerSim(
+        ledger=ledger,
+        cost_model=CostModel(
+            market_configs={
+                "US": MarketCostConfig(
+                    commission_bps_per_side=1.0,
+                    slippage_bps=2.0,
+                    min_spread_bps=0.5,
+                )
+            }
+        ),
+    )
+    backtester = create_short_term_daily_backtester(
+        policy_doc=policy,
+        repo_root=REPO_ROOT,
+        ledger=ledger,
+        broker=broker,
+    )
+    ledger.update_day(
+        trading_day=date(2026, 4, 14),
+        fills=[
+            {
+                "symbol": "SPY",
+                "side": "BUY",
+                "qty": 10,
+                "price": 120.0,
+                "market": "US",
+                "bucket": "short",
+            }
+        ],
+        daily_bars={"SPY": {"close": 120.0}},
+    )
+    daily_bars = {"SPY": {"open": 124.0, "high": 125.0, "low": 123.0, "close": 124.0, "volume": 50_000_000.0}}
+    history = {"SPY": _build_spy_history_rsi_up_cross()}
+
+    with patch("core_sim.short_term_day_runner.check_stop_loss", return_value=[]):
+        events = backtester.run_day(
+            trading_day=date(2026, 4, 15),
+            daily_bars=daily_bars,
+            pipeline_context={"history_by_symbol": history, "rsi_prev_by_symbol": {"SPY": 75.0}},
+        )
+    proposed = events[2].payload
+    rsi_orders = [o for o in proposed["broker_orders"] if o.get("reason") == "rsi_overbought_reached"]
+    assert len(rsi_orders) == 1
+    assert rsi_orders[0]["side"] == "SELL"
+
+    ledger2 = PortfolioLedger(starting_cash=100_000.0)
+    broker2 = PaperBrokerSim(
+        ledger=ledger2,
+        cost_model=CostModel(
+            market_configs={
+                "US": MarketCostConfig(
+                    commission_bps_per_side=1.0,
+                    slippage_bps=2.0,
+                    min_spread_bps=0.5,
+                )
+            }
+        ),
+    )
+    backtester2 = create_short_term_daily_backtester(
+        policy_doc=policy,
+        repo_root=REPO_ROOT,
+        ledger=ledger2,
+        broker=broker2,
+    )
+    ledger2.update_day(
+        trading_day=date(2026, 4, 14),
+        fills=[
+            {
+                "symbol": "SPY",
+                "side": "BUY",
+                "qty": 10,
+                "price": 120.0,
+                "market": "US",
+                "bucket": "short",
+            }
+        ],
+        daily_bars={"SPY": {"close": 120.0}},
+    )
+    with patch("core_sim.short_term_day_runner.check_stop_loss", return_value=[]):
+        events_no_cross = backtester2.run_day(
+            trading_day=date(2026, 4, 15),
+            daily_bars=daily_bars,
+            pipeline_context={"history_by_symbol": history, "rsi_prev_by_symbol": {"SPY": 82.0}},
+        )
+    proposed_no_cross = events_no_cross[2].payload
+    rsi_orders_no_cross = [
+        o for o in proposed_no_cross["broker_orders"] if o.get("reason") == "rsi_overbought_reached"
+    ]
+    assert rsi_orders_no_cross == []
 
 
 def test_rsi_exit_triggers_only_on_descending_crossover():
