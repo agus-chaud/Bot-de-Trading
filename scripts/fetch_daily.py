@@ -290,13 +290,20 @@ def main() -> None:
             universe_report=universe_report,
         )
         symbols_ar = list(universe_report.get("symbols_ar_effective") or [])
+        iol_only = os.environ.get("FETCH_IOL_ONLY", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         report = fetch_and_store(
             symbols_us=symbols_us,
             symbols_ar=symbols_ar,
             start_date=start_date,
             end_date=end_date,
             db=db,
+            iol_only=iol_only,
         )
+        universe_report["fetch_iol_only"] = iol_only
         job_snapshot = {"job_slots_used": meter.job_used, "by_kind": dict(meter.run_by_kind or {})}
 
     usage_after = db.get_iol_api_usage_month(month_key)

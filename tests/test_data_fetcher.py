@@ -6,11 +6,25 @@ Tests verify the FetchReport contract and per-symbol isolation.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from data.connectors.ar_connector import ArFetchResult
+from data.fetch_trace import (
+    FETCH_STATUS_OK,
+    FETCH_STATUS_SKIP,
+    SKIP_CREDENTIALS_MISSING,
+    SKIP_FALLBACK_USED,
+    SOURCE_BYMA,
+    SOURCE_IOL,
+    SOURCE_MIXED,
+    SymbolFetchTrace,
+    VENUE_AR,
+    apply_source_attribution,
+)
 from data.fetcher import FetchReport, fetch_and_store
 from data.schema import OHLCVRow
 from data.universe_selector import merge_fetch_universe
@@ -47,13 +61,37 @@ def _make_db() -> MagicMock:
     return db
 
 
+def _ar_fetch_result(
+    rows: list[OHLCVRow] | None,
+    *,
+    symbol: str = "GGAL",
+    status: str | None = None,
+    skip_reason: str | None = None,
+    source: str | None = None,
+) -> ArFetchResult:
+    if status is None:
+        status = FETCH_STATUS_OK if rows else FETCH_STATUS_SKIP
+    trace = SymbolFetchTrace(
+        symbol=symbol,
+        venue=VENUE_AR,
+        start_date=START,
+        end_date=END,
+        status=status,
+        skip_reason=skip_reason,
+        source=source,
+        iol_only=False,
+        rows=len(rows) if rows else 0,
+    )
+    return ArFetchResult(rows=rows, trace=trace)
+
+
 # ---------------------------------------------------------------------------
 # Patch targets
 # ---------------------------------------------------------------------------
 
 _PATCH_BUILD_CAL = "data.fetcher.build_calendar"
 _PATCH_FETCH_US = "data.fetcher.fetch_us_ohlcv"
-_PATCH_FETCH_AR = "data.fetcher.fetch_ar_ohlcv"
+_PATCH_FETCH_AR = "data.fetcher.fetch_ar_ohlcv_with_trace"
 _PATCH_NORMALIZE = "data.fetcher.normalize"
 
 
@@ -146,7 +184,7 @@ class TestFetchAndStoreAR:
 
         with (
             patch(_PATCH_BUILD_CAL),
-            patch(_PATCH_FETCH_AR, return_value=raw),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(raw)),
             patch(_PATCH_NORMALIZE, return_value=normalized),
         ):
             report = fetch_and_store([], ["GGAL"], START, END, db)
@@ -159,7 +197,7 @@ class TestFetchAndStoreAR:
 
         with (
             patch(_PATCH_BUILD_CAL),
-            patch(_PATCH_FETCH_AR, return_value=None),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(None)),
         ):
             report = fetch_and_store([], ["GGAL"], START, END, db)
 
@@ -171,7 +209,7 @@ class TestFetchAndStoreAR:
 
         with (
             patch(_PATCH_BUILD_CAL),
-            patch(_PATCH_FETCH_AR, return_value=[]),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result([])),
         ):
             report = fetch_and_store([], ["GGAL"], START, END, db)
 
@@ -227,7 +265,7 @@ class TestMixedReport:
         with (
             patch(_PATCH_BUILD_CAL),
             patch(_PATCH_FETCH_US, return_value=us_rows),
-            patch(_PATCH_FETCH_AR, return_value=ar_rows),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(ar_rows)),
             patch(_PATCH_NORMALIZE, side_effect=[us_rows, ar_rows]),
         ):
             report = fetch_and_store(["SPY"], ["GGAL"], START, END, db)
@@ -246,7 +284,7 @@ class TestMixedReport:
         with (
             patch(_PATCH_BUILD_CAL),
             patch(_PATCH_FETCH_US, return_value=us_rows),
-            patch(_PATCH_FETCH_AR, return_value=ar_rows),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(ar_rows)),
             patch(_PATCH_NORMALIZE, side_effect=[us_rows, ar_rows]),
         ):
             report = fetch_and_store(["SPY"], ["GGAL"], START, END, db)
@@ -283,7 +321,7 @@ class TestArUniverseContractForFetcher:
         db = _make_db()
 
         def _fetch_side_effect(sym: str, start: date, end: date, **_):
-            return [_make_row(sym, START, venue="AR")]
+            return _ar_fetch_result([_make_row(sym, START, venue="AR")], symbol=sym)
 
         with (
             patch(_PATCH_BUILD_CAL),
@@ -294,6 +332,152 @@ class TestArUniverseContractForFetcher:
 
         fetched_symbols = {c.args[0] for c in mock_ar.call_args_list}
         assert fetched_symbols == set(symbols_ar)
+
+
+class TestFetchLogPersistence:
+    def test_should_persist_fetch_log_on_us_success(self):
+        raw = [_make_row("SPY", START)]
+        db = _make_db()
+
+        with (
+            patch(_PATCH_BUILD_CAL),
+            patch(_PATCH_FETCH_US, return_value=raw),
+            patch(_PATCH_NORMALIZE, return_value=raw),
+        ):
+            fetch_and_store(["SPY"], [], START, END, db)
+
+        db.log_fetch.assert_called_once()
+        entry = db.log_fetch.call_args.args[0]
+        extra = json.loads(entry["extra"])
+        assert entry["symbol"] == "SPY"
+        assert entry["venue"] == "XNYS"
+        assert entry["status"] == "ok"
+        assert entry["source"] == "yfinance"
+        assert extra["rows_by_source"] == {"yfinance": 1}
+        assert extra["effective_source"] == "yfinance"
+
+    def test_should_persist_fetch_log_on_ar_skip(self):
+        db = _make_db()
+
+        with patch(_PATCH_BUILD_CAL), patch(
+            _PATCH_FETCH_AR,
+            return_value=_ar_fetch_result(
+                None, skip_reason="connector_returned_none", source="iol"
+            ),
+        ):
+            fetch_and_store([], ["GGAL"], START, END, db)
+
+        db.log_fetch.assert_called_once()
+        entry = db.log_fetch.call_args.args[0]
+        assert entry["symbol"] == "GGAL"
+        assert entry["venue"] == "XBUE"
+        assert entry["status"] == "skip"
+
+    def test_should_persist_ar_iol_success_with_provider_source_and_rows(self):
+        raw = [_make_row("GGAL", START, venue="AR")]
+        trace = SymbolFetchTrace(
+            symbol="GGAL",
+            venue=VENUE_AR,
+            start_date=START,
+            end_date=END,
+            status=FETCH_STATUS_OK,
+            provider=SOURCE_IOL,
+            source=SOURCE_IOL,
+            iol_only=False,
+            rows=1,
+        )
+        apply_source_attribution(trace, {SOURCE_IOL: 1}, partial_fallback=False)
+        db = _make_db()
+
+        with (
+            patch(_PATCH_BUILD_CAL),
+            patch(_PATCH_FETCH_AR, return_value=ArFetchResult(rows=raw, trace=trace)),
+            patch(_PATCH_NORMALIZE, return_value=raw),
+        ):
+            fetch_and_store([], ["GGAL"], START, END, db)
+
+        entry = db.log_fetch.call_args.args[0]
+        extra = json.loads(entry["extra"])
+        assert entry["status"] == "ok"
+        assert entry["source"] == SOURCE_IOL
+        assert extra["provider"] == SOURCE_IOL
+        assert extra["rows"] == 1
+        assert extra["effective_source"] == SOURCE_IOL
+
+    def test_should_persist_ar_fallback_with_skip_reason_and_mixed_source(self):
+        raw = [
+            _make_row("GGAL", START, venue="AR"),
+            _make_row("GGAL", date(2024, 1, 3), venue="AR"),
+        ]
+        trace = SymbolFetchTrace(
+            symbol="GGAL",
+            venue=VENUE_AR,
+            start_date=START,
+            end_date=END,
+            status=FETCH_STATUS_OK,
+            provider=SOURCE_IOL,
+            skip_reason=SKIP_FALLBACK_USED,
+            iol_only=False,
+            rows=2,
+        )
+        apply_source_attribution(
+            trace, {SOURCE_IOL: 1, SOURCE_BYMA: 1}, partial_fallback=True
+        )
+        db = _make_db()
+
+        with (
+            patch(_PATCH_BUILD_CAL),
+            patch(_PATCH_FETCH_AR, return_value=ArFetchResult(rows=raw, trace=trace)),
+            patch(_PATCH_NORMALIZE, return_value=raw),
+        ):
+            fetch_and_store([], ["GGAL"], START, END, db)
+
+        entry = db.log_fetch.call_args.args[0]
+        extra = json.loads(entry["extra"])
+        assert entry["status"] == "ok"
+        assert entry["skip_reason"] == SKIP_FALLBACK_USED
+        assert entry["source"] == SOURCE_MIXED
+        assert extra["partial_fallback"] is True
+        assert extra["rows_by_source"] == {SOURCE_IOL: 1, SOURCE_BYMA: 1}
+
+    def test_should_persist_iol_only_and_credentials_missing_on_ar_skip(self):
+        trace = SymbolFetchTrace(
+            symbol="GGAL",
+            venue=VENUE_AR,
+            start_date=START,
+            end_date=END,
+            status=FETCH_STATUS_SKIP,
+            provider=SOURCE_IOL,
+            skip_reason=SKIP_CREDENTIALS_MISSING,
+            iol_only=True,
+            rows=0,
+        )
+        db = _make_db()
+
+        with patch(_PATCH_BUILD_CAL), patch(
+            _PATCH_FETCH_AR, return_value=ArFetchResult(rows=None, trace=trace)
+        ):
+            fetch_and_store([], ["GGAL"], START, END, db, iol_only=True)
+
+        entry = db.log_fetch.call_args.args[0]
+        extra = json.loads(entry["extra"])
+        assert entry["status"] == "skip"
+        assert entry["skip_reason"] == SKIP_CREDENTIALS_MISSING
+        assert extra["iol_only"] is True
+        assert extra["provider"] == SOURCE_IOL
+
+    def test_should_persist_us_skip_with_max_retries_skip_reason(self):
+        db = _make_db()
+
+        with patch(_PATCH_BUILD_CAL), patch(_PATCH_FETCH_US, return_value=None):
+            fetch_and_store(["SPY"], [], START, END, db)
+
+        entry = db.log_fetch.call_args.args[0]
+        extra = json.loads(entry["extra"])
+        assert entry["status"] == "skip"
+        assert entry["skip_reason"] == "max_retries_exceeded"
+        assert entry["source"] == "yfinance"
+        assert extra["provider"] == "yfinance"
 
 
 class TestFetchReport:

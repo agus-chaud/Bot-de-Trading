@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
@@ -478,6 +479,9 @@ class MarketDB:
     def log_fetch(self, entry: dict[str, Any]) -> None:
         """Append a row to fetch_log with created_at set to UTC now."""
         created_at = datetime.now(tz=timezone.utc).isoformat()
+        extra = entry.get("extra")
+        if extra is not None and not isinstance(extra, str):
+            extra = json.dumps(extra, sort_keys=True)
         with self._conn:
             self._conn.execute(
                 """
@@ -491,7 +495,7 @@ class MarketDB:
                     entry["status"],
                     entry.get("source"),
                     entry.get("skip_reason"),
-                    entry.get("extra"),
+                    extra,
                 ),
             )
 

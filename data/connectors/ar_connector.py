@@ -6,12 +6,29 @@ import logging
 import os
 import threading
 import time
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Optional
 
 import requests
 import yfinance as yf
 
+from data.fetch_trace import (
+    FETCH_STATUS_OK,
+    FETCH_STATUS_SKIP,
+    SKIP_BUDGET_EXHAUSTED,
+    SKIP_CONNECTOR_RETURNED_NONE,
+    SKIP_CREDENTIALS_MISSING,
+    SKIP_DATA_ERROR,
+    SKIP_EMPTY_DATA,
+    SKIP_FALLBACK_USED,
+    SKIP_MAX_RETRIES_EXCEEDED,
+    SOURCE_BYMA,
+    SOURCE_IOL,
+    SymbolFetchTrace,
+    VENUE_AR,
+    apply_source_attribution,
+)
 from data.schema import OHLCVRow
 from data.iol_api_meter import (
     IOL_KIND_HISTORY,
@@ -68,6 +85,118 @@ def clear_iol_session_cache() -> None:
         _iol_access_until_monotonic = 0.0
 
 
+@dataclass(frozen=True)
+class ArFetchResult:
+    """Resultado de fetch AR con traza para fetch_log."""
+
+    rows: Optional[list[OHLCVRow]]
+    trace: SymbolFetchTrace
+
+
+def _new_ar_trace(
+    symbol: str,
+    start_date: date,
+    end_date: date,
+    *,
+    iol_only: bool,
+) -> SymbolFetchTrace:
+    return SymbolFetchTrace(
+        symbol=symbol,
+        venue=VENUE_AR,
+        start_date=start_date,
+        end_date=end_date,
+        iol_only=iol_only,
+    )
+
+
+def _expected_dates_in_range(
+    start_date: date,
+    end_date: date,
+    expected_dates: set[date] | None,
+) -> set[date]:
+    if expected_dates is not None:
+        return {d for d in expected_dates if start_date <= d <= end_date}
+    out: set[date] = set()
+    d = start_date
+    while d <= end_date:
+        if d.weekday() < 5:
+            out.add(d)
+        d += timedelta(days=1)
+    return out
+
+
+def _missing_session_dates(
+    rows: list[OHLCVRow],
+    scope: set[date],
+) -> set[date]:
+    if not scope:
+        return set()
+    have = {r.ts for r in rows}
+    return scope - have
+
+
+def _merge_ar_sources(
+    iol_rows: list[OHLCVRow],
+    byma_rows: list[OHLCVRow],
+) -> tuple[list[OHLCVRow], dict[str, int], bool]:
+    """IOL gana por fecha; Byma rellena huecos. Retorna filas, conteos y si hubo mezcla."""
+    by_ts_iol = {r.ts: r for r in iol_rows}
+    by_ts_byma = {r.ts: r for r in byma_rows}
+    byma_fill = 0
+    merged = dict(by_ts_iol)
+    for ts, row in by_ts_byma.items():
+        if ts not in merged:
+            merged[ts] = row
+            byma_fill += 1
+    rows_by_source = {SOURCE_IOL: len(by_ts_iol), SOURCE_BYMA: byma_fill}
+    partial = byma_fill > 0 and len(by_ts_iol) > 0
+    ordered = sorted(merged.values(), key=lambda r: r.ts)
+    return ordered, rows_by_source, partial
+
+
+def _finalize_ar_trace(
+    trace: SymbolFetchTrace,
+    rows: Optional[list[OHLCVRow]],
+    *,
+    provider: str | None,
+    used_fallback: bool = False,
+    partial_fallback: bool = False,
+    skip_reason: str | None = None,
+    rows_by_source: dict[str, int] | None = None,
+) -> ArFetchResult:
+    trace.provider = provider
+    if rows is None:
+        trace.status = FETCH_STATUS_SKIP
+        trace.skip_reason = skip_reason or SKIP_CONNECTOR_RETURNED_NONE
+        if rows_by_source is not None:
+            apply_source_attribution(trace, rows_by_source, partial_fallback=False)
+        else:
+            trace.source = provider
+        return ArFetchResult(rows=None, trace=trace)
+    if not rows:
+        trace.status = FETCH_STATUS_SKIP
+        trace.skip_reason = skip_reason or SKIP_EMPTY_DATA
+        if rows_by_source is not None:
+            apply_source_attribution(trace, rows_by_source, partial_fallback=False)
+        else:
+            trace.source = provider
+        return ArFetchResult(rows=[], trace=trace)
+    trace.status = FETCH_STATUS_OK
+    trace.rows = len(rows)
+    if used_fallback or partial_fallback:
+        trace.skip_reason = SKIP_FALLBACK_USED
+    if rows_by_source is not None:
+        apply_source_attribution(trace, rows_by_source, partial_fallback=partial_fallback)
+    else:
+        counts = {SOURCE_IOL: 0, SOURCE_BYMA: 0}
+        if provider == SOURCE_IOL:
+            counts[SOURCE_IOL] = len(rows)
+        elif provider == SOURCE_BYMA:
+            counts[SOURCE_BYMA] = len(rows)
+        apply_source_attribution(trace, counts, partial_fallback=partial_fallback)
+    return ArFetchResult(rows=rows, trace=trace)
+
+
 def fetch_ar_ohlcv(
     symbol: str,
     start_date: date,
@@ -77,23 +206,34 @@ def fetch_ar_ohlcv(
     iol_only: bool = False,
     iol_meter_kind: str = IOL_KIND_HISTORY,
 ) -> Optional[list[OHLCVRow]]:
-    """Fetch daily OHLCV bars for *symbol* from IOL (primary) or Byma/yfinance (fallback).
+    """Fetch daily OHLCV bars for *symbol* from IOL (primary) or Byma/yfinance (fallback)."""
+    return fetch_ar_ohlcv_with_trace(
+        symbol,
+        start_date,
+        end_date,
+        timeout,
+        iol_only=iol_only,
+        iol_meter_kind=iol_meter_kind,
+    ).rows
 
-    Credential check is performed upfront — if IOL_USER/IOL_PASS are absent the
-    function skips IOL entirely without any network attempt and proceeds straight
-    to the Byma fallback.
 
-    Args:
-        iol_only: If True, use only IOL (no yfinance fallback). Returns None if
-            credentials are missing or IOL fails after retries.
-
-    Returns:
-        List of OHLCVRow (possibly empty) on success.
-        Empty list when data is received but is structurally invalid (DataError).
-        None when all retries on both providers are exhausted.
-    """
+def fetch_ar_ohlcv_with_trace(
+    symbol: str,
+    start_date: date,
+    end_date: date,
+    timeout: int = 30,
+    *,
+    iol_only: bool = False,
+    iol_meter_kind: str = IOL_KIND_HISTORY,
+    expected_dates: set[date] | None = None,
+) -> ArFetchResult:
+    """Como fetch_ar_ohlcv pero incluye SymbolFetchTrace para persistir en fetch_log."""
+    trace = _new_ar_trace(symbol, start_date, end_date, iol_only=iol_only)
+    scope = _expected_dates_in_range(start_date, end_date, expected_dates)
     iol_user = os.environ.get("IOL_USER")
     iol_pass = os.environ.get("IOL_PASS")
+    iol_partial_rows: list[OHLCVRow] | None = None
+    tried_iol = False
 
     if not iol_user or not iol_pass:
         logger.warning(
@@ -101,13 +241,29 @@ def fetch_ar_ohlcv(
             symbol,
         )
         if iol_only:
-            return None
-    else:
-        result: Optional[list[OHLCVRow]] = None
-        try:
-            result = _fetch_with_retry_iol(
-                symbol, start_date, end_date, timeout, iol_user, iol_pass, iol_meter_kind
+            trace.attempts = 0
+            return _finalize_ar_trace(
+                trace,
+                None,
+                provider=SOURCE_IOL,
+                skip_reason=SKIP_CREDENTIALS_MISSING,
+                rows_by_source={SOURCE_IOL: 0, SOURCE_BYMA: 0},
             )
+    else:
+        tried_iol = True
+        result: Optional[list[OHLCVRow]] = None
+        iol_skip: str | None = None
+        try:
+            result, iol_attempts, iol_skip = _fetch_with_retry_iol(
+                symbol,
+                start_date,
+                end_date,
+                timeout,
+                iol_user,
+                iol_pass,
+                iol_meter_kind,
+            )
+            trace.attempts += iol_attempts
         except IolJobBudgetExhausted as exc:
             logger.warning(
                 '{"event": "iol_fetch_skipped_budget", "symbol": "%s", "iol_only": %s, "detail": "%s"}',
@@ -118,18 +274,111 @@ def fetch_ar_ohlcv(
             if iol_only:
                 raise
             result = None
+            trace.extra["budget_detail"] = str(exc)
         else:
-            if result is not None:
-                return result
-        # IOL exhausted — fall through to Byma
+            if result is not None and result:
+                if expected_dates is None:
+                    return _finalize_ar_trace(
+                        trace,
+                        result,
+                        provider=SOURCE_IOL,
+                        skip_reason=iol_skip,
+                        rows_by_source={SOURCE_IOL: len(result), SOURCE_BYMA: 0},
+                    )
+                missing = _missing_session_dates(result, scope)
+                if not missing:
+                    return _finalize_ar_trace(
+                        trace,
+                        result,
+                        provider=SOURCE_IOL,
+                        skip_reason=iol_skip,
+                        rows_by_source={SOURCE_IOL: len(result), SOURCE_BYMA: 0},
+                    )
+                if iol_only:
+                    trace.extra["unfilled_session_dates"] = sorted(
+                        d.isoformat() for d in missing
+                    )
+                    return _finalize_ar_trace(
+                        trace,
+                        result,
+                        provider=SOURCE_IOL,
+                        skip_reason=iol_skip,
+                        rows_by_source={SOURCE_IOL: len(result), SOURCE_BYMA: 0},
+                    )
+                iol_partial_rows = result
+            elif result is not None:
+                return _finalize_ar_trace(
+                    trace,
+                    result,
+                    provider=SOURCE_IOL,
+                    skip_reason=iol_skip,
+                    rows_by_source={SOURCE_IOL: 0, SOURCE_BYMA: 0},
+                )
         if iol_only:
-            return None
-        logger.info(
-            '{"event": "fallback_triggered", "symbol": "%s", "skip_reason": "iol_failed_using_byma_fallback", "source": "byma_fallback"}',
-            symbol,
+            return _finalize_ar_trace(
+                trace,
+                None,
+                provider=SOURCE_IOL,
+                skip_reason=SKIP_MAX_RETRIES_EXCEEDED,
+                rows_by_source={SOURCE_IOL: 0, SOURCE_BYMA: 0},
+            )
+        if iol_partial_rows is None:
+            logger.info(
+                '{"event": "fallback_triggered", "symbol": "%s", "skip_reason": "iol_failed_using_byma_fallback", "source": "byma_fallback"}',
+                symbol,
+            )
+        else:
+            logger.info(
+                '{"event": "partial_fallback_triggered", "symbol": "%s", "iol_rows": %d, "missing_sessions": %d}',
+                symbol,
+                len(iol_partial_rows),
+                len(_missing_session_dates(iol_partial_rows, scope)),
+            )
+
+    byma_rows, byma_attempts, byma_skip = _fetch_with_retry_byma(
+        symbol, start_date, end_date, timeout
+    )
+    trace.attempts += byma_attempts
+    used_fallback = tried_iol
+
+    if iol_partial_rows is not None:
+        if byma_rows is None:
+            trace.extra["byma_fill_failed"] = True
+            return _finalize_ar_trace(
+                trace,
+                iol_partial_rows,
+                provider=SOURCE_IOL,
+                partial_fallback=True,
+                skip_reason=SKIP_FALLBACK_USED,
+                rows_by_source={SOURCE_IOL: len(iol_partial_rows), SOURCE_BYMA: 0},
+            )
+        merged, counts, partial = _merge_ar_sources(iol_partial_rows, byma_rows)
+        return _finalize_ar_trace(
+            trace,
+            merged,
+            provider=SOURCE_BYMA if not partial else SOURCE_IOL,
+            used_fallback=True,
+            partial_fallback=partial,
+            skip_reason=byma_skip,
+            rows_by_source=counts,
         )
 
-    return _fetch_with_retry_byma(symbol, start_date, end_date, timeout)
+    if byma_rows is None:
+        return _finalize_ar_trace(
+            trace,
+            None,
+            provider=SOURCE_BYMA,
+            skip_reason=byma_skip or SKIP_MAX_RETRIES_EXCEEDED,
+            rows_by_source={SOURCE_IOL: 0, SOURCE_BYMA: 0},
+        )
+    return _finalize_ar_trace(
+        trace,
+        byma_rows,
+        provider=SOURCE_BYMA,
+        used_fallback=used_fallback,
+        skip_reason=byma_skip,
+        rows_by_source={SOURCE_IOL: 0, SOURCE_BYMA: len(byma_rows)},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -144,15 +393,17 @@ def _fetch_with_retry_iol(
     iol_user: str,
     iol_pass: str,
     iol_meter_kind: str,
-) -> Optional[list[OHLCVRow]]:
-    """Retry loop for IOL. Returns list[OHLCVRow] on success, None on exhaustion."""
+) -> tuple[Optional[list[OHLCVRow]], int, str | None]:
+    """Retry loop for IOL. Returns (rows, attempts, skip_reason_if_not_ok)."""
     last_exc: Exception | None = None
 
     for attempt in range(_MAX_ATTEMPTS):
         try:
             token = _iol_get_access_token(iol_user, iol_pass, timeout)
             rows = _iol_fetch_once(symbol, start_date, end_date, timeout, token, iol_meter_kind)
-            return rows
+            if not rows:
+                return [], attempt + 1, SKIP_EMPTY_DATA
+            return rows, attempt + 1, None
         except IolJobBudgetExhausted as exc:
             logger.warning('{"event": "iol_job_budget_exhausted", "detail": "%s"}', str(exc))
             raise
@@ -167,10 +418,10 @@ def _fetch_with_retry_iol(
                 time.sleep(_BACKOFF_SECONDS[attempt])
         except DataError as exc:
             _log_skip(symbol, "data_error", str(exc), "iol")
-            return []
+            return [], attempt + 1, SKIP_DATA_ERROR
 
     _log_skip(symbol, "max_retries_exceeded", str(last_exc), "iol")
-    return None
+    return None, _MAX_ATTEMPTS, SKIP_MAX_RETRIES_EXCEEDED
 
 
 def _iol_invalidate_bearer_only() -> None:
@@ -363,15 +614,17 @@ def _fetch_with_retry_byma(
     start_date: date,
     end_date: date,
     timeout: int,
-) -> Optional[list[OHLCVRow]]:
-    """Retry loop for Byma via yfinance. Returns list[OHLCVRow] on success, None on exhaustion."""
+) -> tuple[Optional[list[OHLCVRow]], int, str | None]:
+    """Retry loop for Byma via yfinance. Returns (rows, attempts, skip_reason_if_not_ok)."""
     last_exc: Exception | None = None
     yf_symbol = f"{symbol}.BA"
 
     for attempt in range(_MAX_ATTEMPTS):
         try:
             rows = _byma_fetch_once(symbol, yf_symbol, start_date, end_date, timeout)
-            return rows
+            if not rows:
+                return [], attempt + 1, SKIP_EMPTY_DATA
+            return rows, attempt + 1, None
         except NetworkError as exc:
             last_exc = exc
             _log_attempt_failure(symbol, attempt, "network_error", str(exc), "byma")
@@ -379,10 +632,10 @@ def _fetch_with_retry_byma(
                 time.sleep(_BACKOFF_SECONDS[attempt])
         except DataError as exc:
             _log_skip(symbol, "data_error", str(exc), "byma")
-            return []
+            return [], attempt + 1, SKIP_DATA_ERROR
 
     _log_skip(symbol, "max_retries_exhausted_byma", str(last_exc), "byma")
-    return None
+    return None, _MAX_ATTEMPTS, SKIP_MAX_RETRIES_EXCEEDED
 
 
 def _byma_fetch_once(

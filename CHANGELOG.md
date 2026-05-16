@@ -9,6 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Fetch audit trail (`fetch_log`)** — Fase 2 auditoría IOL (**ADR-049**):
+  - Persistencia por símbolo/rango en tabla `fetch_log` vía `MarketDB.log_fetch` y taxonomía en `data/fetch_trace.py` (`status`, `skip_reason`, `source` / `effective_source`).
+  - `data/fetcher.py` registra cada símbolo US/AR tras `fetch_and_store`; AR usa `fetch_ar_ohlcv_with_trace` con calendario XBUE para detectar huecos.
+  - `extra` JSON auditables: `rows_by_source`, `partial_fallback`, `provider`, `iol_only`, `attempts`, `start_date`, `end_date`, `rows`.
+  - **Fallback parcial**: si IOL cubre solo parte del calendario AR, Byma rellena fechas faltantes (IOL gana en empate); `source=mixed` cuando aplica.
+  - `scripts/fetch_daily.py`: env opcional `FETCH_IOL_ONLY=1|true|yes` → sin fallback Byma en ingesta diaria.
+  - Tests: `tests/test_fetch_trace.py`, `TestPartialSourceAttribution` en `test_data_ar_connector.py`, `TestFetchLogPersistence` en `test_data_fetcher.py`.
+
 - **Gate KPI OOS activado** (`config/policy.v1.yaml`, `config/policy.v1.schema.json`):
   `kpi_oos_gate.enabled` cambia de `false` a `true`; 7 umbrales bloqueantes rellenados
   (Sharpe ≥ 0.30, Sortino ≥ 0.40, DD total ≥ -18%, DD corto ≥ -10%, DD largo ≥ -25%,

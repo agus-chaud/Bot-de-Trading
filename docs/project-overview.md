@@ -168,6 +168,40 @@ Detalle y fuentes en **ADR-047** (`decisiones-tecnicas.md`).
 - Flags de degradacion para no ocultar problemas.
 - Regla operativa: sin datos confiables, no se aumenta riesgo.
 
+### Trazabilidad de ingesta (`fetch_log`, ADR-049)
+
+Cada corrida de `scripts/fetch_daily.py` / `fetch_and_store` registra **un evento por simbolo y rango de fechas** en la tabla SQLite `fetch_log` (via `MarketDB.log_fetch` y taxonomia en `data/fetch_trace.py`).
+
+| Campo | Uso |
+|-------|-----|
+| `status` | `ok`, `skip` o `error` |
+| `source` / `effective_source` | Fuente efectiva: `iol`, `byma`, `yfinance` o `mixed` |
+| `skip_reason` | Detalle si no hubo `ok` (p. ej. `fallback_used`, `empty_data`, `credentials_missing`) |
+| `extra` (JSON) | `rows_by_source`, `partial_fallback`, `attempts`, `iol_only`, fechas del job |
+
+**Comportamiento AR relevante:**
+
+- Si IOL responde bien para todo el calendario **XBUE** del rango → solo IOL.
+- Si IOL falla por completo → fallback Byma/yfinance; se audita `{iol: 0, byma: N}`.
+- Si IOL devuelve **datos parciales** (faltan sesiones segun calendario XBUE pasado por el fetcher) → merge por fecha (IOL gana en empate), `source=mixed`, `partial_fallback=true` y conteos en `rows_by_source`.
+- Variable de entorno opcional `FETCH_IOL_ONLY=1|true|yes` fuerza ingesta AR solo por IOL (sin fallback en el job diario).
+
+El ranking dinamico en `universe_selector` **no** activa merge parcial (no pasa calendario explicito); el job diario con calendario en DB si.
+
+Detalle de decision en **ADR-049** (`decisiones-tecnicas.md`). Granularidad **por barra** en `ohlcv` queda fuera de alcance (fase 2.1 opcional).
+
+### Diagnostico pre-gate (`notebooks/pre_gate_diagnostic.ipynb`)
+
+Notebook operativo para revisar datos y motor **antes** de confiar en el pre-gate walk-forward:
+
+1. **Universo dinamico** — deja de usar listas hardcodeadas: carga US desde `whitelist_us`, AR desde policy + ultimo `universe_snapshots` (o whitelist estatica + holdings abiertos), alineado a `fetch_daily`.
+2. **Cobertura OHLCV** — paneles y heatmaps separados **US (XNYS)** y **AR/CEDEAR (XBUE)** contra el tamano del universo efectivo.
+3. **Calidad de datos IOL** — lee `fetch_log` en el lookback: tasas de exito y fallback, `skip_reason`, fuente efectiva, simbolos con fallos recurrentes (requiere al menos una corrida de `fetch_daily` post ADR-049).
+4. **Pre-gate / motor** — ventanas OOS desde `outputs/pre_gate_windows_180d_rsi.json` (fills, return, drawdown).
+5. **Diagnostico automatico** — flags agrupados por IOL, datos (US/AR) y motor.
+
+Ejecutar con `data/market.db` poblada; si `fetch_log` esta vacio, la seccion IOL avisa y el resto del notebook sigue.
+
 ## 7) Paper broker y ledger
 
 El `PaperBrokerSim` permite validar ejecucion sin riesgo de capital real:

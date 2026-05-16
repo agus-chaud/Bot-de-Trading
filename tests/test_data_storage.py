@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -107,6 +108,13 @@ class TestCorporateActionsUpsert:
         db.upsert_actions([_action(type="split", factor=2.0)])  # idempotent
 
 
+def _fetch_log_rows(db: MarketDB) -> list[dict]:
+    cursor = db._conn.execute(
+        "SELECT symbol, venue, status, source, skip_reason, extra FROM fetch_log ORDER BY id"
+    )
+    return [dict(row) for row in cursor.fetchall()]
+
+
 class TestFetchLog:
     def test_should_log_successful_fetch(self, db):
         db.log_fetch({"symbol": "SPY", "venue": "XNYS", "status": "ok", "source": "yfinance"})
@@ -116,6 +124,65 @@ class TestFetchLog:
             "symbol": "GGAL", "venue": "XBUE",
             "status": "skip", "skip_reason": "outlier_price",
         })
+
+    def test_should_roundtrip_provider_iol_only_and_rows_in_extra(self, db):
+        extra_payload = {
+            "provider": "iol",
+            "iol_only": True,
+            "attempts": 3,
+            "start_date": "2024-03-04",
+            "end_date": "2024-03-06",
+            "rows": 0,
+            "rows_by_source": {"iol": 0, "byma": 0},
+        }
+        db.log_fetch({
+            "symbol": "GGAL",
+            "venue": "XBUE",
+            "status": "skip",
+            "source": "iol",
+            "skip_reason": "credentials_missing",
+            "extra": json.dumps(extra_payload, sort_keys=True),
+        })
+
+        rows = _fetch_log_rows(db)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["symbol"] == "GGAL"
+        assert row["venue"] == "XBUE"
+        assert row["status"] == "skip"
+        assert row["source"] == "iol"
+        assert row["skip_reason"] == "credentials_missing"
+        stored_extra = json.loads(row["extra"])
+        assert stored_extra["provider"] == "iol"
+        assert stored_extra["iol_only"] is True
+        assert stored_extra["rows"] == 0
+
+    def test_should_persist_mixed_source_attribution_in_extra(self, db):
+        extra_payload = {
+            "provider": "iol",
+            "attempts": 5,
+            "start_date": "2024-03-04",
+            "end_date": "2024-03-06",
+            "rows": 3,
+            "effective_source": "mixed",
+            "partial_fallback": True,
+            "rows_by_source": {"iol": 1, "byma": 2},
+        }
+        db.log_fetch({
+            "symbol": "GGAL",
+            "venue": "XBUE",
+            "status": "ok",
+            "source": "mixed",
+            "skip_reason": "fallback_used",
+            "extra": json.dumps(extra_payload, sort_keys=True),
+        })
+
+        row = _fetch_log_rows(db)[0]
+        stored_extra = json.loads(row["extra"])
+        assert row["status"] == "ok"
+        assert row["skip_reason"] == "fallback_used"
+        assert stored_extra["effective_source"] == "mixed"
+        assert stored_extra["rows_by_source"] == {"iol": 1, "byma": 2}
 
 
 class TestCalendarsUpsert:

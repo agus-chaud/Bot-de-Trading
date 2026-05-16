@@ -1073,7 +1073,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 - **Por qué**: una sola fuente de verdad para fetch y corto reduce drift operativo; el overlay de holdings acota sorpresas de datos en posiciones reales; presupuesto explícito evita incidentes de rate/costo y fuerza degradación auditable.
 - **Consecuencias**:
   - Mayor complejidad en `scripts/fetch_daily.py` y dependencia de tablas `universe_snapshots` / `iol_api_usage`.
-  - Tests de comportamiento en `tests/test_universe_selector.py`, `tests/test_fetch_daily_universe_resolution.py`, `tests/test_iol_api_meter.py`, extensiones en `tests/test_data_ar_connector.py`, `tests/test_data_fetcher.py`, `tests/test_short_term_day_runner.py`.
+  - Tests de comportamiento en `tests/test_universe_selector.py`, `tests/test_fetch_daily_universe_resolution.py` (cadencia, `monthly_hard_cap`, `aborted_job_budget`), `tests/test_iol_api_meter.py`, `tests/test_short_term_day_runner.py`; trazabilidad de fetch en **ADR-049**.
 - **Alternativas consideradas**:
   - **Solo whitelist estática**: descartada — no captura liquidez cambiante en BYMA/CEDEARs.
   - **Ranking con fallback Byma/yfinance**: descartada para selección — distorsiona métricas respecto del venue operativo IOL.
@@ -1106,6 +1106,37 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Forzar SPY exclusivamente US o exclusivamente AR en el merge global**: descartada — rompe corto largo combinado en paper-live con el mismo ticker en dos venues conceptuales.
   - **Ticker distinto para CEDEAR vs ETF** (p. ej. `SPYD`): descartada por ahora — fricción operativa en IOL y en datos; el diseño por archivos separados evita renombrar.
   - **Solo mensual AR**: descartada en el default repo — se mantiene cadencia semanal (**ADR-045**) para latencia de drift y guardrail diario largo.
+
+---
+
+## ADR-049 — Trazabilidad de ingesta OHLCV en `fetch_log` y atribución de fuente (IOL / Byma / yfinance)
+
+- **Fecha**: 2026-05-16
+- **Estado**: aceptada (Fase 2 auditoría IOL; complementa **ADR-021** y **ADR-047**)
+- **Contexto**: El pre-gate y el paper-live dependen de OHLCV reales, pero no había registro persistido por símbolo/rango de **qué proveedor** respondió, si hubo **fallback** IOL→Byma, ni conteos auditables. Sin eso, el notebook de diagnóstico y la revisión de calidad IOL quedaban acoplados a listas hardcodeadas y logs efímeros.
+- **Decisión**:
+  1. **Tabla existente `fetch_log`** (`data/storage.py`): una fila por intento de fetch por símbolo en el job diario, con `symbol`, `venue` (`XNYS` / `XBUE`), `status`, `source`, `skip_reason`, `extra` (JSON).
+  2. **Taxonomía única** en `data/fetch_trace.py`: `status` ∈ `ok` | `skip` | `error`; `skip_reason` estandarizado (`empty_data`, `connector_returned_none`, `fallback_used`, `max_retries_exceeded`, `credentials_missing`, `budget_exhausted`, `data_error`, `unexpected_error`); fuentes `iol`, `byma`, `yfinance`, `mixed`.
+  3. **Puerta única de persistencia**: `persist_fetch_trace()` → `MarketDB.log_fetch()`; instrumentados `data/fetcher.py` (US + AR), `data/connectors/ar_connector.py` (`fetch_ar_ohlcv_with_trace`) y `scripts/fetch_daily.py` (pasa `iol_only` desde env `FETCH_IOL_ONLY`).
+  4. **Atribución en `extra`**: `provider`, `iol_only`, `attempts`, `start_date`, `end_date`, `rows`, `rows_by_source` (conteo de barras por proveedor), `partial_fallback`, `effective_source`.
+  5. **Fallback parcial AR (MVP)**: si IOL devuelve barras pero faltan sesiones respecto del calendario **XBUE** explícito (`expected_dates` desde `fetch_and_store`), se consulta Byma y se hace **merge por fecha** (IOL gana en colisión). Solo se activa cuando el fetcher pasa calendario; sin `expected_dates` (p. ej. ranking en `universe_selector`) se mantiene el comportamiento previo (éxito IOL = retorno inmediato).
+  6. **Fuera de alcance v1 (fase 2.1 opcional)**: metadato de origen **por barra** en tabla `ohlcv` y migración asociada — no implementado; la auditoría diaria queda a nivel job en `fetch_log`.
+- **Por qué**: observabilidad reproducible en SQLite (misma DB que paper-live), sin rediseñar `ohlcv`; el notebook de pre-gate puede medir tasa de éxito/fallback y símbolos problemáticos sin depender de `WHITELIST_SYMBOLS` fijo.
+- **Consecuencias**:
+  - Cada corrida de `fetch_daily.py` appendea filas en `fetch_log` (crecimiento acotado por símbolos × corridas; no reemplaza OHLCV).
+  - Métricas de calidad IOL deben leer `fetch_log`, no inferir solo desde barras almacenadas.
+  - **Regresión de trazabilidad (paso 4, Fase 2)** — tests por comportamiento observable (sin red):
+    - `tests/test_fetch_trace.py`: atribución `mixed` / `rows_by_source` en helpers puros.
+    - `tests/test_data_ar_connector.py`: éxito IOL (`provider`/`source`/`status=ok`); `iol_only` sin credenciales → `credentials_missing` y sin yfinance; fallback Byma tras agotar IOL; merge parcial IOL+Byma; budget job (`IolJobBudgetExhausted`) → `budget_detail` en `extra` + fallback Byma, o re-raise si `iol_only`.
+    - `tests/test_data_fetcher.py` (`TestFetchLogPersistence`): cada símbolo US/AR llama `log_fetch` con `source`, `skip_reason`, `provider` e `iol_only` en `extra` (éxito IOL, fallback `mixed`, skip US `max_retries_exceeded`).
+    - `tests/test_data_storage.py`: round-trip SQLite de columnas `fetch_log` + JSON `extra` (`provider`, `iol_only`, `rows_by_source`, `effective_source`).
+    - `tests/test_fetch_daily_universe_resolution.py`: `monthly_hard_cap` y `aborted_job_budget` en `universe_report` (sin fetch de red; presupuesto IOL a nivel universo, complementa el budget por símbolo del conector).
+  - **Matiz `budget_exhausted`**: la constante `SKIP_BUDGET_EXHAUSTED` está en la taxonomía; hoy el conector ante `IolJobBudgetExhausted` registra `budget_detail` en `extra` y, si no es `iol_only`, continúa con Byma (`skip_reason=fallback_used` si hay datos). Con `iol_only=True` propaga la excepción (el fetcher puede persistir `unexpected_error`). Unificar `skip_reason=budget_exhausted` queda como mejora opcional si el notebook lo exige.
+- **Alternativas consideradas**:
+  - **Columna `source` en `ohlcv` por barra**: descartada en v1 — migración y backfill más costosos; reservada como fase 2.1.
+  - **Solo logs estructurados sin DB**: descartada — no alimenta notebook ni SQL en `market.db` de paper-live.
+  - **Merge parcial siempre por días hábiles inferidos (lun–vie)**: descartada como default — falsos huecos en feriados AR; se usa calendario XBUE del fetcher cuando aplica.
+- **Archivos**: `data/fetch_trace.py`, `data/fetcher.py`, `data/connectors/ar_connector.py`, `data/storage.py`, `scripts/fetch_daily.py`, `tests/test_fetch_trace.py`, `tests/test_data_fetcher.py`, `tests/test_data_ar_connector.py`, `tests/test_data_storage.py`, `tests/test_fetch_daily_universe_resolution.py`, `tests/test_data_integration.py` (mocks `fetch_ar_ohlcv_with_trace`).
 
 ---
 

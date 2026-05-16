@@ -19,6 +19,8 @@ from unittest.mock import patch
 
 import pytest
 
+from data.connectors.ar_connector import ArFetchResult
+from data.fetch_trace import FETCH_STATUS_OK, FETCH_STATUS_SKIP, SymbolFetchTrace, VENUE_AR
 from data.fetcher import FetchReport, fetch_and_store
 from data.normalizer import normalize
 from data.schema import OHLCVRow
@@ -168,12 +170,26 @@ class TestPipelineWithGap:
 
 _PATCH_BUILD_CAL = "data.fetcher.build_calendar"
 _PATCH_FETCH_US = "data.fetcher.fetch_us_ohlcv"
-_PATCH_FETCH_AR = "data.fetcher.fetch_ar_ohlcv"
+_PATCH_FETCH_AR = "data.fetcher.fetch_ar_ohlcv_with_trace"
 
 
 def _seed_calendar(db: MarketDB, venue: str, days: list[date]) -> None:
     """Directly seed the calendars table so fetcher._get_calendar returns real days."""
     db.upsert_calendars(venue=venue, days=days)
+
+
+def _ar_fetch_result(rows: list[OHLCVRow] | None, *, symbol: str = "GGAL") -> ArFetchResult:
+    status = FETCH_STATUS_OK if rows else FETCH_STATUS_SKIP
+    trace = SymbolFetchTrace(
+        symbol=symbol,
+        venue=VENUE_AR,
+        start_date=START,
+        end_date=END,
+        status=status,
+        iol_only=False,
+        rows=len(rows) if rows else 0,
+    )
+    return ArFetchResult(rows=rows, trace=trace)
 
 
 class TestFetchAndStoreRoundTrip:
@@ -189,7 +205,7 @@ class TestFetchAndStoreRoundTrip:
         with (
             patch(_PATCH_BUILD_CAL),
             patch(_PATCH_FETCH_US, return_value=us_rows),
-            patch(_PATCH_FETCH_AR, return_value=ar_rows),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(ar_rows)),
         ):
             report = fetch_and_store(["SPY"], ["GGAL"], START, END, db)
 
@@ -220,7 +236,7 @@ class TestFetchPartialFailure:
         with (
             patch(_PATCH_BUILD_CAL),
             patch(_PATCH_FETCH_US, side_effect=_us_connector),
-            patch(_PATCH_FETCH_AR, return_value=None),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(None)),
         ):
             report = fetch_and_store(["SPY", "QQQ"], [], START, END, db)
 
@@ -243,14 +259,14 @@ class TestFetchIdempotent:
         with (
             patch(_PATCH_BUILD_CAL),
             patch(_PATCH_FETCH_US, return_value=us_rows),
-            patch(_PATCH_FETCH_AR, return_value=None),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(None)),
         ):
             report1 = fetch_and_store(["SPY"], [], START, END, db)
 
         with (
             patch(_PATCH_BUILD_CAL),
             patch(_PATCH_FETCH_US, return_value=us_rows),
-            patch(_PATCH_FETCH_AR, return_value=None),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(None)),
         ):
             report2 = fetch_and_store(["SPY"], [], START, END, db)
 

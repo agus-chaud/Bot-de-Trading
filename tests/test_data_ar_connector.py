@@ -5,6 +5,7 @@ All tests are fully mocked — zero real network calls.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
 from unittest.mock import MagicMock, patch
@@ -12,7 +13,17 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from data.connectors.ar_connector import fetch_ar_ohlcv
+from data.connectors.ar_connector import fetch_ar_ohlcv, fetch_ar_ohlcv_with_trace
+from data.fetch_trace import (
+    FETCH_STATUS_OK,
+    FETCH_STATUS_SKIP,
+    SKIP_CREDENTIALS_MISSING,
+    SKIP_FALLBACK_USED,
+    SOURCE_BYMA,
+    SOURCE_IOL,
+    SOURCE_MIXED,
+)
+from data.iol_api_meter import IolJobBudgetExhausted
 from data.iol_api_meter import (
     IOL_KIND_HISTORY,
     IOL_KIND_UNIVERSE_VOLUME,
@@ -479,3 +490,134 @@ class TestPartialData:
         assert result == []
         assert call_count == 1
         mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Partial fallback / source attribution (fetch_log extra)
+# ---------------------------------------------------------------------------
+
+
+class TestPartialSourceAttribution:
+    def test_should_merge_byma_when_iol_covers_only_part_of_expected_calendar(self):
+        """Con calendario explícito, huecos IOL se rellenan con Byma y se audita rows_by_source."""
+        expected = {date(2024, 3, 4), date(2024, 3, 5), date(2024, 3, 6)}
+        byma_df = _make_byma_df(
+            [
+                {
+                    "Date": pd.Timestamp("2024-03-05"),
+                    "Open": 1010.0,
+                    "High": 1060.0,
+                    "Low": 1000.0,
+                    "Close": 1040.0,
+                    "Volume": 400_000.0,
+                },
+                {
+                    "Date": pd.Timestamp("2024-03-06"),
+                    "Open": 1020.0,
+                    "High": 1070.0,
+                    "Low": 1010.0,
+                    "Close": 1050.0,
+                    "Volume": 300_000.0,
+                },
+            ]
+        )
+
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with _patch_requests_get(json_payload=_IOL_PAYLOAD):
+                    with _patch_byma_history(return_value=byma_df):
+                        out = fetch_ar_ohlcv_with_trace(
+                            "GGAL",
+                            _START,
+                            _END,
+                            expected_dates=expected,
+                        )
+
+        assert out.rows is not None
+        assert len(out.rows) == 3
+        assert {r.ts for r in out.rows} == expected
+        assert out.trace.extra["partial_fallback"] is True
+        assert out.trace.source == SOURCE_MIXED
+        assert out.trace.extra["rows_by_source"][SOURCE_IOL] == 1
+        assert out.trace.extra["rows_by_source"][SOURCE_BYMA] == 2
+
+    def test_should_record_zero_iol_rows_on_full_byma_fallback(self):
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with patch(
+                    "data.connectors.ar_connector.requests.get",
+                    side_effect=ConnectionError("iol down"),
+                ):
+                    with patch("data.connectors.ar_connector.time.sleep"):
+                        with _patch_byma_history():
+                            out = fetch_ar_ohlcv_with_trace("GGAL", _START, _END)
+
+        assert out.rows is not None
+        assert out.trace.extra["rows_by_source"] == {SOURCE_IOL: 0, SOURCE_BYMA: 1}
+        assert out.trace.extra["partial_fallback"] is False
+        assert out.trace.extra["effective_source"] == SOURCE_BYMA
+
+
+# ---------------------------------------------------------------------------
+# fetch_log trace fields (status / source / skip_reason / provider)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchTraceFields:
+    def test_should_record_iol_provider_and_ok_status_on_trace_when_iol_succeeds(self):
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with _patch_requests_get():
+                    out = fetch_ar_ohlcv_with_trace("GGAL", _START, _END)
+
+        assert out.rows is not None
+        assert out.trace.status == FETCH_STATUS_OK
+        assert out.trace.provider == SOURCE_IOL
+        assert out.trace.source == SOURCE_IOL
+        assert out.trace.skip_reason is None
+        assert out.trace.iol_only is False
+        entry = out.trace.to_log_entry()
+        extra = json.loads(entry["extra"])
+        assert extra["provider"] == SOURCE_IOL
+        assert extra["rows"] == 1
+
+    def test_should_set_credentials_missing_on_trace_when_iol_only_without_credentials(self):
+        import os
+
+        with patch.dict("os.environ", {}, clear=True):
+            os.environ.pop("IOL_USER", None)
+            os.environ.pop("IOL_PASS", None)
+            with patch("data.connectors.ar_connector.yf.Ticker") as mock_ticker:
+                out = fetch_ar_ohlcv_with_trace("GGAL", _START, _END, iol_only=True)
+
+        mock_ticker.assert_not_called()
+        assert out.rows is None
+        assert out.trace.status == FETCH_STATUS_SKIP
+        assert out.trace.skip_reason == SKIP_CREDENTIALS_MISSING
+        assert out.trace.provider == SOURCE_IOL
+        assert out.trace.iol_only is True
+
+    def test_should_fallback_to_byma_and_record_budget_detail_when_iol_budget_exhausted(self):
+        with patch.dict("os.environ", _IOL_ENV):
+            with patch(
+                "data.connectors.ar_connector._fetch_with_retry_iol",
+                side_effect=IolJobBudgetExhausted("max_calls_per_job exceeded"),
+            ):
+                with _patch_byma_history():
+                    out = fetch_ar_ohlcv_with_trace("GGAL", _START, _END)
+
+        assert out.rows is not None
+        assert out.trace.status == FETCH_STATUS_OK
+        assert out.trace.source == SOURCE_BYMA
+        assert out.trace.skip_reason == SKIP_FALLBACK_USED
+        assert "budget_detail" in out.trace.extra
+        assert "max_calls_per_job" in out.trace.extra["budget_detail"]
+
+    def test_should_raise_when_iol_only_and_iol_budget_exhausted(self):
+        with patch.dict("os.environ", _IOL_ENV):
+            with patch(
+                "data.connectors.ar_connector._fetch_with_retry_iol",
+                side_effect=IolJobBudgetExhausted("max_calls_per_job exceeded"),
+            ):
+                with pytest.raises(IolJobBudgetExhausted):
+                    fetch_ar_ohlcv_with_trace("GGAL", _START, _END, iol_only=True)
