@@ -55,6 +55,9 @@ class PortfolioLedger:
         self._short_eod_by_trading_date: dict[date, float] = {}
         # long equity por fecha para daily return del sleeve largo
         self._long_eod_by_trading_date: dict[date, float] = {}
+        # último close válido visto por símbolo, para carry-forward de valuación
+        # cuando un día falta la barra (hueco de datos). Evita crashear la corrida.
+        self._last_mark: dict[str, float] = {}
 
     def apply_fills(
         self,
@@ -90,8 +93,13 @@ class PortfolioLedger:
         mv_us = 0.0
         mv_ar = 0.0
 
+        stale_marks: list[str] = []
         for symbol, position in self.positions.items():
-            close_price = self._extract_close(symbol=symbol, daily_bars=daily_bars)
+            close_price, is_stale = self._resolve_mark_price(
+                symbol=symbol, position=position, daily_bars=daily_bars
+            )
+            if is_stale:
+                stale_marks.append(symbol)
             market_value = position.qty * close_price
             unrealized = (close_price - position.avg_cost) * position.qty
 
@@ -102,6 +110,7 @@ class PortfolioLedger:
                 "bucket": position.bucket,
                 "market_value": market_value,
                 "unrealized_pnl": unrealized,
+                "stale": is_stale,
             }
             market_value_total += market_value
             unrealized_pnl_total += unrealized
@@ -165,6 +174,7 @@ class PortfolioLedger:
             "equity_curve_points": list(self.equity_curve_points),
             "short_bucket": short_bucket,
             "long_bucket": long_bucket,
+            "stale_marks": stale_marks,
         }
 
     def update_day(
@@ -283,14 +293,33 @@ class PortfolioLedger:
             "fee": fee,
         }
 
-    def _extract_close(self, symbol: str, daily_bars: dict[str, dict[str, float]]) -> float:
+    def _resolve_mark_price(
+        self,
+        symbol: str,
+        position: PositionState,
+        daily_bars: dict[str, dict[str, float]],
+    ) -> tuple[float, bool]:
+        """Precio para valuar una posición abierta, resiliente a huecos de datos.
+
+        Devuelve `(precio, is_stale)`. Prioridad:
+        1) close válido (>0) del día → fresco; actualiza el último mark conocido.
+        2) último mark conocido (carry-forward) → stale.
+        3) `avg_cost` de la posición → stale (nunca se vio precio de mercado).
+
+        Nunca valúa a 0 ni crashea: un hueco de datos en un símbolo no debe tirar
+        abajo toda la corrida de validación. El flag `is_stale` deja el evento
+        observable para la capa de calidad de datos.
+        """
         bar = daily_bars.get(symbol)
-        if bar is None or "close" not in bar:
-            raise ValueError(f"missing close price for symbol {symbol}")
-        close = float(bar["close"])
-        if close <= 0:
-            raise ValueError(f"close must be > 0 for symbol {symbol}")
-        return close
+        if bar is not None and "close" in bar:
+            close = float(bar["close"])
+            if close > 0:
+                self._last_mark[symbol] = close
+                return close, False
+        last = self._last_mark.get(symbol)
+        if last is not None and last > 0:
+            return last, True
+        return float(position.avg_cost), True
 
     def _update_short_drawdown(
         self,

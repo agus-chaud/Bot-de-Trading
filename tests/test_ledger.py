@@ -103,7 +103,13 @@ def test_should_reject_sell_above_open_position():
         )
 
 
-def test_should_fail_when_missing_close_for_open_position():
+def test_missing_close_carries_forward_last_known_mark():
+    """Un hueco de datos en un símbolo abierto NO crashea: se arrastra el último close.
+
+    Antes esto tiraba ValueError y mataba toda la corrida de validación. Ahora la
+    posición se valúa con el último mark conocido (carry-forward) y se marca `stale`,
+    dejando el evento observable para la capa de calidad de datos.
+    """
     ledger = PortfolioLedger(starting_cash=10_000)
     ledger.update_day(
         trading_day=date(2026, 4, 15),
@@ -120,12 +126,47 @@ def test_should_fail_when_missing_close_for_open_position():
         daily_bars={"SPY": {"close": 100.0}},
     )
 
-    with pytest.raises(ValueError, match="missing close price for symbol SPY"):
-        ledger.update_day(
-            trading_day=date(2026, 4, 16),
-            fills=[],
-            daily_bars={},
-        )
+    snapshot = ledger.update_day(
+        trading_day=date(2026, 4, 16),
+        fills=[],
+        daily_bars={},
+    )
+
+    # Sin crash; SPY valuado con el último close conocido (100.0), no a cero.
+    spy = snapshot["positions"]["SPY"]
+    assert spy["market_value"] == pytest.approx(500.0)
+    assert spy["stale"] is True
+    assert snapshot["stale_marks"] == ["SPY"]
+
+
+def test_fresh_close_clears_stale_flag_after_gap():
+    """Cuando vuelve el dato, la valuación es fresca otra vez (stale=False)."""
+    ledger = PortfolioLedger(starting_cash=10_000)
+    ledger.update_day(
+        trading_day=date(2026, 4, 15),
+        fills=[
+            {
+                "symbol": "SPY",
+                "side": "BUY",
+                "qty": 5,
+                "price": 100.0,
+                "market": "US",
+                "bucket": "short",
+            }
+        ],
+        daily_bars={"SPY": {"close": 100.0}},
+    )
+    ledger.update_day(trading_day=date(2026, 4, 16), fills=[], daily_bars={})
+
+    snapshot = ledger.update_day(
+        trading_day=date(2026, 4, 17),
+        fills=[],
+        daily_bars={"SPY": {"close": 110.0}},
+    )
+    spy = snapshot["positions"]["SPY"]
+    assert spy["market_value"] == pytest.approx(550.0)
+    assert spy["stale"] is False
+    assert snapshot["stale_marks"] == []
 
 
 def test_mark_to_market_same_day_updates_single_equity_curve_point():

@@ -1172,6 +1172,26 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-051 — Valuación resiliente a huecos de datos en `mark_to_market` (carry-forward)
+
+- **Fecha**: 2026-06-02
+- **Estado**: aceptada
+- **Contexto**: `PortfolioLedger.mark_to_market` valúa **todas** las posiciones abiertas llamando, por símbolo, a `_extract_close`, que lanzaba `ValueError: missing close price for symbol {sym}` cuando faltaba la barra del día. Un único hueco de datos (ej. `TXAR` en pre-gate corto) abortaba **toda** la corrida de `run_validation_wf`, impidiendo medir la calidad de los motores. El crash venía de la valuación (MTM de cartera), no del broker: las órdenes solo se generan para símbolos presentes en `daily_bars`.
+- **Decisión**: Reemplazar `_extract_close` por `_resolve_mark_price(symbol, position, daily_bars) -> (precio, is_stale)` con prioridad: (1) close válido `>0` del día → fresco, actualiza `self._last_mark[symbol]`; (2) último mark conocido (carry-forward) → `stale`; (3) `avg_cost` de la posición → `stale` (nunca se vio precio de mercado). Nunca valúa a `0` ni crashea. El snapshot de `mark_to_market` ahora incluye `stale_marks: list[str]` y un flag `stale: bool` por posición.
+- **Por qué**: Un dato faltante **no es un dato cero**. Crashear tira abajo la medición; valuar a cero corrompe equity, drawdown y retornos (la posición “desaparece”). El carry-forward es el comportamiento estándar de sistemas de cartera (stale price). El flag `stale` mantiene el evento **observable** para la capa de calidad de datos sin esconderlo.
+- **Consecuencias**:
+  - `mark_to_market`/`update_day` ya no lanzan por barras faltantes; la validación sobrevive a huecos.
+  - Nuevo contrato de snapshot: `stale_marks` + `positions[sym]["stale"]`. Consumidores existentes (paper_broker, day_runner, pre_gate, walk-forward, validation_runner) verificados sin cambios (48/48).
+  - `stale_marks` queda disponible pero **no** cableado a `halt_on_data_quality` (decisión de política pendiente: cuándo un MTM stale debe frenar operación).
+- **Alternativas consideradas**:
+  - **Valuar a 0 si falta barra**: descartada — corrompe equity/DD/retornos; la peor opción.
+  - **Mantener el crash**: descartada — un hueco en un símbolo no debe invalidar toda la corrida de evaluación.
+  - **Cablear `stale_marks` a halt inmediato**: pospuesta — requiere política (¿1 stale frena? ¿umbral?); por ahora solo observable.
+- **Archivos**: `core_sim/ledger.py`, `tests/test_ledger.py`
+- **Ver también**: **ADR-018/019** (ledger paper-first, `mark_to_market`), **ADR-050** (incidente CI: feriados sin barras, IOL 401)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **ADR-051** — Valuación resiliente a huecos de datos: `PortfolioLedger.mark_to_market` ya no crashea con `ValueError: missing close price` cuando una posición abierta no tiene barra ese día. Ahora arrastra el último close conocido (carry-forward), o `avg_cost` si nunca se vio precio, y marca la valuación como `stale`. El snapshot expone `stale_marks` y un flag `stale` por posición. Esto destraba `run_validation_wf`, que abortaba la corrida completa ante un solo hueco (ej. `TXAR`). (`core_sim/ledger.py`, `tests/test_ledger.py`).
+
 ### Added
 - **ADR-050** — Runbook operativo paper-live: secretos GitHub obligatorios para CI, recuperación F3 en tandas, resolución de conflictos LFS en `data/market.db`, feriados sin barras, incidente IOL histórico 401 (`decisiones-tecnicas.md`, `docs/project-overview.md`, `POLICY.md` §15, `README.md`, `AGENTS.md`).
 
