@@ -127,14 +127,14 @@ def fetch_and_store(
             rows = result.rows
             if rows is None:
                 logger.warning(
-                    '{"event": "symbol_skipped", "symbol": "%s", "venue": "AR", "reason": "connector_returned_none"}',
+                    '{"event": "symbol_skipped", "symbol": "%s", "venue": "XBUE", "reason": "connector_returned_none"}',
                     symbol,
                 )
                 skipped_ar.append(symbol)
                 continue
             if not rows:
                 logger.warning(
-                    '{"event": "symbol_skipped", "symbol": "%s", "venue": "AR", "reason": "empty_data"}',
+                    '{"event": "symbol_skipped", "symbol": "%s", "venue": "XBUE", "reason": "empty_data"}',
                     symbol,
                 )
                 skipped_ar.append(symbol)
@@ -144,13 +144,13 @@ def fetch_and_store(
             rows_stored += len(normalized)
             fetched_ar.append(symbol)
             logger.info(
-                '{"event": "symbol_fetched", "symbol": "%s", "venue": "AR", "rows": %d}',
+                '{"event": "symbol_fetched", "symbol": "%s", "venue": "XBUE", "rows": %d}',
                 symbol,
                 len(normalized),
             )
         except Exception as exc:
             msg = f"AR:{symbol}: unexpected error: {exc}"
-            logger.exception('{"event": "symbol_error", "symbol": "%s", "venue": "AR"}', symbol)
+            logger.exception('{"event": "symbol_error", "symbol": "%s", "venue": "XBUE"}', symbol)
             errors.append(msg)
             err_trace = SymbolFetchTrace(
                 symbol=symbol,

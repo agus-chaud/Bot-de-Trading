@@ -5,7 +5,7 @@ External connectors (yfinance, IOL) are mocked — everything else runs for real
 
 Key contract discoveries captured here:
 - us_connector produces venue="XNYS" (canonical ISO MIC for NYSE) — normalizer passes it through unchanged
-- ar_connector produces venue="AR" (NOT "XBUE") — same
+- ar_connector produces venue="XBUE" (BYMA MIC) — same as calendars table
 - MarketDB.get_ohlcv filters by venue, so queries must use the venue the connector sets
 - calendar_builder uses "XNYS"/"XBUE" as venue keys in the calendars table
 - fetcher._get_calendar queries by venue from calendars table — must match what build_calendar inserts
@@ -62,7 +62,7 @@ def _ar_row(symbol: str, ts: date, close: float = 500.0) -> OHLCVRow:
         close=close,
         volume=50_000.0,
         currency="ARS",
-        venue="AR",   # what ar_connector actually produces
+        venue="XBUE",   # what ar_connector actually produces
         imputed=False,
     )
 
@@ -106,17 +106,17 @@ class TestUSPipelineHappyPath:
 
 
 class TestARPipelineHappyPath:
-    def test_ar_rows_stored_with_ar_venue_and_ars_currency(self, db):
-        """AR connector rows keep venue=AR and currency=ARS through the full pipeline."""
+    def test_ar_rows_stored_with_xbue_venue_and_ars_currency(self, db):
+        """AR connector rows keep venue=XBUE and currency=ARS through the full pipeline."""
         rows = [_ar_row("GGAL", d) for d in WEEKDAYS]
         calendar = set(WEEKDAYS)
 
         normalized = normalize(rows, calendar)
         db.upsert_ohlcv(normalized)
 
-        stored = db.get_ohlcv("GGAL", START, END, venue="AR")
+        stored = db.get_ohlcv("GGAL", START, END, venue="XBUE")
         assert len(stored) == 5
-        assert all(r.venue == "AR" for r in stored)
+        assert all(r.venue == "XBUE" for r in stored)
         assert all(r.currency == "ARS" for r in stored)
         assert all(r.imputed is False for r in stored)
 
@@ -217,7 +217,7 @@ class TestFetchAndStoreRoundTrip:
         assert report.rows_stored == 10  # 5 US + 5 AR
 
         spy_rows = db.get_ohlcv("SPY", START, END, venue="XNYS")
-        ggal_rows = db.get_ohlcv("GGAL", START, END, venue="AR")
+        ggal_rows = db.get_ohlcv("GGAL", START, END, venue="XBUE")
         assert len(spy_rows) == 5
         assert len(ggal_rows) == 5
 

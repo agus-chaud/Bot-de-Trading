@@ -1,0 +1,80 @@
+name: IOL API smoke check
+
+# Valida secretos IOL_USER / IOL_PASS en el runner (mismo entorno que paper-live).
+# Debe vivir en la rama default (main) para workflow_dispatch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol_merval:
+        description: "Ticker Merval (bCBA)"
+        required: false
+        default: "GGAL"
+        type: string
+      symbol_cedear:
+        description: "Ticker CEDEAR (bCBA)"
+        required: false
+        default: "SPY"
+        type: string
+      lookback_days:
+        description: "Días de histórico a probar"
+        required: false
+        default: "14"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  iol-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: "Diagnose IOL (login + histórico Merval: ${{ inputs.symbol_merval }})"
+        env:
+          IOL_USER: ${{ secrets.IOL_USER }}
+          IOL_PASS: ${{ secrets.IOL_PASS }}
+        run: |
+          python scripts/diagnose_iol_auth.py \
+            --symbol "${{ inputs.symbol_merval }}" \
+            --lookback "${{ inputs.lookback_days }}"
+
+      - name: "Diagnose IOL (histórico CEDEAR: ${{ inputs.symbol_cedear }})"
+        env:
+          IOL_USER: ${{ secrets.IOL_USER }}
+          IOL_PASS: ${{ secrets.IOL_PASS }}
+        run: |
+          python scripts/diagnose_iol_auth.py \
+            --symbol "${{ inputs.symbol_cedear }}" \
+            --lookback "${{ inputs.lookback_days }}" \
+            --skip-portfolio
+
+      - name: Smoke ar_connector (iol_only, sin fallback)
+        env:
+          IOL_USER: ${{ secrets.IOL_USER }}
+          IOL_PASS: ${{ secrets.IOL_PASS }}
+        run: |
+          python - <<'PY'
+          from datetime import date, timedelta
+          from data.connectors.ar_connector import clear_iol_session_cache, fetch_ar_ohlcv_with_trace
+          from data.fetch_trace import FETCH_STATUS_OK
+
+          clear_iol_session_cache()
+          end = date.today()
+          start = end - timedelta(days=int("${{ inputs.lookback_days }}"))
+          for sym in ("${{ inputs.symbol_merval }}", "${{ inputs.symbol_cedear }}"):
+              r = fetch_ar_ohlcv_with_trace(sym.strip().upper(), start, end, iol_only=True)
+              n = len(r.rows) if r.rows else 0
+              print(f"connector sym={sym} status={r.trace.status} rows={n} source={r.trace.source}")
+              if r.trace.status != FETCH_STATUS_OK or n == 0:
+                  raise SystemExit(f"IOL connector failed for {sym}")
+          print("OK: ar_connector iol_only returned data for both symbols")
+          PY

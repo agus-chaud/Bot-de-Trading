@@ -176,8 +176,10 @@ La transición a real está planteada como gate, no como salto de fe:
 pip install -r requirements.txt
 python -m pytest tests/ -v
 python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
-python scripts/run_short_term_pre_gate.py
-python scripts/run_long_engine_wf.py --window-months 6 --step-months 1
+python scripts/migrate_venue_ar_to_xbue.py --db data/market.db   # una vez si hay filas legacy venue=AR
+python scripts/run_validation_wf.py --db data/market.db
+python scripts/run_short_term_pre_gate.py --db data/market.db
+python scripts/run_long_engine_wf.py --window-months 3 --step-months 1
 # Notebook comparativo largo (ejecutar todas las celdas desde notebooks/):
 #   notebooks/wf_long_comparison.ipynb  → pasos 3–4: orquestador + gráficos ADR-045/046
 python scripts/report_kpis.py --equity path/to/equity.csv --trades path/to/fills.csv --benchmark-returns path/to/benchmark_returns.csv --out-json kpi.json --out-md kpi.md

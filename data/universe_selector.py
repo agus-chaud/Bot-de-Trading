@@ -220,20 +220,21 @@ class ShortPipelineArUniverse:
 
 
 def static_ar_symbols_from_policy(repo_root: Path, policy_doc: dict[str, Any]) -> list[str]:
-    """Same AR ticker union as legacy fetch_daily: whitelist_ar stocks + inline_ar."""
+    """Unión estática para fetch AR: inline_ar + candidatos Merval + candidatos CEDEAR.
+
+    Misma bolsa de símbolos que alimenta ``universe_selection`` (antes del top-N por
+    volumen). Con ``universe_selection.enabled: false``, fetch_daily usa esta lista
+    completa vía IOL/XBUE.
+    """
     sym = policy_doc["symbols"]
     out: list[str] = []
     for raw in sym.get("inline_ar", []) or []:
         s = str(raw).strip().upper()
         if s:
             out.append(s)
-    ar_path = repo_root / str(sym["whitelist_ar_file"])
-    with ar_path.open(encoding="utf-8") as f:
-        ar_doc = yaml.safe_load(f) or {}
-    for raw in ar_doc.get("stocks", []) or []:
-        s = str(raw).strip().upper()
-        if s:
-            out.append(s)
+    merval, cedears = load_merval_and_cedear_candidates(repo_root, policy_doc)
+    out.extend(merval)
+    out.extend(cedears)
     return sorted(set(out))
 
 

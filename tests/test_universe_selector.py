@@ -15,8 +15,11 @@ from data.universe_selector import (
     metrics_from_bars,
     resolve_ar_universe_for_short_pipeline,
     select_dynamic_universe,
+    static_ar_symbols_from_policy,
     window_start_for_volume,
 )
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _bar(ts: date, close: float, volume: float, sym: str = "GGAL") -> OHLCVRow:
@@ -41,6 +44,19 @@ class TestMetricsFromBars:
         total, _ = metrics_from_bars(rows, 20)
         expected = sum(range(5, 25))
         assert total == pytest.approx(float(expected))
+
+
+class TestStaticArSymbolsFromPolicy:
+    def test_should_include_merval_and_cedear_candidate_pools(self):
+        with (_REPO_ROOT / "config" / "policy.v1.yaml").open(encoding="utf-8") as f:
+            import yaml
+
+            policy = yaml.safe_load(f)
+        symbols = static_ar_symbols_from_policy(_REPO_ROOT, policy)
+        assert "GGAL" in symbols
+        assert "PAMP" in symbols
+        assert "SPY" in symbols
+        assert "NVDA" in symbols
 
 
 class TestMergeFetchUniverse:

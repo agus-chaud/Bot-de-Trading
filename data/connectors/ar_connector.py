@@ -41,7 +41,7 @@ from data.iol_api_meter import (
 
 logger = logging.getLogger(__name__)
 
-_VENUE = "AR"
+_VENUE = "XBUE"  # ISO MIC BYMA — must match calendars / get_ohlcv (see ADR-030 US→XNYS)
 _CURRENCY = "ARS"
 _REQUIRED_COLUMNS = {"Open", "High", "Low", "Close", "Volume"}
 

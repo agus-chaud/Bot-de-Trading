@@ -178,7 +178,7 @@ class TestFetchAndStoreUS:
 class TestFetchAndStoreAR:
     def test_successful_ar_symbol_appears_in_fetched_ar(self):
         """When AR connector succeeds, symbol goes to fetched_ar, not fetched_us."""
-        raw = [_make_row("GGAL", START, venue="AR")]
+        raw = [_make_row("GGAL", START, venue="XBUE")]
         normalized = raw
         db = _make_db()
 
@@ -259,7 +259,7 @@ class TestMixedReport:
     def test_mix_us_and_ar_symbols_correctly_separated(self):
         """US and AR results are reported in their respective lists."""
         us_rows = [_make_row("SPY", START)]
-        ar_rows = [_make_row("GGAL", START, venue="AR")]
+        ar_rows = [_make_row("GGAL", START, venue="XBUE")]
         db = _make_db()
 
         with (
@@ -278,7 +278,7 @@ class TestMixedReport:
     def test_rows_stored_is_sum_across_all_successful_symbols(self):
         """rows_stored accumulates across US and AR symbols."""
         us_rows = [_make_row("SPY", START), _make_row("SPY", date(2024, 1, 3))]
-        ar_rows = [_make_row("GGAL", START, venue="AR")]
+        ar_rows = [_make_row("GGAL", START, venue="XBUE")]
         db = _make_db()
 
         with (
@@ -321,7 +321,7 @@ class TestArUniverseContractForFetcher:
         db = _make_db()
 
         def _fetch_side_effect(sym: str, start: date, end: date, **_):
-            return _ar_fetch_result([_make_row(sym, START, venue="AR")], symbol=sym)
+            return _ar_fetch_result([_make_row(sym, START, venue="XBUE")], symbol=sym)
 
         with (
             patch(_PATCH_BUILD_CAL),
@@ -374,7 +374,7 @@ class TestFetchLogPersistence:
         assert entry["status"] == "skip"
 
     def test_should_persist_ar_iol_success_with_provider_source_and_rows(self):
-        raw = [_make_row("GGAL", START, venue="AR")]
+        raw = [_make_row("GGAL", START, venue="XBUE")]
         trace = SymbolFetchTrace(
             symbol="GGAL",
             venue=VENUE_AR,
@@ -406,8 +406,8 @@ class TestFetchLogPersistence:
 
     def test_should_persist_ar_fallback_with_skip_reason_and_mixed_source(self):
         raw = [
-            _make_row("GGAL", START, venue="AR"),
-            _make_row("GGAL", date(2024, 1, 3), venue="AR"),
+            _make_row("GGAL", START, venue="XBUE"),
+            _make_row("GGAL", date(2024, 1, 3), venue="XBUE"),
         ]
         trace = SymbolFetchTrace(
             symbol="GGAL",

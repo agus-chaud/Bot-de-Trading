@@ -101,7 +101,7 @@ def _patch_byma_history(return_value=None, side_effect=None):
 
 class TestIolSuccess:
     def test_should_return_normalized_ar_ohlcv_rows_when_iol_succeeds_on_first_attempt(self):
-        """IOL primary succeeds → returns OHLCVRow list with venue=AR and currency=ARS."""
+        """IOL primary succeeds → returns OHLCVRow list with venue=XBUE and currency=ARS."""
         with patch.dict("os.environ", _IOL_ENV):
             with _patch_iol_access_token():
                 with _patch_requests_get():
@@ -118,7 +118,7 @@ class TestIolSuccess:
         assert row.close == pytest.approx(1030.0)
         assert row.volume == pytest.approx(500_000.0)
         assert row.currency == "ARS"
-        assert row.venue == "AR"
+        assert row.venue == "XBUE"
         assert row.imputed is False
 
     def test_should_preserve_clean_symbol_without_ba_suffix_in_output_rows(self):
@@ -255,7 +255,7 @@ class TestBymaFallback:
 
         assert result is not None
         assert len(result) == 1
-        assert result[0].venue == "AR"
+        assert result[0].venue == "XBUE"
         assert result[0].currency == "ARS"
 
     def test_should_log_fallback_trigger_when_switching_from_iol_to_byma(self, caplog):
