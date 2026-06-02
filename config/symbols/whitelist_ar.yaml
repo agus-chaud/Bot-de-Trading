@@ -1,11 +1,11 @@
 # Candidatos Merval (BYMA / panel local IOL bCBA). La selección dinámica toma top N por volumen.
 stocks:
   - GGAL
-  - YPF
+  - YPFD
   - PAMP
   - BMA
   - CEPU
-  - TGS
+  - TGSU2
   - TXAR
   - ALUA
   - SUPV

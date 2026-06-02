@@ -213,7 +213,11 @@ def run_catch_up(
                 }
 
         if not daily_bars:
-            raise RuntimeError(f"No OHLCV bars found for {day} — cannot proceed.")
+            logger.warning(
+                "No OHLCV bars found for %s — skipping day (likely holiday/non-trading day).",
+                day,
+            )
+            continue
 
         history_by_symbol: dict[str, list[dict[str, float]]] = {}
         for sym, market in merged_whitelist.items():
