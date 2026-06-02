@@ -117,10 +117,12 @@ La transición a real está planteada como gate, no como salto de fe:
   - Con `--enable-long-engine`, tras el **corto** se construye una copia de `daily_bars` y se **sobrescriben** los precios de las líneas del **`long_term_engine`** con OHLCV **XBUE** cuando el policy usa calendario **AR**, de modo que CEDEAR/pesos (p. ej. `SPY`) no usen cierres **XNYS** por el merge global — ver **ADR-048**.
   - **Soporte para ambos sleeves**: con ese flag se ejecuta short → long sobre el mismo ledger/broker; fills combinados y snapshot final con MTM usando la copia de barras cuando el largo está activo. Sin flag (default), solo corto.
   - `data/storage.py` — `get_last_snapshot_day(mode)` para detectar último día procesado.
-  - `.github/workflows/paper_live_daily.yml` — cron Lun–Vie 10:00 UTC (post-cierre US) + `workflow_dispatch`; opera sobre branch `paper-live-data` y commitea la DB tras cada corrida. Incluye step de **fetch OHLCV** previo al pipeline (`fetch_daily.py --lookback 5`) y **notificación automática** (issue GitHub) ante fallos.
-  - **Branch `paper-live-data`**: rama dedicada para datos operativos diarios (DB + fills + snapshots); `main` se mantiene limpio para evolución de código. Git LFS para `data/*.db` evita inflación del repo por commits binarios diarios.
+  - `.github/workflows/paper_live_daily.yml` — cron Lun–Vie 10:00 UTC (post-cierre US) + `workflow_dispatch` (input opcional `date`); opera sobre branch `paper-live-data` y commitea la DB tras cada corrida. Incluye step de **fetch OHLCV** previo al pipeline (`fetch_daily.py --lookback 5`) y **notificación automática** (issue GitHub) ante fallos.
+  - **Secretos GitHub (obligatorio para CI)**: `IOL_USER` y `IOL_PASS` en *Settings → Secrets and variables → Actions*. Variables locales de Windows **no** alimentan el runner. Diagnóstico: `python scripts/diagnose_iol_auth.py`.
+  - **Política F3**: catch-up automático de hasta **3** días hábiles por corrida; gap mayor → `exit(2)` y recuperación manual en tandas (`workflow_dispatch` con `date` o local + push). Días sin barras (feriados) se **saltan con warning** sin abortar todo el rango (**ADR-050**).
+  - **Branch `paper-live-data`**: rama dedicada para datos operativos diarios (DB + fills + snapshots); `main` se mantiene limpio para evolución de código. Git LFS para `data/*.db` evita inflación del repo por commits binarios diarios. Conflictos en `data/market.db` al hacer merge: resolver puntero LFS con `git checkout --ours` o `--theirs`, no editar marcadores `<<<<<<<` a mano.
   - Tests en `tests/test_storage.py` y `tests/test_run_paper_live.py` (gap detection, F3 exit code, single/multi-day integration, idempotencia, **feature flag long on/off**).
-  - Decisiones registradas en `decisiones-tecnicas.md` (**ADR-040**, **ADR-044**, **ADR-048**).
+  - Decisiones registradas en `decisiones-tecnicas.md` (**ADR-040**, **ADR-044**, **ADR-048**, **ADR-050**).
 
 - **Gate KPI OOS activo** (Fase 5, gate-ramp):
   - `kpi_oos_gate.enabled: true` en `config/policy.v1.yaml` con 7 umbrales bloqueantes pre-registrados (2026-05-11): Sharpe ≥ 0.30, Sortino ≥ 0.40, DD total ≥ -18%, DD corto ≥ -10%, DD largo ≥ -25%, turnover largo ≤ 8%, alpha ≥ -2%.
@@ -184,6 +186,16 @@ python scripts/report_kpis_walk_forward.py --equity path/to/equity.csv --trades 
 python scripts/regenerate_kpi_golden_fixtures.py   # solo tras cambio consciente del spec / KPIs (actualiza tests/fixtures/kpi_golden/)
 python scripts/run_paper_live.py --date 2026-05-09 --db data/market.db   # ejecución manual paper-live (short-only, branch paper-live-data)
 python scripts/run_paper_live.py --date 2026-05-09 --db data/market.db --enable-long-engine   # short + long
+python scripts/fetch_daily.py --lookback 120 --db data/market.db   # backfill OHLCV antes de recuperar gap largo
+python scripts/diagnose_iol_auth.py   # validar credenciales IOL (no imprime secretos)
+```
+
+**Recuperación paper-live tras fallos de CI** (resumen; detalle en `docs/project-overview.md` §8 y **ADR-050**):
+
+1. Configurar `IOL_USER` / `IOL_PASS` en GitHub Secrets.
+2. `git checkout paper-live-data && git pull && git lfs pull`.
+3. Si gap > 3 días: `fetch_daily --lookback 120` y varias corridas de `run_paper_live --date <último día del bloque>` (≤3 hábiles por tanda) o `workflow_dispatch` equivalente.
+4. `git push origin paper-live-data`.
 ```
 
 Por módulo (desarrollo acotado):

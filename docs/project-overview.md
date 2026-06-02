@@ -234,22 +234,40 @@ flowchart LR
 
 `scripts/run_paper_live.py` ejecuta el pipeline dia a dia contra OHLCV real en SQLite:
 
-- Detecta el ultimo dia procesado y hace catch-up idempotente de los dias faltantes.
-- Aplica politica F3: si el gap supera 3 dias habiles, exit(2) y requiere intervencion manual.
+- Detecta el ultimo dia procesado (`get_last_snapshot_day("paper_live")`) y hace catch-up idempotente de los dias faltantes (solo dias habiles lun–vie en el calculo de gap).
+- **Politica F3**: si el gap supera **3** dias habiles, `exit(2)` y requiere intervencion manual (no hace catch-up masivo automatico). Ver **ADR-050** y `POLICY.md` §15.
+- Si un dia del gap **no tiene barras** (feriado AR, mercado cerrado, fetch incompleto), registra **warning y continua** con el siguiente dia — no aborta todo el rango (**ADR-050**).
 - Persiste fills y snapshots en `data/market.db` bajo mode `paper_live`.
 - Replay de ledger desde fills anteriores para mantener estado coherente.
 - **Soporte para ambos sleeves**: con `--enable-long-engine` se ejecuta el pipeline corto primero y luego el largo sobre el mismo ledger/broker. Los fills de ambos sleeves se persisten juntos. Sin el flag (default), el flujo es solo corto — rollback inmediato sin cambio de codigo.
 - Tras el corto, si el largo esta activo y el policy usa calendario **AR**, una copia de `daily_bars` recibe precios **XBUE** por cada simbolo de `long_term_engine` (motor CEDEAR/pesos; **ADR-048**). El snapshot final usa esa copia para MTM cuando el flag esta encendido.
 - Orden fijo **short → long**: el largo consume la caja que quedo despues del corto.
 
+**Exit codes** (`run_paper_live.py`): `0` OK; `1` error de runtime (datos faltantes en dia que si debia operar, crash); `2` violacion F3 (gap > 3).
+
 ### Workflow automatizado
 
-`.github/workflows/paper_live_daily.yml` corre de lunes a viernes a las 10:00 UTC (post-cierre US):
+`.github/workflows/paper_live_daily.yml` corre de lunes a viernes a las 10:00 UTC (post-cierre US) y admite **`workflow_dispatch`** con input opcional `date` (`YYYY-MM-DD`):
 
-1. Fetch OHLCV de los ultimos 5 dias (`fetch_daily.py --lookback 5`).
-2. Ejecucion del pipeline (`run_paper_live.py`).
-3. Commit automatico de la DB actualizada.
-4. Notificacion automatica (issue GitHub) ante cualquier fallo.
+1. Checkout de rama **`paper-live-data`** (LFS activo para `data/market.db`).
+2. `pip install -r requirements.txt`.
+3. Fetch OHLCV (`fetch_daily.py --lookback 5`) con secrets **`IOL_USER`** / **`IOL_PASS`** inyectados desde GitHub Actions (no desde el PC del operador).
+4. `run_paper_live.py` (con `--date` si se disparo dispatch manual).
+5. `git add -f data/market.db` + commit/push si hubo cambios.
+6. Issue automatico si falla cualquier step (**ADR-040**).
+
+**Secretos IOL (critico):** deben existir en el repo de GitHub. Variables de entorno locales (Windows `setx`, panel de usuario) **no** llegan al runner. Sin secrets, el fetch AR degrada y el catch-up puede fallar. Diagnostico local: `python scripts/diagnose_iol_auth.py`. Incidente y runbook: **ADR-050**.
+
+**IOL histórico 401 (conocido):** el login (`/token`) puede responder 200 y la serie historica 401; el conector reintenta y cae a Byma/yfinance. El workflow puede quedar en verde; revisar `fetch_log` para calidad AR.
+
+### Recuperacion tras caida (runbook)
+
+| Situacion | Accion |
+|-----------|--------|
+| Gap ≤ 3 dias | Dejar que el cron o un `workflow_dispatch` sin fecha lo procese. |
+| Gap > 3 dias (F3) | Varios dispatch con `date` = ultimo dia de cada bloque de ≤3 habiles, o local: `fetch_daily --lookback 120` + `run_paper_live --date ...` en tandas + push a `paper-live-data`. |
+| Conflicto al `pull` en `data/market.db` | Puntero LFS: `git checkout --ours data/market.db` (DB local) o `--theirs` (remoto), `git add`, commit merge. No editar `<<<<<<<` en el puntero. |
+| Codigo nuevo en `main` | `git checkout paper-live-data && git merge main` antes de operar localmente. |
 
 ### Modelo de branches
 
@@ -258,7 +276,7 @@ flowchart LR
 | `main` | Evolucion de codigo, PRs, CI | Solo codigo y docs |
 | `paper-live-data` | Operacion diaria automatizada | Codigo + `data/market.db` (via Git LFS) |
 
-El workflow vive en `main` (GitHub lee schedule/dispatch del default branch), pero hace checkout de `paper-live-data` para ejecutar. Git LFS para `data/*.db` evita inflar el repo con commits binarios diarios (~250/año).
+El workflow vive en `main` (GitHub lee schedule/dispatch del default branch), pero hace checkout de `paper-live-data` para ejecutar. Git LFS para `data/*.db` evita inflar el repo con commits binarios diarios (~250/año). Los commits diarios del bot (`paper-live: YYYY-MM-DD daily run`) solo van a `paper-live-data`.
 
 ## 9) Validation workflow (GO/NO-GO)
 
@@ -307,7 +325,7 @@ El repo cuenta con ~44 archivos de test, abarcando unitarios, integracion y regr
 
 ## 11) Decisiones tecnicas clave
 
-Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (46 ADRs a la fecha). Los ejes principales son:
+Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (50 ADRs a la fecha). Los ejes principales son:
 
 - Paper-first como estrategia de construccion.
 - Riesgo deterministico y centralizado.
@@ -315,7 +333,7 @@ Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (46 ADRs
 - Contratos versionados (`policy.v1.yaml` + schema).
 - Gate KPI OOS con umbrales pre-registrados y ramp-up gradual en 5 escalones (**ADR-041**).
 - RSI(14) como filtro de entrada y señal de salida del motor corto (**ADR-042**): mejoro avg max drawdown de -0.134% a -0.098% y redujo turnover de 1.69 a 1.26 en walk-forward 180d.
-- Modelo de branches `main` / `paper-live-data` con LFS y notificaciones (**ADR-040**).
+- Modelo de branches `main` / `paper-live-data` con LFS y notificaciones (**ADR-040**); runbook CI/secretos/F3/feriados (**ADR-050**).
 - ADRs argentinos (MELI, YPF, TGS, GGAL) incorporados al whitelist US con precedencia de tag y categoría `adrs` separada (**ADR-043**).
 - Integración del largo en paper-live con guardrail efectivo, dedup de riesgo corto y feature flag de rollback (**ADR-044**).
 - Rebalanceo largo semanal vs mensual: cambio operativo en policy (**ADR-045**); evidencia en notebook WF + corrida continua (**ADR-046**).
@@ -490,6 +508,6 @@ Documentos complementarios:
 - Politica operativa: `POLICY.md`
 - Contrato parseable: `config/policy.v1.yaml`
 - Validacion estructural: `config/policy.v1.schema.json`
-- Registro de decisiones: `decisiones-tecnicas.md` (44 ADRs)
+- Registro de decisiones: `decisiones-tecnicas.md` (50 ADRs)
 - KPI spec: `docs/kpi_report_spec.v1.md`
 - Listas blancas: `config/symbols/whitelist_us.yaml` (ETFs, stocks, ADRs), `config/symbols/whitelist_ar.yaml`

@@ -868,7 +868,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - Separar branches evita contaminar `main` con ~250 commits/año de DB binaria y preserva historial limpio para PRs y revisiones de código.
 - **Consecuencias**:
   - GitHub LFS tiene 1 GB storage + 1 GB bandwidth gratis; suficiente para paper trading.
-  - Para usar IOL directo (AR), configurar `IOL_USER`/`IOL_PASS` en GitHub secrets; sin ellos, fallback Byma funciona.
+  - Para usar IOL directo (AR), configurar `IOL_USER`/`IOL_PASS` en **GitHub Actions secrets** (obligatorio para CI; variables locales de Windows no aplican al runner). Sin ellos, fallback Byma/yfinance puede operar pero el fetch AR queda degradado. Runbook ampliado en **ADR-050**.
   - Cambios de código en `main` deben mergearse a `paper-live-data` para que el cron los use.
   - El workflow YAML vive en `main` (GitHub lee schedule/dispatch del default branch); el checkout ejecuta contra `paper-live-data`.
 - **Alternativas consideradas**:
@@ -1137,6 +1137,38 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Solo logs estructurados sin DB**: descartada — no alimenta notebook ni SQL en `market.db` de paper-live.
   - **Merge parcial siempre por días hábiles inferidos (lun–vie)**: descartada como default — falsos huecos en feriados AR; se usa calendario XBUE del fetcher cuando aplica.
 - **Archivos**: `data/fetch_trace.py`, `data/fetcher.py`, `data/connectors/ar_connector.py`, `data/storage.py`, `scripts/fetch_daily.py`, `tests/test_fetch_trace.py`, `tests/test_data_fetcher.py`, `tests/test_data_ar_connector.py`, `tests/test_data_storage.py`, `tests/test_fetch_daily_universe_resolution.py`, `tests/test_data_integration.py` (mocks `fetch_ar_ohlcv_with_trace`).
+
+---
+
+## ADR-050 — Incidente paper-live CI (may–jun 2026): secretos GitHub, F3, feriados y conflictos LFS
+
+- **Fecha**: 2026-06-02
+- **Estado**: aceptada
+- **Contexto**: El workflow `paper_live_daily.yml` falló de forma continua desde 2026-05-26 tras el último run verde (2026-05-25). Cadena observada en logs de Actions:
+  1. `IOL_USER` / `IOL_PASS` **vacíos en GitHub** (credenciales solo en variables de entorno locales de Windows) → `iol_credentials_missing` o fetch AR degradado.
+  2. Sin barras del día → `No OHLCV bars found for YYYY-MM-DD` y abort del catch-up.
+  3. Varios días sin snapshot → **F3** (`gap > 3` días hábiles, `exit 2` en `run_paper_live.py`).
+  4. Día **2026-05-25** (feriado AR) sin barras hacía fallar el bloque aunque el resto del rango fuera recuperable.
+  5. Al hacer `git pull` en `paper-live-data`, conflicto en **puntero LFS** de `data/market.db` (`<<<<<<<` dentro del archivo puntero, no mergeable como texto).
+  6. Tras configurar secrets en GitHub: login IOL OK (`POST /token` 200) pero **serie histórica HTTP 401** (`iol_unauthorized`); el job sigue con fallback Byma/yfinance.
+- **Decisión**:
+  1. **Secretos obligatorios en CI**: `IOL_USER` y `IOL_PASS` deben existir en **Settings → Secrets and variables → Actions** del repo. Variables locales (`setx`, panel de Windows) **no** alimentan GitHub Actions. Validación: `python scripts/diagnose_iol_auth.py` en local; en CI, revisar que el step Fetch muestre `IOL_USER: ***` (no vacío).
+  2. **Política F3** (sin cambio de umbral): máximo **3** días hábiles de catch-up por corrida; si `len(gap_days) > 3` → `exit 2` e intervención manual. Recuperación: varios `workflow_dispatch` con input `date` apuntando al **último día de cada bloque** de ≤3 días (p. ej. `2026-05-19`, `2026-05-22`, `2026-05-27`, `2026-06-01`), o el equivalente local + `git push` a `paper-live-data`.
+  3. **Feriados / sin barras**: en `run_catch_up`, si un día del gap no tiene ninguna barra en whitelist, **registrar warning y continuar** con el siguiente día (no `raise RuntimeError` que aborta todo el rango). El snapshot de ese día no se crea; el siguiente run puede reintentar si llegan datos.
+  4. **Conflictos LFS en `data/market.db`**: resolver el puntero con `git checkout --ours data/market.db` (mantener DB local reconstruida) o `--theirs` (mantener remoto), luego `git add data/market.db` y commit de merge. **No** editar a mano marcadores `<<<<<<<` dentro del puntero LFS.
+  5. **Backfill de OHLCV previo al catch-up**: si la DB quedó vieja, correr `python scripts/fetch_daily.py --lookback 120 --db data/market.db` antes de `run_paper_live.py` en bloques F3-safe.
+  6. **IOL 401 en histórico**: documentado como incidente conocido; operación diaria puede seguir en verde vía fallback. Seguimiento: permisos de cuenta IOL / soporte API; no bloquear CI mientras `fetch_log` y fallback sean aceptables para paper.
+- **Por qué**: separar causas (secretos vs F3 vs feriado vs LFS) evita “arreglar” solo el síntoma; F3 protege contra catch-up masivo no auditado; saltar feriados evita un solo día no operable que tumbe una semana de recuperación.
+- **Consecuencias**:
+  - Run de verificación 2026-06-02 (`workflow_dispatch` #26826413712): **success**, mensaje `No gap — target day 2026-06-01 already processed`, commit LFS `be72f1a` en `paper-live-data`.
+  - Operadores deben **mergear `main` → `paper-live-data`** para que el cron use el fix de feriados en `run_paper_live.py`.
+  - Rotar contraseña IOL si estuvo expuesta en logs locales de diagnóstico.
+- **Alternativas consideradas**:
+  - **Subir F3 a 10 días en CI**: descartada — debilita control operativo; mejor dispatch manual en tandas.
+  - **Forzar `FETCH_IOL_ONLY` en workflow**: descartada mientras histórico devuelva 401 — tumbaría el job entero.
+  - **Resolver conflicto LFS fusionando binarios a mano**: descartada — Git LFS no mergea SQLite; elegir `--ours` o `--theirs` explícitamente.
+- **Archivos**: `.github/workflows/paper_live_daily.yml`, `scripts/run_paper_live.py`, `scripts/diagnose_iol_auth.py`, `docs/project-overview.md`, `README.md`, `AGENTS.md`, `POLICY.md` §15, `CHANGELOG.md`
+- **Ver también**: **ADR-040** (modelo branches + workflow), **ADR-049** (`fetch_log` / fallback)
 
 ---
 

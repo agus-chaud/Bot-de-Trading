@@ -93,10 +93,12 @@ El proyecto usa dos ramas con responsabilidades distintas:
 | `paper-live-data` | Operación diaria automatizada | Código + `data/market.db` (via Git LFS) |
 
 - El **workflow** (`paper_live_daily.yml`) vive en `main` (GitHub lee schedule/dispatch del default branch), pero hace `checkout` de `paper-live-data` para ejecutar.
+- **Secretos IOL en GitHub Actions**: `IOL_USER` y `IOL_PASS` deben existir como *repository secrets*. Variables de entorno locales del operador **no** aplican al runner. Sin ellos, fetch AR degrada y el catch-up puede fallar.
+- **Política F3** (`run_paper_live.py`): máximo **3** días hábiles de catch-up por corrida; `exit 2` si el gap es mayor (recuperación manual en tandas). Días sin OHLCV en el gap se **saltan** (warning), no abortan el rango completo (**ADR-050**).
 - **Sincronización de código**: `git checkout paper-live-data; git merge main` trae cambios de código sin perder la DB.
-- **Git LFS**: `data/*.db` en `paper-live-data` se trackea con LFS (`.gitattributes`); en `main` la DB está gitignoreada.
+- **Git LFS**: `data/*.db` en `paper-live-data` se trackea con LFS (`.gitattributes`); en `main` la DB está gitignoreada. Conflictos de merge en `market.db`: resolver puntero con `git checkout --ours|--theirs`, nunca editar `<<<<<<<` en el puntero.
 - **Notificación de fallos**: el workflow crea un issue GitHub automáticamente si algún step falla (detección temprana, evita violar F3).
-- Decisión registrada en `decisiones-tecnicas.md` (**ADR-040**).
+- Decisiones: **ADR-040** (modelo branches + workflow), **ADR-050** (incidente may–jun 2026, runbook).
 
 ## Integración largo en paper-live (ADR-044)
 

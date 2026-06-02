@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **ADR-050** — Runbook operativo paper-live: secretos GitHub obligatorios para CI, recuperación F3 en tandas, resolución de conflictos LFS en `data/market.db`, feriados sin barras, incidente IOL histórico 401 (`decisiones-tecnicas.md`, `docs/project-overview.md`, `POLICY.md` §15, `README.md`, `AGENTS.md`).
+
 - **Fetch audit trail (`fetch_log`)** — Fase 2 auditoría IOL (**ADR-049**):
   - Persistencia por símbolo/rango en tabla `fetch_log` vía `MarketDB.log_fetch` y taxonomía en `data/fetch_trace.py` (`status`, `skip_reason`, `source` / `effective_source`).
   - `data/fetcher.py` registra cada símbolo US/AR tras `fetch_and_store`; AR usa `fetch_ar_ohlcv_with_trace` con calendario XBUE para detectar huecos.
@@ -37,6 +39,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `.gitignore` updated with `!data/market.db` negation on `paper-live-data` branch only.
 
 ### Fixed
+- **`run_paper_live.py`**: días del gap sin barras OHLCV (p. ej. feriado AR) se registran como warning y se omiten en lugar de abortar todo el catch-up (**ADR-050**).
+- **Paper-live CI (may–jun 2026)**: documentada cadena de fallo (secretos solo locales → gap → F3) y verificación exitosa post-configuración (`workflow_dispatch` 2026-06-02).
+
 - **Short bucket monthly drawdown** (`core_sim/ledger.py`): switched DD calculation
   from MV-only to bucket equity (`short_cash + MV_short`). Closing a profitable
   position no longer produces phantom -100% drawdowns. Peak and drawdown now

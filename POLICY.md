@@ -356,4 +356,39 @@ Graduar la exposición a capital real en escalones con checkpoints de revisión.
 
 ---
 
-*Fin del documento — Fase 1 (especificación paper) + Fase 5 (informe KPI, gate, ramp-up).*
+## 15. Operación paper-live automatizada (cron y recuperación)
+
+Esta sección norma el orquestador diario `scripts/run_paper_live.py` y el workflow `.github/workflows/paper_live_daily.yml`. Detalle técnico en `decisiones-tecnicas.md` (**ADR-040**, **ADR-050**).
+
+### 15.1 Política F3 (catch-up máximo)
+
+| Regla | Valor | Comportamiento |
+|-------|-------|----------------|
+| **F3** | Máximo **3** días hábiles (lun–vie) entre el último `paper_snapshots.trading_day` y el día objetivo | Si el gap es mayor, el script termina con **código 2** y mensaje de intervención manual. No se procesa catch-up masivo en una sola corrida. |
+| Recuperación | Tandas de ≤3 días | `workflow_dispatch` con input `date` = último día de cada bloque, o ejecución local equivalente + push a `paper-live-data`. |
+| Día sin barras | Feriado / mercado cerrado / fetch incompleto | **Warning y continuar** con el siguiente día del gap; no abortar todo el rango por un solo día sin OHLCV (**ADR-050**). |
+
+El día objetivo por defecto (sin `--date`) es el **último día hábil anterior** a la fecha UTC del runner.
+
+### 15.2 Credenciales y datos en CI
+
+- **`IOL_USER` / `IOL_PASS`**: deben configurarse como **secretos del repositorio en GitHub Actions**. No bastan variables de entorno en la máquina del operador.
+- Sin credenciales en CI, la ingesta AR puede omitir IOL (`iol_credentials_missing`) y depender de fallback; el paper-live puede fallar si faltan barras del día.
+- **Diagnóstico local** (sin imprimir contraseñas): `python scripts/diagnose_iol_auth.py`.
+- **IOL histórico 401** (login OK, serie 401): incidente conocido; el job diario puede seguir con fallback Byma/yfinance mientras se revisan permisos de cuenta IOL.
+
+### 15.3 Ramas y persistencia
+
+- Código y workflow en **`main`**; ejecución y DB operativa en **`paper-live-data`** (`data/market.db` vía Git LFS).
+- Tras cambios de código en `main`, sincronizar: `git checkout paper-live-data && git merge main`.
+- Conflictos en `data/market.db` al integrar remoto: resolver el **puntero LFS** con `git checkout --ours` o `--theirs`, luego `git add` y commit de merge.
+
+### 15.4 Backfill previo a recuperación larga
+
+Si la DB quedó desactualizada, antes de tandas F3-safe ejecutar:
+
+`python scripts/fetch_daily.py --lookback 120 --db data/market.db`
+
+---
+
+*Fin del documento — Fase 1 (especificación paper) + Fase 5 (informe KPI, gate, ramp-up) + §15 operación paper-live.*
