@@ -1227,6 +1227,30 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-053 — Ampliación del universo (+10 símbolos diversificados por industria) para destrabar la medición de señal
+
+- **Fecha**: 2026-06-03
+- **Estado**: aceptada
+- **Contexto**: La medición de señal limpia (**ADR-052**) reveló **breadth insuficiente** para evaluar un ranking cross-seccional: la cross-section mediana es de **~1 símbolo/día** y solo **89 de 278 días** alcanzan ≥5 nombres, lo que dejó el veredicto de la señal **inconcluso** (no es un defecto del fix de venue, es falta de amplitud). Además, las whitelists estaban **concentradas por sector**: el Merval pesaba en bancos (GGAL/BMA/SUPV) y energía (YPFD/PAMP/CEPU/TGSU2), y los CEDEARs pesaban en tech, con salud flaca (solo PFE) e industriales (solo BA). Con tan pocos nombres por día y sectores correlacionados, no hay cross-section sobre la cual rankear.
+- **Decisión**: Ampliar el universo en **+10 símbolos**, diversificando deliberadamente por industria para ensanchar la cross-section:
+  - **Merval (+5, market `AR`, venue XBUE/ARS)**: `CRES` (agro), `TECO2` (telecom), `LOMA` (construcción/cemento), `MIRG` (electrónica/industrial), `IRSA` (real estate).
+  - **CEDEARs (+5, tag `US` para que la señal se compute en USD vía XNYS, registrados también en `whitelist_cedear` para ejecución futura en pesos)**: `V` (pagos), `UNH` (salud), `CAT` (industrial), `PEP` (consumo masivo), `NFLX` (streaming).
+- **Por qué**:
+  - No se puede rankear una lista de un elemento: la **amplitud del universo es prerequisito** de cualquier medición cross-seccional de señal. Ampliar es la palanca de menor riesgo para conseguir breadth.
+  - Diversificar por industria (no agregar más bancos/energía) **descorrelaciona** la cross-section, que es justo lo que un ranking necesita para discriminar.
+  - Etiquetar los CEDEARs como `US` mantiene coherencia con la decisión **#401 / ADR-052**: la señal de los dual-listed se computa en **USD (XNYS)** para que el CCL no contamine el momentum; el registro paralelo en `whitelist_cedear` deja lista la pata de ejecución en pesos sin forzarla ahora.
+- **Consecuencias**:
+  - Datos cargados para los 10 nuevos símbolos en el rango **2025-03-20 → 2026-06-02** (~297 filas AR, ~302 US), con **warmup antes del día 1** de la ventana de medición para que los indicadores arranquen calientes.
+  - Coherente con **ADR-052** (señal dual-listed en USD); **no** se re-etiquetó nada existente.
+  - **Pendiente**: re-correr la medición de señal sobre la cross-section completa (U2) para ver si la breadth mejora y el veredicto deja de estar inconcluso.
+- **Alternativas consideradas**:
+  - **Relajar los filtros del motor (p. ej. `p_min`, liquidez) en vez de ampliar el universo**: descartada como **primer paso** — tocar los filtros afecta el riesgo real de trading; es mejor medir primero sobre la cross-section completa U2 con un universo más ancho, y solo después considerar ajustes de motor con evidencia.
+  - **Cargar ya la pata ARS de los CEDEARs**: descartada — la señal va en USD y la ejecución en pesos (mapeo US→cedear + ratio + precio ARS + valuación) es un **paso futuro acotado**, no un prerequisito de la medición.
+- **Archivos**: `config/symbols/whitelist_ar.yaml`, `config/symbols/whitelist_us.yaml`, `config/symbols/whitelist_cedear.yaml`, `data/market.db`
+- **Ver también**: **ADR-052** (señal sin mezcla de monedas; breadth insuficiente como problema separado), **ADR-043** (precedencia del market tag US en `load_merged_whitelist`), **#401** (señal dual-listed computada en USD)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

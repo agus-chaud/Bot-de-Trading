@@ -12,6 +12,11 @@ stocks:
   - WMT
   - JNJ
   - PG
+  - V
+  - UNH
+  - CAT
+  - PEP
+  - NFLX
 # ADRs argentinos listados en NYSE/NASDAQ
 adrs:
   - MELI
