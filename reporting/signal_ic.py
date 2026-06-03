@@ -44,6 +44,7 @@ from core_sim.short_term_engine import (
     ShortEngineConfig,
     compute_signal_candidates,
 )
+from data.venue_policy import pick_venue_bar, venues_for_market
 
 if TYPE_CHECKING:
     from data.storage import MarketDB
@@ -130,30 +131,55 @@ def bars_by_date_from_db(
     db: "MarketDB",
     start: date,
     end: date,
+    merged_whitelist: dict[str, str],
 ) -> dict[date, dict[str, dict[str, float]]]:
     """Load OHLCV in [start, end] indexed as ``date -> symbol -> bar``.
 
     Uses the stored ``close`` (the project's adjusted close) for every symbol.
+
+    Venue policy (see :mod:`data.venue_policy`): each symbol is read ONLY from the
+    venue that matches its ``merged_whitelist`` market tag — US-tagged symbols from
+    XNYS/US (USD), AR-tagged symbols from XBUE (ARS). This prevents the last-write-
+    wins bug that blended USD and ARS bars for dual-listed names. When both XNYS and
+    legacy US exist on the same day, XNYS wins deterministically. A symbol with no
+    bar at its allowed venue on a given day is omitted that day — never substituted.
+
+    Symbols absent from ``merged_whitelist`` are skipped entirely (no tag = no way to
+    know the correct venue, and they are not part of the traded universe anyway).
     """
     cursor = db._conn.execute(
         """
-        SELECT symbol, ts, open, high, low, close, volume
+        SELECT symbol, ts, open, high, low, close, volume, venue
         FROM ohlcv
         WHERE ts BETWEEN ? AND ?
         ORDER BY ts ASC
         """,
         (start.isoformat(), end.isoformat()),
     )
-    bars_by_date: dict[date, dict[str, dict[str, float]]] = {}
+    # Stage all venues per (day, symbol), then collapse to the policy-correct bar.
+    staged: dict[date, dict[str, dict[str, dict[str, float]]]] = {}
     for row in cursor.fetchall():
+        symbol = row["symbol"]
+        market = merged_whitelist.get(symbol)
+        if market is None:
+            continue
+        if row["venue"] not in venues_for_market(market):
+            continue
         day = date.fromisoformat(row["ts"])
-        bars_by_date.setdefault(day, {})[row["symbol"]] = {
+        staged.setdefault(day, {}).setdefault(symbol, {})[row["venue"]] = {
             "open": float(row["open"]),
             "high": float(row["high"]),
             "low": float(row["low"]),
             "close": float(row["close"]),
             "volume": float(row["volume"]),
         }
+
+    bars_by_date: dict[date, dict[str, dict[str, float]]] = {}
+    for day, by_symbol in staged.items():
+        for symbol, bars_by_venue in by_symbol.items():
+            bar = pick_venue_bar(merged_whitelist[symbol], bars_by_venue)
+            if bar is not None:
+                bars_by_date.setdefault(day, {})[symbol] = bar
     return bars_by_date
 
 
@@ -572,7 +598,7 @@ def run_signal_ic_report(
     """
     config = short_engine_config_from_policy(policy_doc)
     merged_whitelist = load_merged_whitelist(repo_root, policy_doc)
-    bars_by_date = bars_by_date_from_db(db, start, end)
+    bars_by_date = bars_by_date_from_db(db, start, end, merged_whitelist)
     trading_days = sorted(bars_by_date.keys())
 
     daily_scores = reconstruct_daily_scores(

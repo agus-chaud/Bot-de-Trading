@@ -9,8 +9,10 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from core_sim.short_term_day_runner import load_merged_whitelist
 from core_sim.short_term_pre_gate import PreGateReport, run_short_term_pre_gate
 from data.storage import MarketDB
+from data.venue_policy import venues_for_market
 from validation.report import StageResult
 
 _STAGE_NAME = "short_pre_gate"
@@ -19,38 +21,40 @@ _STAGE_NAME = "short_pre_gate"
 def _bars_from_db(
     db: MarketDB,
     trading_days: list[date],
+    merged_whitelist: dict[str, str],
 ) -> dict[date, dict[str, dict[str, float]]]:
-    """Carga todos los bars OHLCV del período desde la DB y los indexa por fecha → símbolo."""
+    """Carga los bars OHLCV del período desde la DB y los indexa por fecha → símbolo.
+
+    Política de venue (ver :mod:`data.venue_policy`): cada símbolo se lee SOLO del
+    venue que matchea su market tag en ``merged_whitelist`` — US desde XNYS/US (USD),
+    AR desde XBUE (ARS). Evita el bug de mezclar USD y ARS en los duales. Con XNYS y
+    US legacy ambos presentes gana XNYS (orden de preferencia); si un símbolo no tiene
+    barra en su venue ese día, se omite (nunca se sustituye desde otro venue). Símbolos
+    fuera de la whitelist se ignoran (sin tag no hay venue definido).
+    """
     if not trading_days:
         return {}
 
     start = min(trading_days)
     end = max(trading_days)
 
-    # Obtener todos los símbolos con datos en ese período (US + AR)
-    cursor = db._conn.execute(
-        """
-        SELECT DISTINCT symbol, venue
-        FROM ohlcv
-        WHERE ts BETWEEN ? AND ?
-        """,
-        (start.isoformat(), end.isoformat()),
-    )
-    symbol_venues: list[tuple[str, str]] = [(row["symbol"], row["venue"]) for row in cursor.fetchall()]
-
     bars_by_date: dict[date, dict[str, dict[str, float]]] = {}
-    for sym, venue in symbol_venues:
-        rows = db.get_ohlcv(sym, start, end, venue)
-        for row in rows:
-            if row.ts not in bars_by_date:
-                bars_by_date[row.ts] = {}
-            bars_by_date[row.ts][sym] = {
-                "open": row.open,
-                "high": row.high,
-                "low": row.low,
-                "close": row.close,
-                "volume": row.volume,
-            }
+    for sym, market in merged_whitelist.items():
+        seen_days: set[date] = set()
+        # venues_for_market está ordenado por preferencia (XNYS antes que US legacy):
+        # el primer venue que aporte barra para un día gana, los siguientes no la pisan.
+        for venue in venues_for_market(market):
+            for row in db.get_ohlcv(sym, start, end, venue):
+                if row.ts in seen_days:
+                    continue
+                seen_days.add(row.ts)
+                bars_by_date.setdefault(row.ts, {})[sym] = {
+                    "open": row.open,
+                    "high": row.high,
+                    "low": row.low,
+                    "close": row.close,
+                    "volume": row.volume,
+                }
 
     return bars_by_date
 
@@ -114,7 +118,8 @@ def run_short_pre_gate_stage(
             violations=[],
         )
 
-    bars_by_date = _bars_from_db(db, trading_days)
+    merged_whitelist = load_merged_whitelist(repo_root, policy_doc)
+    bars_by_date = _bars_from_db(db, trading_days, merged_whitelist)
 
     report = run_short_term_pre_gate(
         policy_doc=policy_doc,

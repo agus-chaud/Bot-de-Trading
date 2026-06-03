@@ -141,6 +141,7 @@ Esta seccion es critica porque sin calidad de datos no hay señal confiable ni r
 - **US OHLCV**: `yfinance` con retry exponencial (`data/connectors/us_connector.py`).
 - **AR OHLCV**: IOL REST API como primario y fallback Byma/yfinance (`data/connectors/ar_connector.py`).
 - **Calendarios**: `pandas_market_calendars` para sesiones US (XNYS) y AR (XBUE) (`data/calendar_builder.py`).
+- **Venue por moneda (`data/venue_policy.py`)**: fuente unica que mapea cada `market` tag a sus venues — US → `("XNYS","US")` (USD; `"US"` legacy de ADR-037, menor precedencia) y AR → `("XBUE",)` (ARS). Los lectores de `ohlcv` que arman series por simbolo (medicion de senal `reporting/signal_ic.py`, pre-gate corto) **filtran por venue** segun el tag del simbolo: nunca mezclan monedas. Regla dura: venue **por serie, no por dia**; si falta la barra del venue correcto un dia, se omite (no se sustituye con la otra moneda). La senal de los dual-listed se computa en **USD**; los AR-nativos en **ARS** (**ADR-052**).
 - **Persistencia**: SQLite en `MarketDB` (`data/storage.py`), con tablas para OHLCV, logs, fills, snapshots y kill switch.
 - **Benchmark**: `data/benchmark_returns.py` genera retornos de un benchmark mixto 20/80 (AR/US) point-in-time, sin lookahead, usando cierres disponibles hasta cada fecha de valoracion. Se usa en el informe KPI para calcular alpha vs pasivo.
 

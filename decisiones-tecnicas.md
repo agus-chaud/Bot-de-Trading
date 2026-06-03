@@ -1192,6 +1192,41 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-052 — Señal sin mezcla de monedas: lectores de `ohlcv` honran el venue del market tag (`data/venue_policy.py`)
+
+- **Fecha**: 2026-06-03
+- **Estado**: aceptada
+- **Contexto**: Los lectores de `ohlcv` que reconstruyen series por símbolo (medición de señal y pre-gate corto) hacían `SELECT ... WHERE symbol = ? AND ts BETWEEN ...` **sin filtrar venue**. Para los símbolos *dual-listed* —presentes en `ohlcv` tanto en **XNYS/US** (USD) como en **XBUE** (ARS)— eso colapsaba dos monedas distintas en una misma serie con semántica *last-write-wins* por timestamp. El retorno entre un cierre USD y un cierre ARS del mismo ticker es físicamente imposible: el caso testigo fue **KO** con "+30000%" (22519 ARS / 74 USD − 1). El bug afectaba a **13 símbolos** de la whitelist activa (AAPL, GGAL, IWM, JNJ, JPM, KO, MELI, MSFT, PG, QQQ, SPY, WMT, XOM), por lo que contaminaba **dos capas a la vez**: el sim/KPIs **pre-gate** y la **capa de medición de señal** (`reporting/signal_ic.py`). El salto artificial USD↔ARS inflaba el edge aparente sin que ningún test lo detectara (los unit tests usaban un único venue por símbolo).
+- **Decisión**:
+  - Crear `data/venue_policy.py` como **fuente única de verdad** de qué venue corresponde a cada market tag:
+    - `venues_for_market("US") -> ("XNYS", "US")`: ambos en USD; `"US"` es legacy de la migración **ADR-030/037** y queda como fallback con menor precedencia que `XNYS`.
+    - `venues_for_market("AR") -> ("XBUE",)`: ARS, serie única.
+    - `pick_venue_bar(market, bars_by_venue)`: colapsa los venues de un símbolo-día a la barra correcta del market tag, o `None` si no existe (omite el día; **nunca** sustituye con otra moneda).
+  - Los **tres** lectores filtran ahora por el venue que matchea el `market` tag que ya asigna `load_merged_whitelist` (precedencia US definida en **ADR-043**), sin hardcodear venues: todos pasan por el helper.
+    - `reporting/signal_ic.py` (`bars_by_date_from_db`)
+    - `scripts/run_short_term_pre_gate.py` (`_bars_from_db`)
+    - `validation/stages/short_pre_gate.py` (`_bars_from_db`)
+  - **Regla dura**: el venue se fija **por SERIE, no día por día**. Si falta la barra del venue correcto un día, ese día se **OMITE**; nunca se rellena con la barra del otro venue (un fallback día-a-día recrearía exactamente el bug).
+  - **Decisión de arquitectura asociada**: la señal/análisis de los dual-listed se computa en **USD (XNYS)** para que el CCL / tipo de cambio no contamine el momentum; los **AR-nativos** (Merval) usan **ARS (XBUE)**, única serie. **No** se re-etiquetó nada: los tags US existentes ya son correctos para la señal.
+- **Por qué**:
+  - Un dato en otra moneda **no es el mismo dato**: mezclar USD y ARS en una serie produce retornos imposibles que corrompen la medición de edge y el backtest, no un ruido tolerable.
+  - Centralizar en `data/venue_policy.py` evita que cada lector reinvente (y desincronice) la regla venue↔moneda; es el mismo argumento de fuente única de los conectores en **ADR-037**.
+  - Computar la señal en USD aísla el momentum del ruido cambiario: el CCL puede moverse fuerte sin que el instrumento subyacente lo haga, y no queremos que ese movimiento se cuele como "señal".
+- **Consecuencias**:
+  - Contaminación por moneda **eliminada** en ambas capas (sim/KPIs y medición de señal).
+  - Al limpiar, el **IC de señal a h=1 cayó de 0.146 (sucio) a 0.087 (limpio)**: ~40 % del edge aparente era el salto artificial USD↔ARS, no momentum real.
+  - La limpieza reveló que la **cross-section es muy fina** (mediana ~1 símbolo/día; solo 89/278 días con ≥5 nombres): la medición de señal queda **inconclusa por falta de breadth**, problema separado a resolver ampliando universo (no es un defecto de este fix).
+  - La **ejecución en pesos sobre el CEDEAR** queda como **paso POSTERIOR, no implementado**: requerirá mapeo US→cedear + ratio de conversión + precio ARS + valuación en pesos. Este ADR cubre solo la señal/medición.
+  - Tests nuevos: `tests/test_venue_policy.py`, `tests/test_signal_ic_venue_filter.py`, `tests/test_validation_short_pre_gate_venue.py` (47 passed en suites afectadas; suite completa 560 passed / 1 failed, donde el failure de `test_universe_selector` es **preexistente y fuera de scope**).
+- **Alternativas consideradas**:
+  - **ARS-first: re-etiquetar todo a XBUE y operar en pesos**: descartada — genera ripple innecesario en allocator y calendario (geo 20/80, sesiones), cuando para la **señal** los tags US ya son correctos; la ejecución en pesos es un paso futuro acotado, no un re-tag global.
+  - **Fallback venue día-a-día (usar el otro venue si falta la barra del correcto)**: descartada — recrea exactamente el bug de mezcla de monedas que estamos eliminando.
+  - **Purgar ahora el venue legacy `"US"` de la DB**: descartada — es higiene de datos aparte; `venues_for_market` ya lo tolera como fallback de menor precedencia sin mezclar moneda.
+- **Archivos**: `data/venue_policy.py` (nuevo), `reporting/signal_ic.py`, `scripts/run_short_term_pre_gate.py`, `validation/stages/short_pre_gate.py`, `tests/test_venue_policy.py` (nuevo), `tests/test_signal_ic_venue_filter.py` (nuevo), `tests/test_validation_short_pre_gate_venue.py` (nuevo)
+- **Ver también**: **ADR-030/037** (US→XNYS, código MIC), **ADR-043** (precedencia del market tag US en `load_merged_whitelist`), **ADR-051** (carry-forward en ledger: hueco ≠ cero, misma filosofía de no inventar datos)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

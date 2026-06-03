@@ -22,8 +22,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core_sim.short_term_day_runner import load_merged_whitelist  # noqa: E402
 from core_sim.short_term_pre_gate import run_short_term_pre_gate  # noqa: E402
 from data.storage import MarketDB  # noqa: E402
+from data.venue_policy import pick_venue_bar, venues_for_market  # noqa: E402
 
 
 def _weekdays_from(start: date, n: int) -> list[date]:
@@ -84,8 +86,17 @@ def _trading_days_from_db(db: MarketDB, ref: date, lookback: int) -> list[date]:
 def _bars_from_db(
     db: MarketDB,
     trading_days: list[date],
+    merged_whitelist: dict[str, str],
 ) -> dict[date, dict[str, dict[str, float]]]:
-    """Carga OHLCV del período y lo indexa como date -> symbol -> bar."""
+    """Carga OHLCV del período y lo indexa como date -> symbol -> bar.
+
+    Política de venue (ver :mod:`data.venue_policy`): cada símbolo se lee SOLO del
+    venue que matchea su market tag en ``merged_whitelist`` — US desde XNYS/US (USD),
+    AR desde XBUE (ARS). Evita el bug last-write-wins que mezclaba USD y ARS en los
+    duales. Con XNYS y US legacy el mismo día gana XNYS; si no hay barra del venue
+    correcto ese día, el símbolo se omite (no se sustituye). Símbolos fuera de la
+    whitelist se ignoran (sin tag no hay venue definido).
+    """
     if not trading_days:
         return {}
 
@@ -94,7 +105,7 @@ def _bars_from_db(
 
     cursor = db._conn.execute(
         """
-        SELECT symbol, ts, open, high, low, close, volume
+        SELECT symbol, ts, open, high, low, close, volume, venue
         FROM ohlcv
         WHERE ts BETWEEN ? AND ?
         ORDER BY ts ASC
@@ -102,18 +113,29 @@ def _bars_from_db(
         (start, end),
     )
 
-    bars_by_date: dict[date, dict[str, dict[str, float]]] = {}
+    staged: dict[date, dict[str, dict[str, dict[str, float]]]] = {}
     for row in cursor.fetchall():
+        symbol = row["symbol"]
+        market = merged_whitelist.get(symbol)
+        if market is None:
+            continue
+        if row["venue"] not in venues_for_market(market):
+            continue
         day = date.fromisoformat(row["ts"])
-        if day not in bars_by_date:
-            bars_by_date[day] = {}
-        bars_by_date[day][row["symbol"]] = {
+        staged.setdefault(day, {}).setdefault(symbol, {})[row["venue"]] = {
             "open": float(row["open"]),
             "high": float(row["high"]),
             "low": float(row["low"]),
             "close": float(row["close"]),
             "volume": float(row["volume"]),
         }
+
+    bars_by_date: dict[date, dict[str, dict[str, float]]] = {}
+    for day, by_symbol in staged.items():
+        for symbol, bars_by_venue in by_symbol.items():
+            bar = pick_venue_bar(merged_whitelist[symbol], bars_by_venue)
+            if bar is not None:
+                bars_by_date.setdefault(day, {})[symbol] = bar
 
     return bars_by_date
 
@@ -273,7 +295,8 @@ def main() -> int:
         if not days:
             print("GLOBAL FAIL: empty_trading_calendar_from_db")
             return 1
-        bars = _bars_from_db(db, days)
+        merged_whitelist = load_merged_whitelist(REPO_ROOT, policy_doc)
+        bars = _bars_from_db(db, days, merged_whitelist)
         if not bars:
             print("GLOBAL FAIL: empty_bars_from_db")
             return 1
