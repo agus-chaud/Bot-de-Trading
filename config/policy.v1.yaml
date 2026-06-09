@@ -146,6 +146,16 @@ corporate_actions:
     - split
     - dividend
 
+# Umbrales informacionales para clasificar confianza en salidas v1 (no bloqueante;
+# alineado al stage validation/data_quality: imputed_pct > 5% es warning informativo)
+data_quality_confidence:
+  high:
+    min_n_observations: 60
+    max_imputed_pct: 2.0
+  medium:
+    min_n_observations: 20
+    max_imputed_pct: 5.0
+
 # Parámetros del workflow de validación pre-live
 validation_wf:
   lookback_trading_days: 90

@@ -45,6 +45,11 @@ from core_sim.short_term_engine import (
     compute_signal_candidates,
 )
 from data.venue_policy import pick_venue_bar, venues_for_market
+from reporting.data_quality_envelope import (
+    build_data_quality_envelope,
+    flatten_bars_by_date,
+    thresholds_from_policy,
+)
 
 if TYPE_CHECKING:
     from data.storage import MarketDB
@@ -149,7 +154,7 @@ def bars_by_date_from_db(
     """
     cursor = db._conn.execute(
         """
-        SELECT symbol, ts, open, high, low, close, volume, venue
+        SELECT symbol, ts, open, high, low, close, volume, venue, imputed
         FROM ohlcv
         WHERE ts BETWEEN ? AND ?
         ORDER BY ts ASC
@@ -172,6 +177,7 @@ def bars_by_date_from_db(
             "low": float(row["low"]),
             "close": float(row["close"]),
             "volume": float(row["volume"]),
+            "imputed": bool(int(row["imputed"])),
         }
 
     bars_by_date: dict[date, dict[str, dict[str, float]]] = {}
@@ -726,12 +732,20 @@ def run_signal_ic_report(
         daily_scores, bars_by_date, h0, n_min=n_min, trading_days=trading_days
     )
 
+    data_quality = build_data_quality_envelope(
+        flatten_bars_by_date(bars_by_date),
+        stale_marks=[],
+        expected_dates=trading_days,
+        thresholds=thresholds_from_policy(policy_doc),
+    )
+
     return {
         "range": {"start": start.isoformat(), "end": end.isoformat()},
         "trading_days": len(trading_days),
         "days_with_scores": len(daily_scores),
         "whitelist_size": len(merged_whitelist),
         "skip_reason_distribution": skip_reason_distribution,
+        "data_quality": data_quality,
         "decay_curve": decay,
         "baseline_horizon": h0,
         "engine_ic": engine_ic.as_dict(),

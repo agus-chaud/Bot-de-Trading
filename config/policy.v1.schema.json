@@ -367,6 +367,16 @@
         }
       }
     },
+    "data_quality_confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["high", "medium"],
+      "description": "Umbrales informacionales para clasificar confianza en salidas v1 (no bloqueante).",
+      "properties": {
+        "high": { "$ref": "#/$defs/dataQualityConfidenceTier" },
+        "medium": { "$ref": "#/$defs/dataQualityConfidenceTier" }
+      }
+    },
     "validation_wf": {
       "type": "object",
       "additionalProperties": false,
@@ -489,6 +499,24 @@
     }
   },
   "$defs": {
+    "dataQualityConfidenceTier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min_n_observations", "max_imputed_pct"],
+      "properties": {
+        "min_n_observations": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Mínimo de barras consumidas para este nivel de confianza."
+        },
+        "max_imputed_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Máximo porcentaje de barras imputadas (0-100) para este nivel."
+        }
+      }
+    },
     "marketCosts": {
       "type": "object",
       "additionalProperties": false,
