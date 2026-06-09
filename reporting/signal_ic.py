@@ -183,6 +183,61 @@ def bars_by_date_from_db(
     return bars_by_date
 
 
+def count_skip_reasons(skipped: list[dict[str, object]]) -> dict[str, int]:
+    """Aggregate skip rows by stable ``reason`` code (deterministic key order)."""
+    counts: dict[str, int] = {}
+    for item in skipped:
+        reason = str(item.get("reason", "unknown"))
+        counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _reconstruct_one_day(
+    trading_day: date,
+    *,
+    bars_by_date: dict[date, dict[str, dict[str, float]]],
+    sorted_dates: list[date],
+    merged_whitelist: dict[str, str],
+    config: ShortEngineConfig,
+    history_cap: int,
+    market_open: dict[str, Any],
+) -> tuple[DayScores | None, list[dict[str, object]], list[dict[str, object]]]:
+    """Build one day's scores plus whitelist/signal skip audit rows."""
+    daily = bars_by_date.get(trading_day)
+    if not daily:
+        return None, [], []
+
+    history_by_symbol: dict[str, list[dict[str, float]]] = {}
+    for sym in daily:
+        history_by_symbol[sym] = build_history_before_day(
+            sym, trading_day, sorted_dates, bars_by_date, history_cap
+        )
+
+    rows, skipped_whitelist = build_market_snapshot_rows(
+        trading_day=trading_day,
+        daily_bars=daily,
+        history_by_symbol=history_by_symbol,
+        merged_whitelist=merged_whitelist,
+        market_open=market_open,
+        ste_cfg=config,
+    )
+    candidates, skipped_signal = compute_signal_candidates(rows, config)
+
+    scores = {str(c["symbol"]): float(c["signal_score"]) for c in candidates}
+    market_by_symbol = {str(c["symbol"]): str(c["market"]) for c in candidates}
+    closes = {sym: float(daily[sym]["close"]) for sym in scores if sym in daily}
+    return (
+        DayScores(
+            trading_day=trading_day,
+            scores=scores,
+            closes=closes,
+            market_by_symbol=market_by_symbol,
+        ),
+        list(skipped_whitelist),
+        list(skipped_signal),
+    )
+
+
 def reconstruct_daily_scores(
     *,
     bars_by_date: dict[date, dict[str, dict[str, float]]],
@@ -204,37 +259,72 @@ def reconstruct_daily_scores(
 
     out: list[DayScores] = []
     for d in sorted_dates:
-        daily = bars_by_date.get(d)
-        if not daily:
-            continue
-        history_by_symbol: dict[str, list[dict[str, float]]] = {}
-        for sym in daily:
-            history_by_symbol[sym] = build_history_before_day(
-                sym, d, sorted_dates, bars_by_date, cap
-            )
-
-        rows, _skipped = build_market_snapshot_rows(
-            trading_day=d,
-            daily_bars=daily,
-            history_by_symbol=history_by_symbol,
+        day_scores, _skipped_whitelist, _skipped_signal = _reconstruct_one_day(
+            d,
+            bars_by_date=bars_by_date,
+            sorted_dates=sorted_dates,
             merged_whitelist=merged_whitelist,
+            config=config,
+            history_cap=cap,
             market_open=market_open,
-            ste_cfg=config,
         )
-        candidates, _skipped_signal = compute_signal_candidates(rows, config)
-
-        scores = {str(c["symbol"]): float(c["signal_score"]) for c in candidates}
-        market_by_symbol = {str(c["symbol"]): str(c["market"]) for c in candidates}
-        closes = {sym: float(daily[sym]["close"]) for sym in scores if sym in daily}
-        out.append(
-            DayScores(
-                trading_day=d,
-                scores=scores,
-                closes=closes,
-                market_by_symbol=market_by_symbol,
-            )
-        )
+        if day_scores is not None:
+            out.append(day_scores)
     return out
+
+
+def build_skip_reason_distribution(
+    *,
+    bars_by_date: dict[date, dict[str, dict[str, float]]],
+    merged_whitelist: dict[str, str],
+    config: ShortEngineConfig,
+    history_cap: int | None = None,
+    trading_days: list[date] | None = None,
+) -> dict[str, Any]:
+    """Per-day and aggregate skip-reason counts from whitelist/data + signal filters."""
+    sorted_dates = sorted(trading_days or list(bars_by_date.keys()))
+    cap = history_cap if history_cap is not None else max(config.momentum_lookback_days + 30, 60)
+    market_open = _market_open_all_sessions()
+
+    by_day: list[dict[str, Any]] = []
+    aggregate_whitelist: dict[str, int] = {}
+    aggregate_signal: dict[str, int] = {}
+
+    for d in sorted_dates:
+        day_scores, skipped_whitelist, skipped_signal = _reconstruct_one_day(
+            d,
+            bars_by_date=bars_by_date,
+            sorted_dates=sorted_dates,
+            merged_whitelist=merged_whitelist,
+            config=config,
+            history_cap=cap,
+            market_open=market_open,
+        )
+        if day_scores is None:
+            continue
+
+        whitelist_counts = count_skip_reasons(skipped_whitelist)
+        signal_counts = count_skip_reasons(skipped_signal)
+        by_day.append(
+            {
+                "trading_day": d.isoformat(),
+                "whitelist_skips": whitelist_counts,
+                "signal_skips": signal_counts,
+                "candidates": len(day_scores.scores),
+            }
+        )
+        for reason, count in whitelist_counts.items():
+            aggregate_whitelist[reason] = aggregate_whitelist.get(reason, 0) + count
+        for reason, count in signal_counts.items():
+            aggregate_signal[reason] = aggregate_signal.get(reason, 0) + count
+
+    return {
+        "by_day": by_day,
+        "aggregate": {
+            "whitelist_skips": dict(sorted(aggregate_whitelist.items())),
+            "signal_skips": dict(sorted(aggregate_signal.items())),
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +697,12 @@ def run_signal_ic_report(
         config=config,
         trading_days=trading_days,
     )
+    skip_reason_distribution = build_skip_reason_distribution(
+        bars_by_date=bars_by_date,
+        merged_whitelist=merged_whitelist,
+        config=config,
+        trading_days=trading_days,
+    )
 
     decay = ic_decay_curve(
         daily_scores, bars_by_date, horizons=horizons, n_min=n_min,
@@ -635,6 +731,7 @@ def run_signal_ic_report(
         "trading_days": len(trading_days),
         "days_with_scores": len(daily_scores),
         "whitelist_size": len(merged_whitelist),
+        "skip_reason_distribution": skip_reason_distribution,
         "decay_curve": decay,
         "baseline_horizon": h0,
         "engine_ic": engine_ic.as_dict(),

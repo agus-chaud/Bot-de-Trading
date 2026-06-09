@@ -22,7 +22,9 @@ from reporting.signal_ic import (
     DayScores,
     bars_by_date_from_db,
     build_history_before_day,
+    build_skip_reason_distribution,
     compute_rank_ic,
+    count_skip_reasons,
     forward_return,
     hit_rate_at_k,
     ic_decay_curve,
@@ -138,6 +140,41 @@ def test_reconstructed_scores_reproduce_engine_output_exactly():
     # Assert: identical symbols and identical score values.
     assert recon.scores == expected
     assert set(recon.scores) == {"AAA", "BBB"}
+
+
+def test_count_skip_reasons_aggregates_stable_reason_codes():
+    skipped = [
+        {"symbol": "A", "reason": "rsi_overbought"},
+        {"symbol": "B", "reason": "rsi_overbought"},
+        {"symbol": "C", "reason": "liquidity_below_threshold"},
+    ]
+    assert count_skip_reasons(skipped) == {
+        "liquidity_below_threshold": 1,
+        "rsi_overbought": 2,
+    }
+
+
+def test_skip_reason_distribution_reports_signal_filter_rejections():
+    """Rank-IC reports must explain poor scores via per-day skip reason counts."""
+    days = _weekdays(date(2025, 1, 1), 30)
+    cfg = _cfg(momentum_lookback_days=5)
+    series = {
+        "UP": [100.0 + i for i in range(30)],
+        "DOWN": [100.0 - i for i in range(30)],
+    }
+    bars = _build_bars(days, series, {"UP": "US", "DOWN": "US"})
+    dist = build_skip_reason_distribution(
+        bars_by_date=bars,
+        merged_whitelist={"UP": "US", "DOWN": "US"},
+        config=cfg,
+        trading_days=days,
+    )
+
+    assert dist["aggregate"]["signal_skips"].get("non_positive_momentum", 0) >= 1
+    assert any(
+        day["signal_skips"].get("non_positive_momentum", 0) >= 1
+        for day in dist["by_day"]
+    )
 
 
 def test_reconstruction_only_keeps_positive_momentum_survivors():

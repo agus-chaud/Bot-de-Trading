@@ -180,10 +180,16 @@ def test_short_term_pipeline_end_to_end_produces_fills():
     assert isinstance(proposed, dict)
     assert proposed["sizing_metrics"]["intents_generated"] >= 1
     assert len(proposed["broker_orders"]) >= 1
+    assert "skipped_signal" in proposed
+    assert "redistribution_log" in proposed
+    assert proposed["allocation_headroom"] is not None
+    if proposed["orders_intent"]:
+        assert "drivers" in proposed["orders_intent"][0]
 
     risk = events[3].payload
-    assert isinstance(risk, list)
-    assert len(risk) >= 1
+    assert isinstance(risk, dict)
+    assert len(risk["approved_orders"]) >= 1
+    assert risk["risk_audit"]["guardrail_allowed"] is True
 
     fills = events[4].payload
     assert len(fills) >= 1
@@ -258,7 +264,8 @@ def test_short_term_risk_kill_switch_blocks_orders_same_month():
         pipeline_context={"history_by_symbol": history},
     )
 
-    assert events[3].payload == []
+    assert events[3].payload["approved_orders"] == []
+    assert events[3].payload["risk_audit"]["guardrail_reason"] == "short_monthly_kill_switch"
     assert events[4].payload == []
 
 
@@ -297,7 +304,8 @@ def test_no_trade_window_blocks_in_first_minutes():
     )
     assert events[2].payload.get("sizing_metrics", {}).get("halt_reason") == "no_trade_window"
     assert events[2].payload["broker_orders"] == []
-    assert events[3].payload == []
+    assert events[3].payload["approved_orders"] == []
+    assert events[3].payload["risk_audit"]["guardrail_reason"] == "no_trade_window"
 
 
 def test_halt_data_quality_on_invalid_bar_in_daily_feed():
@@ -466,6 +474,63 @@ def test_stop_loss_order_side_is_uppercase_sell():
     assert stop_loss_orders[0]["side"] == "SELL", (
         "stop-loss side must be 'SELL' (uppercase) — PaperBrokerSim rejects any other value"
     )
+
+
+def test_propose_orders_exposes_skipped_signal_with_drivers_at_edge():
+    """OrdersProposed payload must surface signal skip audit for agent consumption."""
+    policy = _load_policy()
+    ledger = PortfolioLedger(starting_cash=100_000.0)
+    handlers = create_short_term_pipeline_handlers(policy, REPO_ROOT, ledger, db=None)
+    history = {
+        "SPY": _build_spy_history(),
+        "QQQ": _build_qqq_history_declining(),
+    }
+    daily_bars = {
+        "SPY": {"open": 129.0, "high": 131.0, "low": 128.0, "close": 130.0, "volume": 80_000_000.0},
+        "QQQ": {"open": 176.0, "high": 177.0, "low": 175.0, "close": 175.0, "volume": 30_000_000.0},
+    }
+    trading_day = date(2026, 4, 15)
+    signals = handlers["generate_signals"](
+        trading_day=trading_day,
+        daily_bars=daily_bars,
+        market_open={"is_us_session": True, "is_ar_business_day": True},
+        history_by_symbol=history,
+    )
+    proposed = handlers["propose_orders"](
+        trading_day=trading_day,
+        daily_bars=daily_bars,
+        signals=signals,
+    )
+
+    qqq_skips = [s for s in proposed["skipped_signal"] if s.get("symbol") == "QQQ"]
+    assert qqq_skips
+    assert isinstance(qqq_skips[0]["reason"], str)
+    assert "drivers" in qqq_skips[0]
+    assert qqq_skips[0]["drivers"]["skip_reason"] == qqq_skips[0]["reason"]
+    assert qqq_skips[0]["reason"] in qqq_skips[0]["drivers"]["failed_filters"]
+
+
+def test_risk_check_returns_blocked_orders_audit_when_guardrail_blocks():
+    policy = _load_policy()
+    ledger = PortfolioLedger(starting_cash=100_000.0)
+    handlers = create_short_term_pipeline_handlers(policy, REPO_ROOT, ledger, db=None)
+    proposed = {
+        "broker_orders": [{"symbol": "SPY", "side": "BUY", "qty": 1.0, "market": "US", "bucket": "short"}],
+        "orders_intent": [],
+    }
+    result = handlers["risk_check"](
+        trading_day=date(2026, 4, 15),
+        daily_bars={"SPY": {"close": 100.0}},
+        proposed_orders=proposed,
+        signals={"risk_flags": {"data_quality_ok": False, "halt_on_data_quality": True}},
+        session_minutes_from_open=5,
+    )
+
+    assert result["approved_orders"] == []
+    assert result["risk_audit"]["guardrail_allowed"] is False
+    assert result["risk_audit"]["guardrail_reason"] == "halt_data_quality"
+    assert len(result["risk_audit"]["blocked_orders"]) == 1
+    assert result["risk_audit"]["blocked_orders"][0]["block_reason"] == "halt_data_quality"
 
 
 def test_check_risk_with_optional_db_maintains_decision_order_without_db():

@@ -350,7 +350,8 @@ def create_short_term_pipeline_handlers(
         "fallback_pct_ar": float(_sl_raw.get("fallback_pct_ar", -0.08)),
     }
 
-    def _empty_proposal(halt_reason: str) -> dict[str, Any]:
+    def _empty_proposal(halt_reason: str, *, signals: dict[str, Any] | None = None) -> dict[str, Any]:
+        sig = signals if isinstance(signals, dict) else {}
         return {
             "orders_intent": [],
             "broker_orders": [],
@@ -361,7 +362,22 @@ def create_short_term_pipeline_handlers(
                 "symbols_selected": 0,
                 "halt_reason": halt_reason,
             },
+            "skipped_signal": list(sig.get("skipped_signal") or []),
+            "skipped_whitelist_or_data": list(sig.get("skipped_whitelist_or_data") or []),
+            "redistribution_log": [],
+            "allocation_headroom": None,
         }
+
+    def _serialize_redistribution_log(alloc: Any) -> list[dict[str, object]]:
+        return [
+            {
+                "from_bucket": entry.from_bucket,
+                "to_bucket": entry.to_bucket,
+                "amount": float(entry.amount),
+                "reason": entry.reason,
+            }
+            for entry in alloc.redistribution_log
+        ]
 
     from .risk_guardrails import GuardrailResult
 
@@ -453,7 +469,7 @@ def create_short_term_pipeline_handlers(
     def propose_orders(**ctx: Any) -> dict[str, Any]:
         signals = ctx["signals"]
         if not isinstance(signals, dict):
-            return _empty_proposal("invalid_signals")
+            return _empty_proposal("invalid_signals", signals=None)
         flags = signals.get("risk_flags") or {}
 
         selected = signals.get("selected") or []
@@ -481,7 +497,7 @@ def create_short_term_pipeline_handlers(
                 orders_filled=0,
                 kill_switch_active=(guardrail.reason == "short_monthly_kill_switch"),
             )
-            return _empty_proposal(guardrail.reason)
+            return _empty_proposal(guardrail.reason, signals=signals)
 
         alloc = compute_allocation(
             equity_total=equity_total,
@@ -610,9 +626,16 @@ def create_short_term_pipeline_handlers(
             "skip_sizing": skip_sizing,
             "sizing_metrics": metrics,
             "rsi_today_by_symbol": rsi_today_by_symbol,
+            "skipped_signal": list(signals.get("skipped_signal") or []),
+            "skipped_whitelist_or_data": list(signals.get("skipped_whitelist_or_data") or []),
+            "redistribution_log": _serialize_redistribution_log(alloc),
+            "allocation_headroom": {
+                "target_by_bucket": dict(alloc.target_by_bucket),
+                "headroom_by_bucket": dict(alloc.headroom_by_bucket),
+            },
         }
 
-    def risk_check(**ctx: Any) -> list[dict[str, str | float]]:
+    def risk_check(**ctx: Any) -> dict[str, Any]:
         proposed = ctx["proposed_orders"]
         if isinstance(proposed, dict):
             broker_orders = proposed.get("broker_orders") or []
@@ -638,15 +661,29 @@ def create_short_term_pipeline_handlers(
 
         merged_map, _ = _symbol_ctx()
         approved: list[dict[str, str | float]] = list(stop_loss_orders)
+        blocked: list[dict[str, object]] = []
         if guardrail.allowed:
             for order in normal_orders:
                 sym = str(order["symbol"]).strip().upper()
                 if sym not in merged_map:
+                    blocked.append({**order, "block_reason": "symbol_not_in_whitelist"})
                     continue
                 if merged_map[sym] != str(order.get("market", "")):
+                    blocked.append({**order, "block_reason": "market_tag_mismatch"})
                     continue
                 approved.append(order)
-        return approved
+        else:
+            for order in normal_orders:
+                blocked.append({**order, "block_reason": guardrail.reason})
+
+        return {
+            "approved_orders": approved,
+            "risk_audit": {
+                "guardrail_allowed": guardrail.allowed,
+                "guardrail_reason": guardrail.reason,
+                "blocked_orders": blocked,
+            },
+        }
 
     return {
         "generate_signals": generate_signals,
