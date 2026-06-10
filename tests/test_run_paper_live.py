@@ -128,6 +128,44 @@ class TestComputeTradingDaysGap:
         result = compute_trading_days_gap(last, target)
         assert result == [date(2026, 5, 11)]
 
+    def test_us_calendar_excludes_memorial_day_from_gap(self, policy_doc):
+        """Memorial Day (2026-05-25) is not a session in either market."""
+        store = load_required_calendar_store(policy_doc)
+        last = date(2026, 5, 22)
+        target = date(2026, 5, 28)
+
+        calendar_gap = compute_trading_days_gap(
+            last, target, calendar_store=store,
+        )
+        weekday_gap = compute_trading_days_gap(last, target)
+
+        assert calendar_gap == [
+            date(2026, 5, 26),
+            date(2026, 5, 27),
+            date(2026, 5, 28),
+        ]
+        assert weekday_gap == [
+            date(2026, 5, 25),
+            date(2026, 5, 26),
+            date(2026, 5, 27),
+            date(2026, 5, 28),
+        ]
+        assert len(calendar_gap) == 3
+        assert len(weekday_gap) == 4
+
+    def test_gap_includes_ar_only_day_when_us_closed(self, policy_doc):
+        """2026-06-19: AR open, US closed — counts for AR local, not for US-only."""
+        store = load_required_calendar_store(policy_doc)
+        last = date(2026, 6, 18)
+        target = date(2026, 6, 22)
+
+        operational_gap = compute_trading_days_gap(
+            last, target, calendar_store=store,
+        )
+        assert operational_gap == [date(2026, 6, 19), date(2026, 6, 22)]
+        assert store.is_ar_business_day(date(2026, 6, 19))
+        assert not store.is_us_session(date(2026, 6, 19))
+
 
 # ===========================================================================
 # 3.2 — F3 exit code
@@ -193,6 +231,74 @@ class TestF3ExitCode:
             result = main()
 
         assert result != 2
+
+
+class TestF3WithRealCalendar:
+    """F3 gate uses union of US sessions + AR business days (audit H3 / T1.4)."""
+
+    def test_memorial_day_gap_within_f3_with_calendar_not_weekdays(
+        self, tmp_path: Path, policy_doc,
+    ):
+        """4 weekdays incl. Memorial Day → exit 2; 3 US sessions → within F3."""
+        db_path = tmp_path / "f3_calendar.db"
+        real_db = MarketDB(str(db_path))
+
+        last = date(2026, 5, 22)
+        snap = {
+            "equity_total": 1000.0, "equity_short": 300.0,
+            "equity_long": 700.0, "cash": 500.0,
+            "realized_pnl_total": 0.0, "unrealized_pnl_total": 0.0,
+            "costs_day": 0.0, "mv_us": 800.0, "mv_ar": 200.0,
+        }
+        real_db.persist_snapshot("paper_live", last, snap, short_cash=0.0)
+
+        target = date(2026, 5, 28)
+        symbols = ["SPY", "QQQ"]
+        days = _weekdays_from(date(2026, 3, 1), 80)
+        _seed_ohlcv(real_db, symbols, days)
+
+        test_args = [
+            "run_paper_live.py",
+            "--date", target.isoformat(),
+            "--db", str(db_path),
+            "--policy", str(REPO_ROOT / "config" / "policy.v1.yaml"),
+        ]
+        with patch.object(sys, "argv", test_args):
+            result = main()
+
+        assert result != 2
+
+    def test_main_exits_2_when_calendar_gap_exceeds_f3(
+        self, tmp_path: Path, policy_doc,
+    ):
+        """5 US sessions in gap → exit 2 even if some calendar days are holidays."""
+        db_path = tmp_path / "f3_calendar_violation.db"
+        real_db = MarketDB(str(db_path))
+
+        last = date(2026, 5, 14)
+        snap = {
+            "equity_total": 1000.0, "equity_short": 300.0,
+            "equity_long": 700.0, "cash": 500.0,
+            "realized_pnl_total": 0.0, "unrealized_pnl_total": 0.0,
+            "costs_day": 0.0, "mv_us": 800.0, "mv_ar": 200.0,
+        }
+        real_db.persist_snapshot("paper_live", last, snap, short_cash=0.0)
+
+        target = date(2026, 5, 22)
+
+        test_args = [
+            "run_paper_live.py",
+            "--date", target.isoformat(),
+            "--db", str(db_path),
+            "--policy", str(REPO_ROOT / "config" / "policy.v1.yaml"),
+        ]
+        with patch.object(sys, "argv", test_args):
+            result = main()
+
+        store = load_required_calendar_store(policy_doc)
+        gap = compute_trading_days_gap(last, target, calendar_store=store)
+        assert len(gap) > 3
+        assert result == 2
 
 
 # ===========================================================================

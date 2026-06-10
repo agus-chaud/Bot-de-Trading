@@ -91,9 +91,21 @@ def _resolve_calendar_store(
 # ---------------------------------------------------------------------------
 
 
-def compute_trading_days_gap(last_day: date | None, target_day: date) -> list[date]:
-    """Return weekdays from last_day+1 through target_day inclusive.
+def _is_operational_trading_day(d: date, calendar_store: TradingCalendarStore) -> bool:
+    """True when at least one paper-live market operates (US/CEDEAR or AR local)."""
+    return calendar_store.is_us_session(d) or calendar_store.is_ar_business_day(d)
 
+
+def compute_trading_days_gap(
+    last_day: date | None,
+    target_day: date,
+    *,
+    calendar_store: TradingCalendarStore | None = None,
+) -> list[date]:
+    """Return trading days from last_day+1 through target_day inclusive.
+
+    With *calendar_store*: union of US sessions (US + CEDEAR short signal) and AR
+    business days (panel local). Without calendar: weekdays (Mon–Fri) fallback.
     If last_day is None (first run), returns [target_day].
     """
     if last_day is None:
@@ -101,7 +113,10 @@ def compute_trading_days_gap(last_day: date | None, target_day: date) -> list[da
     days: list[date] = []
     d = last_day + timedelta(days=1)
     while d <= target_day:
-        if d.weekday() < 5:
+        if calendar_store is not None:
+            if _is_operational_trading_day(d, calendar_store):
+                days.append(d)
+        elif d.weekday() < 5:
             days.append(d)
         d += timedelta(days=1)
     return days
@@ -452,8 +467,25 @@ def main() -> int:
 
     db = MarketDB(str(db_path))
 
+    calendar_store: TradingCalendarStore | None = None
+    if args.no_calendar:
+        logger.warning(
+            "--no-calendar: running without TradingCalendarStore; "
+            "session flags default to permissive mode and F3 uses weekday fallback."
+        )
+    else:
+        try:
+            calendar_store = load_required_calendar_store(policy_doc)
+        except (FileNotFoundError, CalendarConfigError) as exc:
+            logger.error("Calendar configuration error: %s", exc)
+            return 1
+
     last_day = db.get_last_snapshot_day("paper_live")
-    gap_days = compute_trading_days_gap(last_day, target_day)
+    gap_days = compute_trading_days_gap(
+        last_day,
+        target_day,
+        calendar_store=calendar_store,
+    )
 
     if len(gap_days) > F3_MAX_GAP:
         logger.error(
@@ -469,19 +501,6 @@ def main() -> int:
     if not gap_days:
         logger.info("No gap — target day %s already processed.", target_day)
         return 0
-
-    calendar_store: TradingCalendarStore | None = None
-    if args.no_calendar:
-        logger.warning(
-            "--no-calendar: running without TradingCalendarStore; "
-            "session flags default to permissive mode."
-        )
-    else:
-        try:
-            calendar_store = load_required_calendar_store(policy_doc)
-        except (FileNotFoundError, CalendarConfigError) as exc:
-            logger.error("Calendar configuration error: %s", exc)
-            return 1
 
     logger.info(
         "Processing %d day(s): %s → %s",
