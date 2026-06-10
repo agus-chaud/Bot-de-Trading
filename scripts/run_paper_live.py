@@ -3,7 +3,7 @@
 
 Exit codes:
   0 — success, all days processed
-  1 — runtime error (missing trading calendar, data missing, pipeline crash)
+  1 — runtime error (missing trading calendar, portfolio meta conflict, data missing, pipeline crash)
   2 — gap > 3 trading days (F3 policy), manual intervention needed
 """
 
@@ -34,11 +34,14 @@ from core_sim.long_term_monthly_runner import create_long_term_monthly_backteste
 from core_sim.paper_broker_sim import PaperBrokerSim  # noqa: E402
 from core_sim.short_term_day_runner import create_short_term_daily_backtester  # noqa: E402
 from core_sim.short_term_pre_gate import build_history_before_day  # noqa: E402
-from data.storage import MarketDB  # noqa: E402
+from data.storage import MarketDB, PortfolioMetaConflictError  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 F3_MAX_GAP = 3
+PAPER_LIVE_MODE = "paper_live"
+DEFAULT_STARTING_CASH_ARS = 3_000_000.0
+DEFAULT_REPORTING_CURRENCY = "ARS"
 
 
 class CalendarConfigError(Exception):
@@ -202,16 +205,26 @@ def run_catch_up(
     policy_doc: dict[str, Any],
     initial_cash: float,
     *,
+    currency: str = DEFAULT_REPORTING_CURRENCY,
     calendar_store: TradingCalendarStore | None = None,
     no_calendar: bool = False,
     enable_long_engine: bool = False,
+    init_portfolio_meta: bool = False,
 ) -> None:
     """Process each gap day sequentially: replay → load bars → run pipeline → persist.
 
     When enable_long_engine=True, runs short pipeline first, then long pipeline
     on the same ledger/broker. Fills from both sleeves are persisted together.
     """
-    mode = "paper_live"
+    mode = PAPER_LIVE_MODE
+    meta = db.ensure_portfolio_meta(
+        mode=mode,
+        starting_cash=initial_cash,
+        currency=currency,
+        inception_date=gap_days[0],
+        allow_legacy_init=init_portfolio_meta,
+    )
+    initial_cash = meta.starting_cash
     momentum = int(policy_doc["short_term_engine"]["momentum_lookback_days"])
     history_cap = max(momentum + 30, 60)
 
@@ -373,8 +386,15 @@ def main() -> int:
     parser.add_argument(
         "--initial-cash",
         type=float,
-        default=1000.0,
-        help="Starting cash for ledger replay.",
+        default=DEFAULT_STARTING_CASH_ARS,
+        help=f"Starting cash for ledger replay ({DEFAULT_REPORTING_CURRENCY} default).",
+    )
+    parser.add_argument(
+        "--currency",
+        type=str,
+        default=DEFAULT_REPORTING_CURRENCY,
+        choices=("ARS", "USD"),
+        help="Reporting currency for portfolio_meta (locked on first run).",
     )
     parser.add_argument(
         "--policy",
@@ -393,6 +413,15 @@ def main() -> int:
         action="store_true",
         default=False,
         help="Skip trading calendar (tests only). Disables session-aware no-trade checks.",
+    )
+    parser.add_argument(
+        "--init-portfolio-meta",
+        action="store_true",
+        default=False,
+        help=(
+            "One-time bootstrap when snapshots exist without portfolio_meta "
+            "(legacy DB). Requires matching --initial-cash and --currency."
+        ),
     )
     args = parser.parse_args()
 
@@ -469,10 +498,15 @@ def main() -> int:
             gap_days,
             policy_doc,
             args.initial_cash,
+            currency=args.currency,
             calendar_store=calendar_store,
             no_calendar=args.no_calendar,
             enable_long_engine=args.enable_long_engine,
+            init_portfolio_meta=args.init_portfolio_meta,
         )
+    except PortfolioMetaConflictError as exc:
+        logger.error("Portfolio meta conflict: %s", exc)
+        return 1
     except Exception as exc:
         logger.exception("Runtime error during paper-live run: %s", exc)
         return 1

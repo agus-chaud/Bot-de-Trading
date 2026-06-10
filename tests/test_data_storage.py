@@ -6,10 +6,11 @@ import json
 from datetime import date
 
 import pytest
+import sqlite3
 
 from core_sim.ledger import PortfolioLedger
-from data.schema import CorporateActionRow, OHLCVRow
-from data.storage import KillSwitchState, MarketDB
+from data.schema import CorporateActionRow, OHLCVRow, PortfolioMeta
+from data.storage import KillSwitchState, MarketDB, PortfolioMetaConflictError
 
 
 @pytest.fixture
@@ -416,6 +417,95 @@ class TestGetPaperFills:
         rows = db.get_paper_fills(mode="paper_live")
         assert all(r["mode"] == "paper_live" for r in rows)
         assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# REQ-5b: portfolio_meta (T1.1)
+# ---------------------------------------------------------------------------
+
+class TestPortfolioMeta:
+    _MODE = "paper_live"
+    _DAY = date(2026, 3, 2)
+
+    def test_first_run_inserts_meta(self, db):
+        meta = db.ensure_portfolio_meta(
+            self._MODE, starting_cash=3_000_000.0, currency="ARS", inception_date=self._DAY
+        )
+        assert meta.starting_cash == pytest.approx(3_000_000.0)
+        assert meta.currency == "ARS"
+        assert meta.inception_date == self._DAY
+
+        loaded = db.get_portfolio_meta(self._MODE)
+        assert loaded == meta
+
+    def test_second_run_with_same_values_succeeds(self, db):
+        db.ensure_portfolio_meta(
+            self._MODE, starting_cash=1_000_000.0, currency="ARS", inception_date=self._DAY
+        )
+        again = db.ensure_portfolio_meta(
+            self._MODE, starting_cash=1_000_000.0, currency="ARS", inception_date=date(2026, 6, 1)
+        )
+        assert again.starting_cash == pytest.approx(1_000_000.0)
+        assert db.get_portfolio_meta(self._MODE).inception_date == self._DAY
+
+    def test_starting_cash_mismatch_raises(self, db):
+        db.ensure_portfolio_meta(
+            self._MODE, starting_cash=3_000_000.0, currency="ARS", inception_date=self._DAY
+        )
+        with pytest.raises(PortfolioMetaConflictError, match="starting_cash mismatch"):
+            db.ensure_portfolio_meta(
+                self._MODE, starting_cash=2_000_000.0, currency="ARS", inception_date=self._DAY
+            )
+
+    def test_currency_mismatch_raises(self, db):
+        db.ensure_portfolio_meta(
+            self._MODE, starting_cash=10_000.0, currency="USD", inception_date=self._DAY
+        )
+        with pytest.raises(PortfolioMetaConflictError, match="currency mismatch"):
+            db.ensure_portfolio_meta(
+                self._MODE, starting_cash=10_000.0, currency="ARS", inception_date=self._DAY
+            )
+
+    def test_existing_snapshots_without_meta_requires_legacy_flag(self, db):
+        snap = {
+            "equity_total": 1000.0,
+            "equity_short": 300.0,
+            "equity_long": 700.0,
+            "cash": 500.0,
+            "realized_pnl_total": 0.0,
+            "unrealized_pnl_total": 0.0,
+            "costs_day": 0.0,
+            "mv_us": 800.0,
+            "mv_ar": 200.0,
+        }
+        db.persist_snapshot(self._MODE, self._DAY, snap, short_cash=150.0)
+        with pytest.raises(PortfolioMetaConflictError, match="snapshots exist"):
+            db.ensure_portfolio_meta(
+                self._MODE, starting_cash=1000.0, currency="USD", inception_date=self._DAY
+            )
+        boot = db.ensure_portfolio_meta(
+            self._MODE,
+            starting_cash=1000.0,
+            currency="USD",
+            inception_date=self._DAY,
+            allow_legacy_init=True,
+        )
+        assert boot.starting_cash == pytest.approx(1000.0)
+        assert boot.currency == "USD"
+
+    def test_insert_is_idempotent_via_ensure_only(self, db):
+        db.ensure_portfolio_meta(
+            self._MODE, starting_cash=500_000.0, currency="ARS", inception_date=self._DAY
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            db.insert_portfolio_meta(
+                PortfolioMeta(
+                    mode=self._MODE,
+                    starting_cash=500_000.0,
+                    currency="ARS",
+                    inception_date=self._DAY,
+                )
+            )
 
 
 # ---------------------------------------------------------------------------

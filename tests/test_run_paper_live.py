@@ -18,7 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from data.schema import OHLCVRow
-from data.storage import MarketDB
+from data.storage import MarketDB, PortfolioMetaConflictError
 from scripts.run_paper_live import (
     _build_long_pipeline_context,
     _overlay_ar_long_sleeve_bars_from_db,
@@ -515,6 +515,86 @@ class TestMandatoryCalendar:
         with patch.object(sys, "argv", test_args):
             assert main() == 0
         assert db.get_last_snapshot_day("paper_live") == date(2026, 4, 15)
+
+
+# ===========================================================================
+# 3.9 — portfolio_meta persistence (T1.1)
+# ===========================================================================
+
+
+class TestPortfolioMetaPersistence:
+    """starting_cash and currency locked after first run (audit C1)."""
+
+    def test_run_catch_up_persists_portfolio_meta(self, tmp_path: Path, policy_doc):
+        db_path = tmp_path / "meta.db"
+        db = MarketDB(str(db_path))
+        symbols = ["SPY", "QQQ"]
+        days = _weekdays_from(date(2026, 2, 1), 80)
+        _seed_ohlcv(db, symbols, days)
+
+        run_catch_up(
+            db,
+            [date(2026, 4, 15)],
+            policy_doc,
+            initial_cash=2_500_000.0,
+            currency="ARS",
+        )
+
+        meta = db.get_portfolio_meta("paper_live")
+        assert meta is not None
+        assert meta.starting_cash == pytest.approx(2_500_000.0)
+        assert meta.currency == "ARS"
+        assert meta.inception_date == date(2026, 4, 15)
+
+    def test_second_run_rejects_different_starting_cash(self, tmp_path: Path, policy_doc):
+        db_path = tmp_path / "meta_mismatch.db"
+        db = MarketDB(str(db_path))
+        symbols = ["SPY", "QQQ"]
+        days = _weekdays_from(date(2026, 2, 1), 80)
+        _seed_ohlcv(db, symbols, days)
+
+        run_catch_up(
+            db,
+            [date(2026, 4, 15)],
+            policy_doc,
+            initial_cash=1_000_000.0,
+            currency="ARS",
+        )
+
+        with pytest.raises(PortfolioMetaConflictError):
+            run_catch_up(
+                db,
+                [date(2026, 4, 16)],
+                policy_doc,
+                initial_cash=2_000_000.0,
+                currency="ARS",
+                no_calendar=True,
+            )
+
+    def test_main_exits_1_on_portfolio_meta_conflict(self, tmp_path: Path, policy_doc):
+        db_path = tmp_path / "main_meta.db"
+        db = MarketDB(str(db_path))
+        symbols = ["SPY", "QQQ"]
+        days = _weekdays_from(date(2026, 2, 1), 80)
+        _seed_ohlcv(db, symbols, days)
+        run_catch_up(
+            db,
+            [date(2026, 4, 14)],
+            policy_doc,
+            initial_cash=500_000.0,
+            currency="ARS",
+        )
+
+        test_args = [
+            "run_paper_live.py",
+            "--date", "2026-04-15",
+            "--db", str(db_path),
+            "--policy", str(REPO_ROOT / "config" / "policy.v1.yaml"),
+            "--initial-cash", "999999",
+            "--currency", "ARS",
+        ]
+        with patch.object(sys, "argv", test_args):
+            assert main() == 1
 
 
 # ===========================================================================

@@ -122,6 +122,7 @@ El proyecto usa dos ramas con responsabilidades distintas:
 - `--no-calendar`: opt-out explícito para tests; desactiva flags de sesión en `MarketOpen` (modo permisivo).
 - Regenerar calendario: `python scripts/build_trading_days_yaml.py`. Stub de tests: `tests/fixtures/calendars/trading_days_stub.v1.yaml`.
 - Golden replay (T0.2): `tests/fixtures/replay_golden/` + `tests/test_replay_golden.py` — caracterización de `replay_ledger_from_fills` antes de cambios en persistencia de capital.
+- **`portfolio_meta` (T1.1)**: tabla SQLite `portfolio_meta` — `starting_cash`, `currency` (`ARS`/`USD`), `inception_date` por `mode`. Primera corrida escribe; siguientes validan. Default CLI: 3_000_000 ARS.
 
 ## Convenciones
 

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from data.schema import CorporateActionRow, OHLCVRow, UniverseSnapshotRow
+from data.schema import CorporateActionRow, OHLCVRow, PortfolioMeta, UniverseSnapshotRow
 
 if TYPE_CHECKING:
     from core_sim.ledger import PortfolioLedger
@@ -29,6 +29,11 @@ class KillSwitchState:
     auto_reset: bool
 
 logger = logging.getLogger(__name__)
+
+
+class PortfolioMetaConflictError(Exception):
+    """CLI starting_cash/currency does not match persisted portfolio_meta."""
+
 
 _CREATE_OHLCV = """
 CREATE TABLE IF NOT EXISTS ohlcv (
@@ -120,6 +125,16 @@ CREATE INDEX IF NOT EXISTS idx_pf_symbol_day  ON paper_fills(symbol, trading_day
 CREATE INDEX IF NOT EXISTS idx_pf_run         ON paper_fills(run_id);
 """
 
+_CREATE_PORTFOLIO_META = """
+CREATE TABLE IF NOT EXISTS portfolio_meta (
+    mode           TEXT PRIMARY KEY CHECK(mode IN ('paper_live', 'backtest')),
+    starting_cash  REAL NOT NULL,
+    currency       TEXT NOT NULL CHECK(currency IN ('ARS', 'USD')),
+    inception_date TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+);
+"""
+
 _CREATE_PAPER_SNAPSHOTS = """
 CREATE TABLE IF NOT EXISTS paper_snapshots (
     id                     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -208,6 +223,7 @@ class MarketDB:
                 + _CREATE_FETCH_LOG
                 + _CREATE_KILL_SWITCH_LOG
                 + _CREATE_PAPER_FILLS
+                + _CREATE_PORTFOLIO_META
                 + _CREATE_PAPER_SNAPSHOTS
                 + _CREATE_UNIVERSE_SNAPSHOTS
                 + _CREATE_IOL_API_USAGE
@@ -697,6 +713,100 @@ class MarketDB:
         if row and row["last_day"]:
             return date.fromisoformat(row["last_day"])
         return None
+
+    def get_portfolio_meta(self, mode: str) -> PortfolioMeta | None:
+        """Return persisted inception capital for *mode*, or None if never initialized."""
+        cursor = self._conn.execute(
+            "SELECT mode, starting_cash, currency, inception_date FROM portfolio_meta WHERE mode = ?",
+            (mode,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return PortfolioMeta(
+            mode=str(row["mode"]),
+            starting_cash=float(row["starting_cash"]),
+            currency=str(row["currency"]),
+            inception_date=date.fromisoformat(row["inception_date"]),
+        )
+
+    def insert_portfolio_meta(self, meta: PortfolioMeta) -> None:
+        """Persist portfolio inception metadata (first run only)."""
+        created_at = datetime.now(tz=timezone.utc).isoformat()
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO portfolio_meta (mode, starting_cash, currency, inception_date, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    meta.mode,
+                    float(meta.starting_cash),
+                    meta.currency.upper(),
+                    meta.inception_date.isoformat(),
+                    created_at,
+                ),
+            )
+
+    def ensure_portfolio_meta(
+        self,
+        mode: str,
+        starting_cash: float,
+        currency: str,
+        inception_date: date,
+        *,
+        allow_legacy_init: bool = False,
+    ) -> PortfolioMeta:
+        """Validate CLI capital against DB or initialize on first run."""
+        if starting_cash < 0:
+            raise ValueError("starting_cash must be >= 0")
+        currency_norm = currency.upper()
+        if currency_norm not in {"ARS", "USD"}:
+            raise ValueError(f"unsupported currency: {currency!r}")
+
+        existing = self.get_portfolio_meta(mode)
+        if existing is None:
+            if self.get_last_snapshot_day(mode) is not None and not allow_legacy_init:
+                raise PortfolioMetaConflictError(
+                    f"portfolio_meta missing for mode={mode} but snapshots exist; "
+                    "pass --init-portfolio-meta with --initial-cash and --currency "
+                    "matching historical inception (one-time legacy bootstrap)"
+                )
+            if self.get_last_snapshot_day(mode) is not None:
+                logger.warning(
+                    "Legacy bootstrap: initializing portfolio_meta on existing snapshots "
+                    "mode=%s starting_cash=%s %s",
+                    mode,
+                    starting_cash,
+                    currency_norm,
+                )
+            meta = PortfolioMeta(
+                mode=mode,
+                starting_cash=float(starting_cash),
+                currency=currency_norm,
+                inception_date=inception_date,
+            )
+            self.insert_portfolio_meta(meta)
+            logger.info(
+                "Initialized portfolio_meta mode=%s starting_cash=%s %s inception=%s",
+                mode,
+                meta.starting_cash,
+                meta.currency,
+                meta.inception_date.isoformat(),
+            )
+            return meta
+
+        if abs(existing.starting_cash - float(starting_cash)) > 1e-6:
+            raise PortfolioMetaConflictError(
+                f"starting_cash mismatch for mode={mode}: "
+                f"DB has {existing.starting_cash}, CLI passed {starting_cash}"
+            )
+        if existing.currency != currency_norm:
+            raise PortfolioMetaConflictError(
+                f"currency mismatch for mode={mode}: "
+                f"DB has {existing.currency}, CLI passed {currency_norm}"
+            )
+        return existing
 
     def get_paper_fills(
         self,

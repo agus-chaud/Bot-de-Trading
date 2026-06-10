@@ -43,3 +43,13 @@ class UniverseSnapshotRow:
     metric_value: float | None  # e.g. total volume in window; None for overlay-only rows
     source: str  # dynamic | fallback_last_valid | fallback_static | holding_overlay
     schema_version: int
+
+
+@dataclass(frozen=True)
+class PortfolioMeta:
+    """Persisted inception capital for a paper/backtest mode (audit C1 / T1.1)."""
+
+    mode: str  # "paper_live" | "backtest"
+    starting_cash: float
+    currency: str  # "ARS" | "USD"
+    inception_date: date

@@ -130,6 +130,7 @@ La transición a real está planteada como gate, no como salto de fe:
 - **Paper-live daily orchestrator**:
   - `scripts/run_paper_live.py` — CLI que ejecuta el pipeline día a día contra OHLCV real en SQLite, con catch-up automático y política F3 (gap > 3 días hábiles → exit(2), intervención manual).
   - **Calendario obligatorio**: carga `policy.calendar.source_of_truth` antes del catch-up; si falta → `exit 1`. `--no-calendar` solo para tests (**ADR-054**). Regenerar: `python scripts/build_trading_days_yaml.py`.
+  - **`portfolio_meta` (T1.1)**: primera corrida persiste `--initial-cash` y `--currency` (default **3_000_000 ARS**); corridas siguientes validan — mismatch → `exit 1`. DB legacy con snapshots sin meta: usar una vez `--init-portfolio-meta --initial-cash 1000 --currency USD` (ajustar al historial real).
   - Con `--enable-long-engine`, tras el **corto** se construye una copia de `daily_bars` y se **sobrescriben** los precios de las líneas del **`long_term_engine`** con OHLCV **XBUE** cuando el policy usa calendario **AR**, de modo que CEDEAR/pesos (p. ej. `SPY`) no usen cierres **XNYS** por el merge global — ver **ADR-048**.
   - **Soporte para ambos sleeves**: con ese flag se ejecuta short → long sobre el mismo ledger/broker; fills combinados y snapshot final con MTM usando la copia de barras cuando el largo está activo. Sin flag (default), solo corto.
   - `data/storage.py` — `get_last_snapshot_day(mode)` para detectar último día procesado.
@@ -210,7 +211,8 @@ python scripts/report_kpis_walk_forward.py --equity path/to/equity.csv --trades 
 # Si el CSV tiene pocos días y policy usa burn_in=252: --wf-burn-in 0 --wf-oos 60 --wf-step 60 (ajustar al largo real del CSV)
 python scripts/regenerate_kpi_golden_fixtures.py   # solo tras cambio consciente del spec / KPIs (actualiza tests/fixtures/kpi_golden/)
 python scripts/build_trading_days_yaml.py   # regenerar config/calendars/trading_days.v1.yaml (XNYS + XBUE)
-python scripts/run_paper_live.py --date 2026-05-09 --db data/market.db   # ejecución manual paper-live (short-only, branch paper-live-data)
+python scripts/run_paper_live.py --date 2026-05-09 --db data/market.db   # paper-live (default 3M ARS)
+python scripts/run_paper_live.py --date 2026-05-09 --db data/market.db --initial-cash 3000000 --currency ARS
 python scripts/run_paper_live.py --date 2026-05-09 --db data/market.db --enable-long-engine   # short + long
 python scripts/fetch_daily.py --lookback 120 --db data/market.db   # backfill OHLCV antes de recuperar gap largo
 python scripts/diagnose_iol_auth.py   # validar credenciales IOL (no imprime secretos)
