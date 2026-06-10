@@ -333,9 +333,7 @@ def run_catch_up(
             db.persist_fills(run_id, mode, day, all_fills)
 
         if isinstance(snap, dict):
-            short_cash = float(snap.get("cash", 0.0)) * float(
-                policy_doc.get("weights", {}).get("short", 0.3)
-            )
+            short_cash = float(ledger.short_cash)
             db.persist_snapshot(
                 mode,
                 day,

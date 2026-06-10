@@ -598,6 +598,84 @@ class TestPortfolioMetaPersistence:
 
 
 # ===========================================================================
+# 3.10 — short_cash from ledger (T1.3)
+# ===========================================================================
+
+
+class TestShortCashPersistence:
+    """Persisted short_cash must come from ledger.short_cash, not cash * weight (C3)."""
+
+    def test_persisted_short_cash_matches_replayed_ledger(self, tmp_path: Path, policy_doc):
+        db_path = tmp_path / "short_cash.db"
+        db = MarketDB(str(db_path))
+        symbols = ["SPY", "QQQ"]
+        days = _weekdays_from(date(2026, 2, 1), 80)
+        _seed_ohlcv(db, symbols, days)
+
+        initial_cash = 1_000_000.0
+        target = date(2026, 4, 15)
+        run_catch_up(
+            db,
+            [target],
+            policy_doc,
+            initial_cash=initial_cash,
+            no_calendar=True,
+        )
+
+        row = db._conn.execute(
+            """
+            SELECT short_cash, cash, equity_short, num_fills_today
+            FROM paper_snapshots
+            WHERE mode = 'paper_live' AND trading_day = ?
+            """,
+            (target.isoformat(),),
+        ).fetchone()
+        assert row is not None
+
+        ledger = db.replay_ledger_from_fills("paper_live", starting_cash=initial_cash)
+        assert float(row["short_cash"]) == pytest.approx(ledger.short_cash)
+
+        naive_weight = float(row["cash"]) * float(policy_doc["weights"]["short"])
+        if int(row["num_fills_today"]) > 0 or ledger.short_cash != 0.0:
+            assert float(row["short_cash"]) != pytest.approx(naive_weight)
+
+    def test_no_fills_short_cash_is_zero_not_weight_fraction(
+        self, tmp_path: Path, policy_doc,
+    ):
+        """Before any short fills, ledger.short_cash stays 0 — not cash * 30%."""
+        db_path = tmp_path / "short_cash_zero.db"
+        db = MarketDB(str(db_path))
+        symbols = ["SPY", "QQQ"]
+        days = _weekdays_from(date(2026, 2, 1), 80)
+        _seed_ohlcv(db, symbols, days)
+
+        initial_cash = 1_000_000.0
+        target = date(2026, 4, 15)
+        run_catch_up(
+            db,
+            [target],
+            policy_doc,
+            initial_cash=initial_cash,
+            no_calendar=True,
+        )
+
+        row = db._conn.execute(
+            """
+            SELECT short_cash, cash, num_fills_today
+            FROM paper_snapshots
+            WHERE mode = 'paper_live' AND trading_day = ?
+            """,
+            (target.isoformat(),),
+        ).fetchone()
+        assert row is not None
+        if int(row["num_fills_today"]) == 0:
+            assert float(row["short_cash"]) == pytest.approx(0.0)
+            assert float(row["short_cash"]) != pytest.approx(
+                float(row["cash"]) * float(policy_doc["weights"]["short"])
+            )
+
+
+# ===========================================================================
 # 3.7 — AR long sleeve: overlay XBUE over merge-US CEDEAR tickers
 # ===========================================================================
 
