@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -56,14 +57,17 @@ class TestTradingCalendarStoreFromDb:
         assert store.is_ar_business_day(date(2024, 1, 15)) is False
 
     def test_from_yaml_still_works(self):
-        """Regression: existing from_yaml() must not be broken by the new adapter."""
-        import yaml
-        from pathlib import Path
-        yaml_path = Path(__file__).resolve().parents[1] / "config" / "calendars" / "trading_days.v1.yaml"
+        """Regression: from_yaml() loads the test stub fixture (not production calendar)."""
+        yaml_path = (
+            Path(__file__).resolve().parents[1]
+            / "tests"
+            / "fixtures"
+            / "calendars"
+            / "trading_days_stub.v1.yaml"
+        )
         store = TradingCalendarStore.from_yaml(yaml_path)
-        # The YAML has 4 hardcoded sessions — just verify it loads without error
-        assert isinstance(store.us_sessions, frozenset)
-        assert isinstance(store.ar_business_days, frozenset)
+        assert len(store.us_sessions) == 4
+        assert len(store.ar_business_days) == 4
 
 
 class TestCorporateActionsStoreFromDb:

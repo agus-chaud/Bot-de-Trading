@@ -47,6 +47,9 @@ secrets/
 # Local market DB + SQLite sidecars (regenerable con fetch / pipeline)
 data/*.db
 !data/market.db
+data/market_defensa*.db
+data/defensa_sim.log
+config/calendars/*.defensa-bak
 data/*.db-wal
 data/*.db-shm
 

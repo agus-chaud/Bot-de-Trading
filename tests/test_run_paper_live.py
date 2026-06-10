@@ -23,6 +23,7 @@ from scripts.run_paper_live import (
     _build_long_pipeline_context,
     _overlay_ar_long_sleeve_bars_from_db,
     compute_trading_days_gap,
+    load_required_calendar_store,
     main,
     run_catch_up,
 )
@@ -386,6 +387,134 @@ class TestLongEngineFeatureFlag:
         ).fetchone()
         assert snap_row is not None
         assert float(snap_row["equity_total"]) > 0
+
+
+# ===========================================================================
+# 3.8 — Mandatory trading calendar (T1.2)
+# ===========================================================================
+
+
+class TestMandatoryCalendar:
+    """Paper-live must fail fast when calendar is missing (C2)."""
+
+    def test_load_required_calendar_store_loads_production_yaml(self, policy_doc):
+        store = load_required_calendar_store(policy_doc)
+        assert len(store.us_sessions) >= 200
+        assert store.is_us_session(date(2026, 4, 15))
+
+    def test_load_required_calendar_store_raises_when_file_missing(self, policy_doc):
+        policy_doc = dict(policy_doc)
+        policy_doc["calendar"] = {
+            **policy_doc.get("calendar", {}),
+            "source_of_truth": "config/calendars/does_not_exist.v1.yaml",
+        }
+        with pytest.raises(FileNotFoundError, match="Trading calendar required"):
+            load_required_calendar_store(policy_doc)
+
+    def test_run_catch_up_raises_when_calendar_missing_and_not_opted_out(
+        self, tmp_path: Path, policy_doc,
+    ):
+        db = MarketDB(str(tmp_path / "no_cal.db"))
+        bad_policy = dict(policy_doc)
+        bad_policy["calendar"] = {
+            **bad_policy.get("calendar", {}),
+            "source_of_truth": "config/calendars/missing_for_test.v1.yaml",
+        }
+        with pytest.raises(FileNotFoundError):
+            run_catch_up(
+                db,
+                [date(2026, 4, 15)],
+                bad_policy,
+                1000.0,
+            )
+
+    def test_run_catch_up_no_calendar_skips_load(self, tmp_path: Path, policy_doc):
+        db = MarketDB(str(tmp_path / "opt_out.db"))
+        symbols = ["SPY", "QQQ"]
+        days = _weekdays_from(date(2026, 2, 1), 80)
+        _seed_ohlcv(db, symbols, days)
+
+        run_catch_up(
+            db,
+            [date(2026, 4, 15)],
+            policy_doc,
+            1000.0,
+            no_calendar=True,
+        )
+        assert db.get_last_snapshot_day("paper_live") == date(2026, 4, 15)
+
+    def test_main_exits_1_when_calendar_missing(self, tmp_path: Path):
+        db_path = tmp_path / "test.db"
+        MarketDB(str(db_path))
+
+        policy_path = tmp_path / "policy_no_cal.yaml"
+        policy_path.write_text(
+            yaml.safe_dump(
+                {
+                    "schema_version": 1,
+                    "calendar": {
+                        "source_of_truth": "config/calendars/absent.v1.yaml",
+                    },
+                    "short_term_engine": {"momentum_lookback_days": 20},
+                    "markets": {
+                        "US": {"commission_bps_per_side": 1.0, "slippage_bps": 2.0},
+                        "AR": {"commission_bps_per_side": 15.0, "slippage_bps": 5.0},
+                    },
+                    "risk": {
+                        "no_trade_first_minutes": 15,
+                        "no_trade_last_minutes": 15,
+                        "short_kill_switch_monthly_dd": -0.08,
+                        "short_max_daily_loss_pct": 0.02,
+                    },
+                    "weights": {"short": 0.3, "long": 0.7},
+                    "geo": {"AR": 0.2, "US": 0.8},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        test_args = [
+            "run_paper_live.py",
+            "--date", "2026-04-15",
+            "--db", str(db_path),
+            "--policy", str(policy_path),
+        ]
+        with patch.object(sys, "argv", test_args):
+            assert main() == 1
+
+    def test_main_no_calendar_runs_without_production_yaml(
+        self, tmp_path: Path, policy_doc,
+    ):
+        db_path = tmp_path / "test.db"
+        db = MarketDB(str(db_path))
+        symbols = ["SPY", "QQQ"]
+        days = _weekdays_from(date(2026, 2, 1), 80)
+        _seed_ohlcv(db, symbols, days)
+
+        policy_path = tmp_path / "policy_bad_cal.yaml"
+        policy_path.write_text(
+            yaml.safe_dump(
+                {
+                    **policy_doc,
+                    "calendar": {
+                        **policy_doc.get("calendar", {}),
+                        "source_of_truth": "config/calendars/absent.v1.yaml",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        test_args = [
+            "run_paper_live.py",
+            "--date", "2026-04-15",
+            "--db", str(db_path),
+            "--policy", str(policy_path),
+            "--no-calendar",
+        ]
+        with patch.object(sys, "argv", test_args):
+            assert main() == 0
+        assert db.get_last_snapshot_day("paper_live") == date(2026, 4, 15)
 
 
 # ===========================================================================

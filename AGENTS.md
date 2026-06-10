@@ -116,6 +116,13 @@ El proyecto usa dos ramas con responsabilidades distintas:
 - `PaperBrokerSim` del stage lleva `CostModel` con **una sola clave** de mercado (`AR` o `US`) según `long_sleeve_trade_market`, leída de `policy["markets"]` (misma semántica que paper-live para comisión/slippage/spread mínimo).
 - Si existe `config/calendars/trading_days.v1.yaml`, se pasa `TradingCalendarStore` al backtester del largo (coherencia con paper-live para `ar_business_days` / `us_sessions`).
 
+## Paper-live: calendario obligatorio (ADR-054)
+
+- `scripts/run_paper_live.py` carga el YAML de `policy.calendar.source_of_truth` **antes** del catch-up. Si falta o está vacío → `exit 1` (no degradar con `calendar_store=None`).
+- `--no-calendar`: opt-out explícito para tests; desactiva flags de sesión en `MarketOpen` (modo permisivo).
+- Regenerar calendario: `python scripts/build_trading_days_yaml.py`. Stub de tests: `tests/fixtures/calendars/trading_days_stub.v1.yaml`.
+- Golden replay (T0.2): `tests/fixtures/replay_golden/` + `tests/test_replay_golden.py` — caracterización de `replay_ledger_from_fills` antes de cambios en persistencia de capital.
+
 ## Convenciones
 
 - **Idioma**: documentación de producto/política en español; código y nombres de módulos en inglés salvo dominio AR/US ya acordado.

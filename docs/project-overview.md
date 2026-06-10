@@ -87,7 +87,7 @@ flowchart TD
 El corto plazo esta pensado para decisiones diarias y control estricto de exposicion:
 
 - Genera candidatos con momentum y filtros de liquidez/volatilidad.
-- **Filtra sobrecompra con RSI(14)**: si `RSI > rsi_overbought_entry` (default 70), el candidato se descarta con motivo `rsi_overbought`. Esto evita entrar en tickers cuyo momentum es positivo pero cuya velocidad de suba sugiere reversion.
+- **Filtra sobrecompra con RSI(14)**: si `RSI > rsi_overbought_entry` (default **80** en `policy.v1.yaml`), el candidato se descarta con motivo `rsi_overbought`. Esto evita entrar en tickers cuyo momentum es positivo pero cuya velocidad de suba sugiere reversion.
 - Rankea por mercado y limita seleccion (`top_k_per_market`).
 - Construye `orders_intent` con sizing por presupuesto de riesgo.
 - Pasa por `risk_guardrails` antes de llegar al broker simulado.
@@ -110,7 +110,7 @@ flowchart TD
   F -->|No| X5[Descartado]
   F -->|Si| G{Momentum > 0?}
   G -->|No| X6[Descartado]
-  G -->|Si| H{"RSI(14) < 70?"}
+  G -->|Si| H{"RSI(14) < 80?"}
   H -->|No| X7["Descartado: sobrecompra"]
   H -->|Si| I[Top K por mercado]
   I --> J[Sizing + caps]
@@ -140,7 +140,7 @@ Esta seccion es critica porque sin calidad de datos no hay señal confiable ni r
 
 - **US OHLCV**: `yfinance` con retry exponencial (`data/connectors/us_connector.py`).
 - **AR OHLCV**: IOL REST API como primario y fallback Byma/yfinance (`data/connectors/ar_connector.py`).
-- **Calendarios**: `pandas_market_calendars` para sesiones US (XNYS) y AR (XBUE) (`data/calendar_builder.py`).
+- **Calendarios**: `pandas_market_calendars` para sesiones US (XNYS) y AR (XBUE). Persistencia en DB: `data/calendar_builder.py`. YAML versionado para paper-live: `scripts/build_trading_days_yaml.py` → `config/calendars/trading_days.v1.yaml` (**ADR-054**). Stub de 4 dias solo en `tests/fixtures/calendars/`.
 - **Venue por moneda (`data/venue_policy.py`)**: fuente unica que mapea cada `market` tag a sus venues — US → `("XNYS","US")` (USD; `"US"` legacy de ADR-037, menor precedencia) y AR → `("XBUE",)` (ARS). Los lectores de `ohlcv` que arman series por simbolo (medicion de senal `reporting/signal_ic.py`, pre-gate corto) **filtran por venue** segun el tag del simbolo: nunca mezclan monedas. Regla dura: venue **por serie, no por dia**; si falta la barra del venue correcto un dia, se omite (no se sustituye con la otra moneda). La senal de los dual-listed se computa en **USD**; los AR-nativos en **ARS** (**ADR-052**).
 - **Persistencia**: SQLite en `MarketDB` (`data/storage.py`), con tablas para OHLCV, logs, fills, snapshots y kill switch.
 - **Benchmark**: `data/benchmark_returns.py` genera retornos de un benchmark mixto 20/80 (AR/US) point-in-time, sin lookahead, usando cierres disponibles hasta cada fecha de valoracion. Se usa en el informe KPI para calcular alpha vs pasivo.
@@ -191,6 +191,31 @@ El ranking dinamico en `universe_selector` **no** activa merge parcial (no pasa 
 
 Detalle de decision en **ADR-049** (`decisiones-tecnicas.md`). Granularidad **por barra** en `ohlcv` queda fuera de alcance (fase 2.1 opcional).
 
+### Ampliacion del universo (ADR-053)
+
+Tras corregir la mezcla de monedas (**ADR-052**), la medicion de senal revelo **breadth insuficiente**: mediana ~1 simbolo/dia y solo 89/278 dias con >=5 nombres — veredicto inconcluso por falta de amplitud, no por defecto del fix de venue.
+
+Se agregaron **10 simbolos diversificados por industria**:
+
+- **Merval** (market `AR`, XBUE/ARS): `CRES`, `TECO2`, `LOMA`, `MIRG`, `IRSA`.
+- **CEDEARs** (tag `US` → senal en USD via XNYS; tambien en `whitelist_cedear` para ejecucion futura): `V`, `UNH`, `CAT`, `PEP`, `NFLX`.
+
+Pendiente: re-correr la medicion IC/hit rate sobre la cross-section completa con datos limpios.
+
+### Medicion de senal (capa de research, sin ejecucion)
+
+Modulos offline que evaluan si el ranking del motor corto tiene edge predictivo — **no** mueven ordenes ni tocan `run_paper_live.py`:
+
+| Modulo | Rol |
+|--------|-----|
+| `reporting/signal_ic.py` | IC de ranking, hit rate@K, quantile spread, curva de decay; filtra venue por market tag (**ADR-052**) |
+| `reporting/scenario.py` | Escenarios what-if con overrides parametricos de `short_term_engine` |
+| `reporting/data_quality_envelope.py` | Envoltorio de confianza (`stale_marks`, `imputed_pct`, umbrales policy) |
+| `scripts/run_signal_ic_now.py` | CLI de medicion IC sobre `data/market.db` |
+| `scripts/run_scenario.py` | CLI de escenarios what-if |
+
+Tras limpiar la mezcla USD/ARS, el IC a h=1 cayo de 0.146 a 0.087 (~40 % del edge aparente era artificial). La narrativa completa de complicaciones encadenadas esta en `docs/complicaciones-tecnicas.md`.
+
 ### Diagnostico pre-gate (`notebooks/pre_gate_diagnostic.ipynb`)
 
 Notebook operativo para revisar datos y motor **antes** de confiar en el pre-gate walk-forward:
@@ -216,8 +241,9 @@ El `PortfolioLedger` centraliza:
 - Estado de posiciones.
 - PnL realizado/no realizado.
 - Curva de equity.
-- Drawdown mensual del bucket corto (`short_bucket`).
+- Drawdown mensual del bucket corto (`short_bucket`), sobre equity del bucket (`short_cash + MV_short`), no solo MV de posiciones abiertas.
 - **Daily return del sleeve largo** (`long_bucket` con `long_daily_return` y `long_equity`), calculado como variacion vs MTM del dia habil anterior.
+- **Valuacion resiliente a huecos** (**ADR-051**): si falta barra del dia, carry-forward del ultimo close (o `avg_cost` si nunca se vio precio); el snapshot expone `stale_marks` y flag `stale` por posicion. Evita crash en `run_validation_wf` ante un solo hueco (ej. TXAR).
 
 ```mermaid
 flowchart LR
@@ -236,15 +262,16 @@ flowchart LR
 `scripts/run_paper_live.py` ejecuta el pipeline dia a dia contra OHLCV real en SQLite:
 
 - Detecta el ultimo dia procesado (`get_last_snapshot_day("paper_live")`) y hace catch-up idempotente de los dias faltantes (solo dias habiles lun–vie en el calculo de gap).
+- **Calendario obligatorio** (**ADR-054**): carga `policy.calendar.source_of_truth` (`config/calendars/trading_days.v1.yaml` por defecto) antes del catch-up. Si falta o esta vacio → `exit 1`. Regenerar: `python scripts/build_trading_days_yaml.py`. Flag `--no-calendar` solo para tests.
 - **Politica F3**: si el gap supera **3** dias habiles, `exit(2)` y requiere intervencion manual (no hace catch-up masivo automatico). Ver **ADR-050** y `POLICY.md` §15.
 - Si un dia del gap **no tiene barras** (feriado AR, mercado cerrado, fetch incompleto), registra **warning y continua** con el siguiente dia — no aborta todo el rango (**ADR-050**).
 - Persiste fills y snapshots en `data/market.db` bajo mode `paper_live`.
-- Replay de ledger desde fills anteriores para mantener estado coherente.
+- Replay de ledger desde fills anteriores para mantener estado coherente (`replay_ledger_from_fills`). Regresion: golden fixture en `tests/fixtures/replay_golden/` + `tests/test_replay_golden.py`.
 - **Soporte para ambos sleeves**: con `--enable-long-engine` se ejecuta el pipeline corto primero y luego el largo sobre el mismo ledger/broker. Los fills de ambos sleeves se persisten juntos. Sin el flag (default), el flujo es solo corto — rollback inmediato sin cambio de codigo.
 - Tras el corto, si el largo esta activo y el policy usa calendario **AR**, una copia de `daily_bars` recibe precios **XBUE** por cada simbolo de `long_term_engine` (motor CEDEAR/pesos; **ADR-048**). El snapshot final usa esa copia para MTM cuando el flag esta encendido.
 - Orden fijo **short → long**: el largo consume la caja que quedo despues del corto.
 
-**Exit codes** (`run_paper_live.py`): `0` OK; `1` error de runtime (datos faltantes en dia que si debia operar, crash); `2` violacion F3 (gap > 3).
+**Exit codes** (`run_paper_live.py`): `0` OK; `1` error de runtime (calendario faltante, datos faltantes en dia que si debia operar, crash); `2` violacion F3 (gap > 3).
 
 ### Workflow automatizado
 
@@ -321,25 +348,30 @@ La estrategia de testing prioriza comportamiento observable:
 - Contrato de policy (YAML + schema + tests).
 - Regresion de KPI con fixtures golden.
 - Validation stages (data quality, risk audit, kill switch history, motores corto/largo).
+- Filtro de venue en senal y pre-gate (`test_venue_policy`, `test_signal_ic_venue_filter`, `test_validation_short_pre_gate_venue`).
+- Escenarios what-if y envelope de calidad (`test_scenario`, `test_data_quality_envelope`).
 
-El repo cuenta con ~44 archivos de test, abarcando unitarios, integracion y regresion. El objetivo no es "testear por cobertura", sino reducir riesgo de regresiones en decisiones de negocio (riesgo, sizing, ejecucion y validacion).
+El repo cuenta con **54 archivos de test** y **601 casos** recolectados (`pytest --collect-only`), abarcando unitarios, integracion y regresion. Cobertura minima de `core_sim` >= 80 % en CI. El objetivo no es "testear por cobertura", sino reducir riesgo de regresiones en decisiones de negocio (riesgo, sizing, ejecucion, validacion y medicion de senal).
 
 ## 11) Decisiones tecnicas clave
 
-Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (50 ADRs a la fecha). Los ejes principales son:
+Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (**53 ADRs** a la fecha). Los ejes principales son:
 
 - Paper-first como estrategia de construccion.
 - Riesgo deterministico y centralizado.
 - Motores desacoplados con nucleo comun.
 - Contratos versionados (`policy.v1.yaml` + schema).
 - Gate KPI OOS con umbrales pre-registrados y ramp-up gradual en 5 escalones (**ADR-041**).
-- RSI(14) como filtro de entrada y señal de salida del motor corto (**ADR-042**): mejoro avg max drawdown de -0.134% a -0.098% y redujo turnover de 1.69 a 1.26 en walk-forward 180d.
+- RSI(14) como filtro de entrada y señal de salida del motor corto (**ADR-042**): mejoro avg max drawdown de -0.134% a -0.098% y redujo turnover de 1.69 a 1.26 en walk-forward 180d; umbral de sobrecompra actual **80** en `policy.v1.yaml`.
 - Modelo de branches `main` / `paper-live-data` con LFS y notificaciones (**ADR-040**); runbook CI/secretos/F3/feriados (**ADR-050**).
 - ADRs argentinos (MELI, YPF, TGS, GGAL) incorporados al whitelist US con precedencia de tag y categoría `adrs` separada (**ADR-043**).
 - Integración del largo en paper-live con guardrail efectivo, dedup de riesgo corto y feature flag de rollback (**ADR-044**).
 - Rebalanceo largo semanal vs mensual: cambio operativo en policy (**ADR-045**); evidencia en notebook WF + corrida continua (**ADR-046**).
+- Valuacion resiliente a huecos de datos en ledger (**ADR-051**): carry-forward + `stale_marks`.
+- Senal sin mezcla de monedas: `data/venue_policy.py` + filtro de venue en lectores de OHLCV (**ADR-052**).
+- Ampliacion del universo (+10 simbolos) para destrabar medicion de senal (**ADR-053**).
 
-Para defensa oral, esta seccion muestra que la arquitectura no salio de una implementacion improvisada, sino de decisiones acumuladas y justificadas.
+Para defensa oral, esta seccion muestra que la arquitectura no salio de una implementacion improvisada, sino de decisiones acumuladas y justificadas. Las complicaciones vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`.
 
 ## 12) Metodologia con IA
 
@@ -361,7 +393,7 @@ En una defensa oral, el punto central es demostrar gobernanza: **la IA fue herra
 
 ## 12.1) Ultimo cambio estructural: integracion del largo (ADR-044)
 
- se arreglaron tres cosas que estaban rotas o a medias:
+En la integracion del sleeve largo en paper-live se arreglaron tres cosas que estaban rotas o a medias:
 
 **El guardrail del largo no funcionaba.** El sistema tenia un limite de perdida diaria del -1.5% para el sleeve largo, pero en la practica nunca se activaba. El codigo buscaba un dato (`long_daily_return`) que nadie calculaba, asi que siempre valia 0.0 y el limite nunca disparaba. Ahora el ledger calcula ese retorno diario de verdad (comparando equity largo hoy vs ayer) y el runner largo lo usa para decidir si bloquea rebalanceos.
 
@@ -482,15 +514,17 @@ Si algun dia se quisiera que etiquetas influyan en senales, seria un **cambio de
 
 ## 13) Trabajo pendiente
 
-El proyecto esta funcional en paper-first con ambos sleeves (corto y largo) integrados en el loop diario. Gate KPI OOS activo. Frentes abiertos:
+El proyecto esta funcional en paper-first con ambos sleeves (corto y largo) integrados en el loop diario. Gate KPI OOS activo. Workflow paper-live verificado post-configuracion de secretos IOL (2026-06-02). Frentes abiertos:
 
 1. **Acumular datos paper-live**: el gate KPI OOS requiere minimo 312 dias habiles (~15 meses); hoy hay ~120 dias historicos. El workflow diario esta activo y acumulando.
-2. **Activar `--enable-long-engine` en produccion**: el largo esta cableado y testeado, pero el flag esta apagado por defecto. Activar tras validar en paper que el snapshot final refleja ambos sleeves correctamente.
-3. Cerrar brechas entre policy y ejecucion en puntos puntuales (por ejemplo, controles de concentracion sectorial en runtime si se habilitan como bloqueantes).
-4. Explorar indicadores complementarios al RSI si el drawdown mensual del bucket corto sigue siendo cuello de botella (4/13 windows passed en walk-forward 180d).
-5. Extender controles CI de cobertura y regresion a modulos fuera de `core_sim` con la misma disciplina (especialmente `validation/` y `reporting/`).
-6. Agregar observabilidad explicita para operacion diaria del largo: metricas minimas por dia (`fills_long_count`, `long_risk_block_count`, `snapshot_long_equity_present`).
-7. **Copiloto de noticias (investigacion)**: pipeline offline con LangChain/CrewAI para resumir eventos diarios y etiquetado **human-validated** hacia `knowledge-base/` — sin acoplar a motores ni a ejecucion (ver seccion 12.2).
+2. **Re-medir senal con universo ampliado (ADR-053)**: tras corregir mezcla de monedas (**ADR-052**), la cross-section quedo demasiado fina; falta re-correr IC/hit rate con los +10 simbolos y datos limpios.
+3. **Activar `--enable-long-engine` en produccion**: el largo esta cableado y testeado, pero el flag esta apagado por defecto en `run_paper_live.py` y en el workflow CI. Activar tras validar en paper que el snapshot final refleja ambos sleeves correctamente.
+4. **Bug IOL de mapeo de keys** (mitigado por fallback Byma; ver `docs/complicaciones-tecnicas.md` §3): pendiente de fix definitivo en el connector.
+5. Cerrar brechas entre policy y ejecucion en puntos puntuales (por ejemplo, controles de concentracion sectorial en runtime si se habilitan como bloqueantes).
+6. Explorar indicadores complementarios al RSI si el drawdown mensual del bucket corto sigue siendo cuello de botella (4/13 windows passed en walk-forward 180d).
+7. Extender controles CI de cobertura y regresion a modulos fuera de `core_sim` con la misma disciplina (especialmente `validation/` y `reporting/`).
+8. Agregar observabilidad explicita para operacion diaria del largo: metricas minimas por dia (`fills_long_count`, `long_risk_block_count`, `snapshot_long_equity_present`).
+9. **Copiloto de noticias (investigacion)**: pipeline offline con LangChain/CrewAI para resumir eventos diarios y etiquetado **human-validated** hacia `knowledge-base/` — sin acoplar a motores ni a ejecucion (ver seccion 12.2).
 
 Este capitulo existe para evitar una narrativa "cerrada". El sistema se presenta como una base robusta en evolucion, con backlog tecnico explicitado.
 
@@ -500,6 +534,7 @@ Este capitulo existe para evitar una narrativa "cerrada". El sistema se presenta
 
 - Abrir con secciones 1 y 2 (problema + arquitectura) para marcar contexto.
 - Profundizar en 3, 4, 5 y 6 para explicar decisiones tecnicas de motores y datos.
+- Usar 6 (medicion de senal + complicaciones) para mostrar honestidad tecnica sobre calidad de datos y edge real.
 - Usar 8 y 9 para mostrar operacion diaria real (paper-live) y validacion automatica.
 - Usar 12 para explicar metodologia de construccion con IA; 12.2 para delimitar LangChain/CrewAI (copiloto vs nucleo deterministico).
 - Cerrar con 13 para mostrar criterio, honestidad tecnica y roadmap.
@@ -509,6 +544,7 @@ Documentos complementarios:
 - Politica operativa: `POLICY.md`
 - Contrato parseable: `config/policy.v1.yaml`
 - Validacion estructural: `config/policy.v1.schema.json`
-- Registro de decisiones: `decisiones-tecnicas.md` (50 ADRs)
+- Registro de decisiones: `decisiones-tecnicas.md` (53 ADRs)
+- Complicaciones tecnicas (guion oral, 9 casos): `docs/complicaciones-tecnicas.md`
 - KPI spec: `docs/kpi_report_spec.v1.md`
-- Listas blancas: `config/symbols/whitelist_us.yaml` (ETFs, stocks, ADRs), `config/symbols/whitelist_ar.yaml`
+- Listas blancas: `config/symbols/whitelist_us.yaml` (ETFs, stocks, ADRs), `config/symbols/whitelist_ar.yaml`, `config/symbols/whitelist_cedear.yaml`

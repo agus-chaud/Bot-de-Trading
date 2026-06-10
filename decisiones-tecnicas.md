@@ -2,11 +2,28 @@
 
 Este documento registra las decisiones técnicas relevantes del proyecto, su contexto, el porqué, consecuencias y alternativas evaluadas.
 
+**Última actualización**: 2026-06-09 — **53 ADRs** aceptadas (001–053). Las complicaciones técnicas vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`; el overview de arquitectura y estado operativo está en `docs/project-overview.md`.
+
 ## Cómo usar este archivo
 
 - Crear una nueva entrada por cada decisión importante.
 - Mantener un estado claro: `propuesta`, `aceptada`, `reemplazada`, `descartada`.
 - Cuando una decisión cambie, no borrar el historial: marcar la anterior como `reemplazada` y enlazar la nueva.
+- Ante conflicto numérico entre `POLICY.md` y `config/policy.v1.yaml`, actualizar ambos en el mismo cambio y anotar el motivo aquí o en el ADR afectado.
+
+## Índice por tema (53 ADRs)
+
+| Tema | ADRs |
+|------|------|
+| Filosofía y arquitectura | 001–004, 014 |
+| Riesgo y guardrails | 002, 005, 015, 020, 022, 026, 036, 041, 042, 044, 051 |
+| Motores corto / largo | 011–013, 016–017, 042, 043, 045–048 |
+| Data layer y calidad | 021, 037, 047, 049, 052, 053 |
+| Simulación y ledger | 008–010, 018–019, 025, 039, 051 |
+| KPI, validación y gates | 027–035, 041 |
+| Paper-live y operación | 040, 044, 048, 050 |
+| Señal y medición offline | 042, 052, 053 (+ `reporting/signal_ic.py`, `reporting/scenario.py`; ver ADR-052) |
+| Tooling / fixes menores | 023–024, 038 |
 
 ---
 
@@ -920,7 +937,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 - **Estado**: aceptada
 - **Contexto**: El walk-forward OOS de 180 días mostraba 9/13 ventanas fallando por `monthly_short_drawdown` debajo del floor (-0.25). El motor corto entraba en tickers sobrecomprados (momentum positivo pero RSI alto) y solo salía por stop-loss ATR, acumulando drawdowns innecesarios.
 - **Decisión**: Agregar RSI(14) al motor corto con dos roles:
-  1. **Filtro de entrada**: descartar candidatos con RSI > `rsi_overbought_entry` (default 70). Reason: `rsi_overbought`.
+  1. **Filtro de entrada**: descartar candidatos con RSI > `rsi_overbought_entry` (default **70** en el ADR original; ver actualización abajo). Reason: `rsi_overbought`.
   2. **Señal de salida por crossover descendente**: vender posiciones del bucket short cuando `rsi_yesterday >= rsi_exit_threshold` y `rsi_today < rsi_exit_threshold` (default 45). Reason: `rsi_momentum_exhausted`. El crossover evita salidas falsas cuando RSI simplemente está bajo y estable.
   3. **Contadores de auditoría**: cada ventana OOS reporta `entries_blocked_by_rsi`, `exits_by_rsi`, `exits_by_stop_loss` para explicar por qué cambió el resultado.
 - **Por qué**:
@@ -931,8 +948,9 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 - **Consecuencias**:
   - Walk-forward 180d con RSI: `avg_max_dd` mejoró de -0.134% a -0.098%; turnover bajó de 1.69 a 1.26; RSI bloqueó 130 entradas y disparó 5 salidas anticipadas.
   - `windows_passed` se mantuvo en 4/13 — el drawdown mensual del bucket corto sigue siendo el cuello de botella, pero la mejora en DD total indica dirección correcta.
-  - Si `rsi_overbought_entry=70` resulta muy restrictivo en tendencias fuertes, se puede subir a 75 sin cambiar arquitectura.
+  - Si `rsi_overbought_entry=70` resulta muy restrictivo en tendencias fuertes, se puede subir a 75–80 sin cambiar arquitectura.
   - Deduplicación implementada: si RSI ya generó SELL, stop-loss no duplica la orden para el mismo símbolo.
+- **Actualización 2026-06**: `rsi_overbought_entry` en `config/policy.v1.yaml` quedó en **80.0** (menos restrictivo en tendencias fuertes; sin cambio de arquitectura ni de la lógica de crossover de salida).
 - **Alternativas consideradas**:
   - **MACD**: 3 parámetros nuevos (fast, slow, signal) — más complejidad de la pedida.
   - **Bollinger Bands**: resuelve solo entradas, no salidas.
@@ -1167,8 +1185,8 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Subir F3 a 10 días en CI**: descartada — debilita control operativo; mejor dispatch manual en tandas.
   - **Forzar `FETCH_IOL_ONLY` en workflow**: descartada mientras histórico devuelva 401 — tumbaría el job entero.
   - **Resolver conflicto LFS fusionando binarios a mano**: descartada — Git LFS no mergea SQLite; elegir `--ours` o `--theirs` explícitamente.
-- **Archivos**: `.github/workflows/paper_live_daily.yml`, `scripts/run_paper_live.py`, `scripts/diagnose_iol_auth.py`, `docs/project-overview.md`, `README.md`, `AGENTS.md`, `POLICY.md` §15, `CHANGELOG.md`
-- **Ver también**: **ADR-040** (modelo branches + workflow), **ADR-049** (`fetch_log` / fallback)
+- **Archivos**: `.github/workflows/paper_live_daily.yml`, `scripts/run_paper_live.py`, `scripts/diagnose_iol_auth.py`, `docs/project-overview.md`, `docs/complicaciones-tecnicas.md`, `README.md`, `AGENTS.md`, `POLICY.md` §15, `CHANGELOG.md`
+- **Ver también**: **ADR-040** (modelo branches + workflow), **ADR-049** (`fetch_log` / fallback), `docs/complicaciones-tecnicas.md` (§1, §4, runbook operativo)
 
 ---
 
@@ -1181,7 +1199,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 - **Por qué**: Un dato faltante **no es un dato cero**. Crashear tira abajo la medición; valuar a cero corrompe equity, drawdown y retornos (la posición “desaparece”). El carry-forward es el comportamiento estándar de sistemas de cartera (stale price). El flag `stale` mantiene el evento **observable** para la capa de calidad de datos sin esconderlo.
 - **Consecuencias**:
   - `mark_to_market`/`update_day` ya no lanzan por barras faltantes; la validación sobrevive a huecos.
-  - Nuevo contrato de snapshot: `stale_marks` + `positions[sym]["stale"]`. Consumidores existentes (paper_broker, day_runner, pre_gate, walk-forward, validation_runner) verificados sin cambios (48/48).
+  - Nuevo contrato de snapshot: `stale_marks` + `positions[sym]["stale"]`. Consumidores existentes (paper_broker, day_runner, pre_gate, walk-forward, validation_runner) verificados sin cambios de contrato.
   - `stale_marks` queda disponible pero **no** cableado a `halt_on_data_quality` (decisión de política pendiente: cuándo un MTM stale debe frenar operación).
 - **Alternativas consideradas**:
   - **Valuar a 0 si falta barra**: descartada — corrompe equity/DD/retornos; la peor opción.
@@ -1217,13 +1235,15 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - Al limpiar, el **IC de señal a h=1 cayó de 0.146 (sucio) a 0.087 (limpio)**: ~40 % del edge aparente era el salto artificial USD↔ARS, no momentum real.
   - La limpieza reveló que la **cross-section es muy fina** (mediana ~1 símbolo/día; solo 89/278 días con ≥5 nombres): la medición de señal queda **inconclusa por falta de breadth**, problema separado a resolver ampliando universo (no es un defecto de este fix).
   - La **ejecución en pesos sobre el CEDEAR** queda como **paso POSTERIOR, no implementado**: requerirá mapeo US→cedear + ratio de conversión + precio ARS + valuación en pesos. Este ADR cubre solo la señal/medición.
-  - Tests nuevos: `tests/test_venue_policy.py`, `tests/test_signal_ic_venue_filter.py`, `tests/test_validation_short_pre_gate_venue.py` (47 passed en suites afectadas; suite completa 560 passed / 1 failed, donde el failure de `test_universe_selector` es **preexistente y fuera de scope**).
+  - Tests nuevos: `tests/test_venue_policy.py`, `tests/test_signal_ic_venue_filter.py`, `tests/test_validation_short_pre_gate_venue.py`.
+  - Capa de medición offline ampliada (sin ADR separado): `reporting/signal_ic.py` (IC, hit rate@K, quantile spread), `reporting/scenario.py` + `scripts/run_scenario.py` (what-if paramétrico), `reporting/data_quality_envelope.py`, `scripts/run_signal_ic_now.py`.
+  - Suite completa del repo: **601** tests recolectados (`pytest --collect-only`, jun 2026).
 - **Alternativas consideradas**:
   - **ARS-first: re-etiquetar todo a XBUE y operar en pesos**: descartada — genera ripple innecesario en allocator y calendario (geo 20/80, sesiones), cuando para la **señal** los tags US ya son correctos; la ejecución en pesos es un paso futuro acotado, no un re-tag global.
   - **Fallback venue día-a-día (usar el otro venue si falta la barra del correcto)**: descartada — recrea exactamente el bug de mezcla de monedas que estamos eliminando.
   - **Purgar ahora el venue legacy `"US"` de la DB**: descartada — es higiene de datos aparte; `venues_for_market` ya lo tolera como fallback de menor precedencia sin mezclar moneda.
-- **Archivos**: `data/venue_policy.py` (nuevo), `reporting/signal_ic.py`, `scripts/run_short_term_pre_gate.py`, `validation/stages/short_pre_gate.py`, `tests/test_venue_policy.py` (nuevo), `tests/test_signal_ic_venue_filter.py` (nuevo), `tests/test_validation_short_pre_gate_venue.py` (nuevo)
-- **Ver también**: **ADR-030/037** (US→XNYS, código MIC), **ADR-043** (precedencia del market tag US en `load_merged_whitelist`), **ADR-051** (carry-forward en ledger: hueco ≠ cero, misma filosofía de no inventar datos)
+- **Archivos**: `data/venue_policy.py` (nuevo), `reporting/signal_ic.py`, `scripts/run_short_term_pre_gate.py`, `validation/stages/short_pre_gate.py`, `tests/test_venue_policy.py` (nuevo), `tests/test_signal_ic_venue_filter.py` (nuevo), `tests/test_validation_short_pre_gate_venue.py` (nuevo), `docs/complicaciones-tecnicas.md` (§6–7)
+- **Ver también**: **ADR-030/037** (US→XNYS, código MIC), **ADR-043** (precedencia del market tag US en `load_merged_whitelist`), **ADR-051** (carry-forward en ledger: hueco ≠ cero, misma filosofía de no inventar datos), **ADR-053** (breadth insuficiente revelado tras este fix)
 
 ---
 
@@ -1242,12 +1262,35 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 - **Consecuencias**:
   - Datos cargados para los 10 nuevos símbolos en el rango **2025-03-20 → 2026-06-02** (~297 filas AR, ~302 US), con **warmup antes del día 1** de la ventana de medición para que los indicadores arranquen calientes.
   - Coherente con **ADR-052** (señal dual-listed en USD); **no** se re-etiquetó nada existente.
-  - **Pendiente**: re-correr la medición de señal sobre la cross-section completa (U2) para ver si la breadth mejora y el veredicto deja de estar inconcluso.
+  - **Pendiente (U2)**: re-correr la medición de señal sobre la cross-section completa con `scripts/run_signal_ic_now.py` y/o `scripts/run_scenario.py` para ver si la breadth mejora y el veredicto deja de estar inconcluso. Narrativa de la cadena de complicaciones #6→#8 en `docs/complicaciones-tecnicas.md`.
 - **Alternativas consideradas**:
   - **Relajar los filtros del motor (p. ej. `p_min`, liquidez) en vez de ampliar el universo**: descartada como **primer paso** — tocar los filtros afecta el riesgo real de trading; es mejor medir primero sobre la cross-section completa U2 con un universo más ancho, y solo después considerar ajustes de motor con evidencia.
   - **Cargar ya la pata ARS de los CEDEARs**: descartada — la señal va en USD y la ejecución en pesos (mapeo US→cedear + ratio + precio ARS + valuación) es un **paso futuro acotado**, no un prerequisito de la medición.
-- **Archivos**: `config/symbols/whitelist_ar.yaml`, `config/symbols/whitelist_us.yaml`, `config/symbols/whitelist_cedear.yaml`, `data/market.db`
-- **Ver también**: **ADR-052** (señal sin mezcla de monedas; breadth insuficiente como problema separado), **ADR-043** (precedencia del market tag US en `load_merged_whitelist`), **#401** (señal dual-listed computada en USD)
+- **Archivos**: `config/symbols/whitelist_ar.yaml`, `config/symbols/whitelist_us.yaml`, `config/symbols/whitelist_cedear.yaml`, `data/market.db`, `docs/complicaciones-tecnicas.md` (§8), `README.md`, `docs/project-overview.md`
+- **Ver también**: **ADR-052** (señal sin mezcla de monedas; breadth insuficiente como problema separado), **ADR-043** (precedencia del market tag US en `load_merged_whitelist`), señal dual-listed en USD (decisión asociada en ADR-052)
+
+---
+
+## ADR-054 — Calendario paper-live obligatorio, YAML completo y separación del stub de tests
+
+- **Fecha**: 2026-06-10
+- **Estado**: aceptada
+- **Contexto**: Auditoría técnica (jun 2026) identificó **C2**: `config/calendars/trading_days.v1.yaml` contenía solo **4 días** (fixture de unit tests en ruta de producción). Además, `run_paper_live.py` hacía `if cal_path.exists()` → si faltaba el archivo, `calendar_store=None` y `event_engine` asumía `is_us_session=True` siempre — guardrails de sesión/no-trade operaban en modo permisivo sin avisar. Simulaciones de defensa oral renombraron el YAML a `.defensa-bak` para evitar el stub, exponiendo ambos modos de fallo.
+- **Decisión**:
+  1. **YAML de producción completo**: `scripts/build_trading_days_yaml.py` genera `config/calendars/trading_days.v1.yaml` desde `pandas_market_calendars` (NYSE → XNYS, XBUE → BYMA), rango configurable (default 2024-01-01..2027-12-31).
+  2. **Stub aislado**: fixture mínimo en `tests/fixtures/calendars/trading_days_stub.v1.yaml` para tests que fijan fechas (p. ej. 2026-04-15).
+  3. **Fail-fast en paper-live**: `load_required_calendar_store()` lee `policy.calendar.source_of_truth`; ausencia o calendario vacío → `exit 1`. Flag explícito `--no-calendar` solo para tests/diagnóstico (con warning).
+  4. **Golden replay (T0.2)**: `tests/fixtures/replay_golden/` + `tests/test_replay_golden.py` caracterizan `replay_ledger_from_fills` antes de cambios en persistencia de capital (**T1.1** pendiente).
+- **Por qué**: Un calendario incorrecto o ausente corrompe riesgo operativo en silencio; es preferible abortar que operar con flags de sesión inventados. Separar stub de `config/` evita repetir el incidente.
+- **Consecuencias**:
+  - CI paper-live y corridas manuales requieren el YAML commiteado; regenerar al extender horizonte.
+  - Stages de validación offline (`long_engine`) siguen pudiendo omitir YAML si no existe — paper-live no.
+  - Tests de integración usan calendario real o `--no-calendar` / stub explícito.
+- **Alternativas consideradas**:
+  - **Cargar calendario solo desde SQLite (`calendars` table)**: descartada como única fuente — el YAML versionado es el contrato ADR-007 alineado a policy.
+  - **Mantener degradación silenciosa con default permisivo**: descartada — origen del hallazgo C2.
+- **Archivos**: `scripts/build_trading_days_yaml.py`, `config/calendars/trading_days.v1.yaml`, `tests/fixtures/calendars/trading_days_stub.v1.yaml`, `scripts/run_paper_live.py`, `tests/test_run_paper_live.py`, `tests/test_replay_golden.py`, `config/README.md`, `README.md`, `AGENTS.md`, `docs/project-overview.md`, `docs/complicaciones-tecnicas.md`
+- **Ver también**: **ADR-007** (fuente única calendario), **ADR-050** (feriados sin barras), auditoría C1/C2 (persistencia capital pendiente T1.1)
 
 ---
 

@@ -3,7 +3,7 @@
 
 Exit codes:
   0 — success, all days processed
-  1 — runtime error (data missing, pipeline crash)
+  1 — runtime error (missing trading calendar, data missing, pipeline crash)
   2 — gap > 3 trading days (F3 policy), manual intervention needed
 """
 
@@ -39,6 +39,48 @@ from data.storage import MarketDB  # noqa: E402
 logger = logging.getLogger(__name__)
 
 F3_MAX_GAP = 3
+
+
+class CalendarConfigError(Exception):
+    """Raised when the trading calendar YAML exists but is unusable."""
+
+
+def _calendar_yaml_path(policy_doc: dict[str, Any]) -> Path:
+    """Resolve calendar YAML path from policy (repo-relative)."""
+    cal_cfg = policy_doc.get("calendar") or {}
+    rel = cal_cfg.get("source_of_truth")
+    if not rel:
+        return REPO_ROOT / "config" / "calendars" / "trading_days.v1.yaml"
+    return REPO_ROOT / str(rel)
+
+
+def load_required_calendar_store(policy_doc: dict[str, Any]) -> TradingCalendarStore:
+    """Load TradingCalendarStore or fail fast — paper-live must not run blind."""
+    cal_path = _calendar_yaml_path(policy_doc)
+    if not cal_path.is_file():
+        raise FileNotFoundError(
+            f"Trading calendar required but missing at {cal_path}. "
+            "Regenerate with: python scripts/build_trading_days_yaml.py"
+        )
+    store = TradingCalendarStore.from_yaml(str(cal_path))
+    if not store.us_sessions:
+        raise CalendarConfigError(f"Calendar {cal_path} defines no US sessions")
+    if not store.ar_business_days:
+        raise CalendarConfigError(f"Calendar {cal_path} defines no AR business days")
+    return store
+
+
+def _resolve_calendar_store(
+    policy_doc: dict[str, Any],
+    *,
+    calendar_store: TradingCalendarStore | None = None,
+    no_calendar: bool = False,
+) -> TradingCalendarStore | None:
+    if no_calendar:
+        return None
+    if calendar_store is not None:
+        return calendar_store
+    return load_required_calendar_store(policy_doc)
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +202,8 @@ def run_catch_up(
     policy_doc: dict[str, Any],
     initial_cash: float,
     *,
+    calendar_store: TradingCalendarStore | None = None,
+    no_calendar: bool = False,
     enable_long_engine: bool = False,
 ) -> None:
     """Process each gap day sequentially: replay → load bars → run pipeline → persist.
@@ -174,10 +218,11 @@ def run_catch_up(
     from core_sim.short_term_day_runner import load_merged_whitelist
     merged_whitelist = load_merged_whitelist(REPO_ROOT, policy_doc)
 
-    calendar_store: TradingCalendarStore | None = None
-    cal_path = REPO_ROOT / "config" / "calendars" / "trading_days.v1.yaml"
-    if cal_path.exists():
-        calendar_store = TradingCalendarStore.from_yaml(str(cal_path))
+    calendar_store = _resolve_calendar_store(
+        policy_doc,
+        calendar_store=calendar_store,
+        no_calendar=no_calendar,
+    )
 
     for day in gap_days:
         existing = db.get_last_snapshot_day(mode)
@@ -343,6 +388,12 @@ def main() -> int:
         default=False,
         help="Enable long-term sleeve execution (default: disabled for short-only rollback).",
     )
+    parser.add_argument(
+        "--no-calendar",
+        action="store_true",
+        default=False,
+        help="Skip trading calendar (tests only). Disables session-aware no-trade checks.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -392,6 +443,19 @@ def main() -> int:
         logger.info("No gap — target day %s already processed.", target_day)
         return 0
 
+    calendar_store: TradingCalendarStore | None = None
+    if args.no_calendar:
+        logger.warning(
+            "--no-calendar: running without TradingCalendarStore; "
+            "session flags default to permissive mode."
+        )
+    else:
+        try:
+            calendar_store = load_required_calendar_store(policy_doc)
+        except (FileNotFoundError, CalendarConfigError) as exc:
+            logger.error("Calendar configuration error: %s", exc)
+            return 1
+
     logger.info(
         "Processing %d day(s): %s → %s",
         len(gap_days),
@@ -401,7 +465,12 @@ def main() -> int:
 
     try:
         run_catch_up(
-            db, gap_days, policy_doc, args.initial_cash,
+            db,
+            gap_days,
+            policy_doc,
+            args.initial_cash,
+            calendar_store=calendar_store,
+            no_calendar=args.no_calendar,
             enable_long_engine=args.enable_long_engine,
         )
     except Exception as exc:
