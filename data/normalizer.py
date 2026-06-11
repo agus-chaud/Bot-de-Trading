@@ -13,6 +13,12 @@ logger = logging.getLogger(__name__)
 
 _OUTLIER_HIGH_FACTOR = 10.0
 _OUTLIER_LOW_FACTOR = 0.1
+# Salto dia-a-dia tipo cambio de ratio CEDEAR / split no registrado: un close
+# que mas que duplica (o menos que halvea) el anterior no es un movimiento de
+# mercado plausible — se descarta hasta que el evento se registre y la serie
+# se ajuste (scripts/adjust_cedear_ratio.py). Caso origen: SPY XBUE 2026-05-29
+# cayo 3x nominal por cambio de ratio 1:3 y paso el filtro de outliers x10.
+_RATIO_JUMP_FACTOR = 2.0
 _ROLLING_WINDOW = 5
 _MAX_FILL_DAYS = 3
 
@@ -89,7 +95,9 @@ def _drop_invalid(rows: list[OHLCVRow]) -> tuple[list[OHLCVRow], set[date]]:
 
 
 def _drop_outliers(rows: list[OHLCVRow]) -> tuple[list[OHLCVRow], set[date]]:
-    """Drop rows where close is > 10× or < 0.1× the rolling-5-day median.
+    """Drop rows where close is > 10× or < 0.1× the rolling-5-day median,
+    or where close jumps more than ×2 / ÷2 vs the previous kept close
+    (cambio de ratio CEDEAR / split no registrado → ``suspect_ratio_jump``).
     Returns (kept, dropped_dates).
     """
     if not rows:
@@ -107,6 +115,12 @@ def _drop_outliers(rows: list[OHLCVRow]) -> tuple[list[OHLCVRow], set[date]]:
                 _log_skip(row.symbol, row.ts, "price_outlier")
                 dropped.add(row.ts)
                 # Do NOT append to closes — don't let the outlier poison the window.
+                continue
+        if closes:
+            prev = closes[-1]
+            if row.close > prev * _RATIO_JUMP_FACTOR or row.close < prev / _RATIO_JUMP_FACTOR:
+                _log_skip(row.symbol, row.ts, "suspect_ratio_jump")
+                dropped.add(row.ts)
                 continue
         closes.append(row.close)
         kept.append(row)
