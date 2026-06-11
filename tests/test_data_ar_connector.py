@@ -482,16 +482,42 @@ class TestIolFieldAliases:
 
 
 class TestPartialData:
-    def test_should_return_empty_list_when_iol_payload_missing_required_keys(self):
-        """IOL response missing required keys (e.g. 'apertura') triggers DataError → []."""
+    def test_should_fall_back_to_byma_when_iol_payload_missing_required_keys(self):
+        """IOL DataError (keys faltantes) ya NO retorna []: cae al fallback Byma."""
         bad_payload = [{"fecha": "2024-03-04T00:00:00", "ultimoPrecio": 1030.0}]
 
         with patch.dict("os.environ", _IOL_ENV):
             with _patch_iol_access_token():
                 with _patch_requests_get(json_payload=bad_payload):
-                    result = fetch_ar_ohlcv("GGAL", _START, _END)
+                    with _patch_byma_history(return_value=_make_byma_df()):
+                        result = fetch_ar_ohlcv("GGAL", _START, _END)
 
-        assert result == []
+        # Byma aportó la data que IOL no pudo entregar.
+        assert len(result) == 1
+        assert result[0].venue == "XBUE"
+        assert result[0].close == 1030.0
+
+    def test_should_fall_back_to_byma_when_iol_returns_empty(self):
+        """IOL vacío (símbolo que no sirve, p. ej. varios CEDEARs) → fallback Byma."""
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with _patch_requests_get(json_payload=[]):  # IOL responde 200 con []
+                    with _patch_byma_history(return_value=_make_byma_df()):
+                        result = fetch_ar_ohlcv("SPY", _START, _END)
+
+        assert len(result) == 1
+        assert result[0].venue == "XBUE"
+
+    def test_iol_only_does_not_fall_back_to_byma_on_empty(self):
+        """Con iol_only=True, IOL vacío NO debe caer a Byma (contrato de iol_only)."""
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with _patch_requests_get(json_payload=[]):
+                    with _patch_byma_history(return_value=_make_byma_df()) as byma_mock:
+                        result = fetch_ar_ohlcv("SPY", _START, _END, iol_only=True)
+
+        assert not result  # None o [] — IOL vacío, sin fallback
+        byma_mock.assert_not_called()
 
     def test_should_return_empty_list_when_byma_response_missing_required_columns(self):
         """Byma DataFrame missing Volume column triggers DataError → []."""
@@ -512,7 +538,8 @@ class TestPartialData:
         assert result == []
 
     def test_should_not_retry_on_data_error_from_iol(self):
-        """DataError from IOL payload is not retried — only one attempt made before returning []."""
+        """DataError de IOL no se reintenta: una sola llamada, sin sleep. (Byma
+        parcheado a vacío para aislar la conducta de IOL del fallback.)"""
         bad_payload = [{"only_junk": True}]
         call_count = 0
 
@@ -528,9 +555,10 @@ class TestPartialData:
             with _patch_iol_access_token():
                 with patch("data.connectors.ar_connector.requests.get", side_effect=get_side_effect):
                     with patch("data.connectors.ar_connector.time.sleep") as mock_sleep:
-                        result = fetch_ar_ohlcv("GGAL", _START, _END)
+                        with _patch_byma_history(return_value=_make_byma_df()):
+                            fetch_ar_ohlcv("GGAL", _START, _END)
 
-        assert result == []
+        # IOL no reintentó el data_error (1 sola llamada GET, sin backoff).
         assert call_count == 1
         mock_sleep.assert_not_called()
 

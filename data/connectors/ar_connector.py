@@ -306,14 +306,12 @@ def fetch_ar_ohlcv_with_trace(
                         rows_by_source={SOURCE_IOL: len(result), SOURCE_BYMA: 0},
                     )
                 iol_partial_rows = result
-            elif result is not None:
-                return _finalize_ar_trace(
-                    trace,
-                    result,
-                    provider=SOURCE_IOL,
-                    skip_reason=iol_skip,
-                    rows_by_source={SOURCE_IOL: 0, SOURCE_BYMA: 0},
-                )
+            # result vacío ([]) o None: IOL no aportó nada usable (sin datos,
+            # data_error, o retries agotados). En vez de retornar vacío, caemos
+            # al fallback Byma de abajo (salvo iol_only). IOL devuelve [] para
+            # símbolos que no sirve en seriehistorica (varios CEDEARs); eso NO
+            # debe tapar datos que Byma sí tiene. La atribución de fuente en
+            # fetch_log mantiene el fallback visible (complicación #4).
         if iol_only:
             return _finalize_ar_trace(
                 trace,
