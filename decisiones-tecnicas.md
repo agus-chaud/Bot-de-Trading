@@ -1280,7 +1280,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   1. **YAML de producción completo**: `scripts/build_trading_days_yaml.py` genera `config/calendars/trading_days.v1.yaml` desde `pandas_market_calendars` (NYSE → XNYS, XBUE → BYMA), rango configurable (default 2024-01-01..2027-12-31).
   2. **Stub aislado**: fixture mínimo en `tests/fixtures/calendars/trading_days_stub.v1.yaml` para tests que fijan fechas (p. ej. 2026-04-15).
   3. **Fail-fast en paper-live**: `load_required_calendar_store()` lee `policy.calendar.source_of_truth`; ausencia o calendario vacío → `exit 1`. Flag explícito `--no-calendar` solo para tests/diagnóstico (con warning).
-  4. **Golden replay (T0.2)**: `tests/fixtures/replay_golden/` + `tests/test_replay_golden.py` caracterizan `replay_ledger_from_fills` antes de cambios en persistencia de capital (**T1.1** pendiente).
+  4. **Golden replay (T0.2)**: `tests/fixtures/replay_golden/` + `tests/test_replay_golden.py` caracterizan `replay_ledger_from_fills` antes de cambios en persistencia de capital.
 - **Por qué**: Un calendario incorrecto o ausente corrompe riesgo operativo en silencio; es preferible abortar que operar con flags de sesión inventados. Separar stub de `config/` evita repetir el incidente.
 - **Consecuencias**:
   - CI paper-live y corridas manuales requieren el YAML commiteado; regenerar al extender horizonte.
@@ -1290,7 +1290,32 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Cargar calendario solo desde SQLite (`calendars` table)**: descartada como única fuente — el YAML versionado es el contrato ADR-007 alineado a policy.
   - **Mantener degradación silenciosa con default permisivo**: descartada — origen del hallazgo C2.
 - **Archivos**: `scripts/build_trading_days_yaml.py`, `config/calendars/trading_days.v1.yaml`, `tests/fixtures/calendars/trading_days_stub.v1.yaml`, `scripts/run_paper_live.py`, `tests/test_run_paper_live.py`, `tests/test_replay_golden.py`, `config/README.md`, `README.md`, `AGENTS.md`, `docs/project-overview.md`, `docs/complicaciones-tecnicas.md`
-- **Ver también**: **ADR-007** (fuente única calendario), **ADR-050** (feriados sin barras), auditoría C1/C2 (persistencia capital pendiente T1.1)
+- **Ver también**: **ADR-007** (fuente única calendario), **ADR-050** (feriados sin barras), **ADR-055** (auditoría T1.1–T1.4 persistencia + F3)
+
+---
+
+## ADR-055 — Auditoría paper-live T1.1–T1.4: persistencia de capital y gap F3 con calendario real
+
+- **Fecha**: 2026-06-10
+- **Estado**: aceptada
+- **Contexto**: Auditoría técnica (jun 2026) sobre persistencia y catch-up de `run_paper_live.py` identificó tres hallazgos operativos además de **C2** (calendario stub, resuelto en **ADR-054**):
+  - **C1 / T1.1**: replay podía reescribir capital silenciosamente — sin `portfolio_meta` bloqueando `starting_cash`/`currency`.
+  - **C3 / T1.3**: `paper_snapshots.short_cash` se persistía como `cash × weights.short` en lugar de `ledger.short_cash`, incoherente con kill switch y bucket equity (**ADR-039**).
+  - **H3 / T1.4**: el gate **F3** contaba lun–vie genérico; feriados US (p. ej. Memorial Day) generaban falsos `exit 2` y días AR-only (US cerrado, AR abierto) no contaban para catch-up.
+- **Decisión**:
+  1. **T1.1 `portfolio_meta`**: tabla SQLite + `ensure_portfolio_meta()` — primera corrida persiste CLI; siguientes validan; mismatch → `exit 1`. Default **3_000_000 ARS**.
+  2. **T1.3 `short_cash`**: `persist_snapshot(..., short_cash=float(ledger.short_cash))` — attr directo del ledger, no proxy por peso.
+  3. **T1.4 gap F3**: `compute_trading_days_gap()` con `TradingCalendarStore` cuenta días donde `is_us_session(d) OR is_ar_business_day(d)`. Calendario cargado **antes** del check F3. Fallback lun–vie solo con `--no-calendar`.
+  4. **What-if cartera**: `scripts/run_whatif_sim.py` — sim 30/70 sobre copia aislada de DB; bypass F3 intencional para backtests multi-mes; no escribe en `paper_live` productivo.
+- **Por qué**: Coherencia entre ledger, snapshots históricos y política operativa; F3 debe reflejar días en que **cualquier** sleeve puede operar (US/CEDEAR vía XNYS, panel AR vía XBUE).
+- **Consecuencias**:
+  - `POLICY.md` §15.1 y docs de runbook actualizados (ya no “solo lun–vie”).
+  - Simulaciones históricas deben respetar cobertura XBUE (al jun 2026 termina 2026-06-02) y corporate actions CEDEAR pendientes.
+- **Alternativas consideradas**:
+  - **Solo sesiones US para F3**: descartada — omite días AR-only con operación local.
+  - **Solo lun–vie**: descartada — origen del hallazgo H3.
+- **Archivos**: `data/storage.py`, `scripts/run_paper_live.py`, `scripts/run_whatif_sim.py`, `tests/test_run_paper_live.py`, `tests/test_data_storage.py`, `POLICY.md`, `README.md`, `AGENTS.md`, `docs/project-overview.md`, `CHANGELOG.md`
+- **Ver también**: **ADR-039** (persistencia fills/snapshots), **ADR-050** (runbook F3), **ADR-054** (calendario obligatorio)
 
 ---
 

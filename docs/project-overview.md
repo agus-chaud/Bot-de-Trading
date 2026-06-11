@@ -212,9 +212,12 @@ Modulos offline que evaluan si el ranking del motor corto tiene edge predictivo 
 | `reporting/scenario.py` | Escenarios what-if con overrides parametricos de `short_term_engine` |
 | `reporting/data_quality_envelope.py` | Envoltorio de confianza (`stale_marks`, `imputed_pct`, umbrales policy) |
 | `scripts/run_signal_ic_now.py` | CLI de medicion IC sobre `data/market.db` |
-| `scripts/run_scenario.py` | CLI de escenarios what-if |
+| `scripts/run_scenario.py` | CLI de escenarios what-if (IC / señal) |
+| `scripts/run_whatif_sim.py` | Simulacion what-if de **cartera** 30/70 sobre copia aislada de DB (fills, equity, posiciones); no paper-live productivo |
 
 Tras limpiar la mezcla USD/ARS, el IC a h=1 cayo de 0.146 a 0.087 (~40 % del edge aparente era artificial). La narrativa completa de complicaciones encadenadas esta en `docs/complicaciones-tecnicas.md`.
+
+**Limitacion de datos (jun 2026)**: OHLCV **XBUE** en `market.db` termina **2026-06-02** mientras **XNYS** llega a 2026-06-09. Backtests o sims que extienden mas alla del 02-jun pueden valuar posiciones AR en pesos con precios USD (fallback) y distorsionar equity. `run_whatif_sim.py` cierra por defecto en 2026-06-02. Pendiente: extender fetch AR y registrar corporate actions de ratio CEDEAR (p. ej. salto SPY 50325→18880 ARS sin ajuste).
 
 ### Diagnostico pre-gate (`notebooks/pre_gate_diagnostic.ipynb`)
 
@@ -261,9 +264,11 @@ flowchart LR
 
 `scripts/run_paper_live.py` ejecuta el pipeline dia a dia contra OHLCV real en SQLite:
 
-- Detecta el ultimo dia procesado (`get_last_snapshot_day("paper_live")`) y hace catch-up idempotente de los dias faltantes (solo dias habiles lun–vie en el calculo de gap).
-- **Calendario obligatorio** (**ADR-054**): carga `policy.calendar.source_of_truth` (`config/calendars/trading_days.v1.yaml` por defecto) antes del catch-up. Si falta o esta vacio → `exit 1`. Regenerar: `python scripts/build_trading_days_yaml.py`. Flag `--no-calendar` solo para tests.
-- **Politica F3**: si el gap supera **3** dias habiles, `exit(2)` y requiere intervencion manual (no hace catch-up masivo automatico). Ver **ADR-050** y `POLICY.md` §15.
+- Detecta el ultimo dia procesado (`get_last_snapshot_day("paper_live")`) y hace catch-up idempotente de los dias faltantes. El **conteo de gap para F3** usa la union de sesiones US (XNYS) y dias habiles AR (XBUE) del calendario versionado — no lun-vie generico (**T1.4**, **ADR-055**). Fallback lun-vie solo con `--no-calendar`.
+- **Calendario obligatorio** (**ADR-054**): carga `policy.calendar.source_of_truth` (`config/calendars/trading_days.v1.yaml` por defecto) **antes** del check F3 y del catch-up. Si falta o esta vacio → `exit 1`. Regenerar: `python scripts/build_trading_days_yaml.py`. Flag `--no-calendar` solo para tests.
+- **`portfolio_meta` (T1.1)**: capital inicial y moneda bloqueados tras primera corrida; mismatch CLI vs DB → `exit 1`.
+- **`short_cash` (T1.3)**: columna `paper_snapshots.short_cash` = `ledger.short_cash` (ADR-039 / ADR-055).
+- **Politica F3**: si el gap supera **3** dias de mercado (segun calendario), `exit(2)` y requiere intervencion manual (no hace catch-up masivo automatico). Ver **ADR-050**, **ADR-055** y `POLICY.md` §15.
 - Si un dia del gap **no tiene barras** (feriado AR, mercado cerrado, fetch incompleto), registra **warning y continua** con el siguiente dia — no aborta todo el rango (**ADR-050**).
 - Persiste fills y snapshots en `data/market.db` bajo mode `paper_live`.
 - Replay de ledger desde fills anteriores para mantener estado coherente (`replay_ledger_from_fills`). Regresion: golden fixture en `tests/fixtures/replay_golden/` + `tests/test_replay_golden.py`.
@@ -293,7 +298,7 @@ flowchart LR
 | Situacion | Accion |
 |-----------|--------|
 | Gap ≤ 3 dias | Dejar que el cron o un `workflow_dispatch` sin fecha lo procese. |
-| Gap > 3 dias (F3) | Varios dispatch con `date` = ultimo dia de cada bloque de ≤3 habiles, o local: `fetch_daily --lookback 120` + `run_paper_live --date ...` en tandas + push a `paper-live-data`. |
+| Gap > 3 dias (F3) | Varios dispatch con `date` = ultimo dia de cada bloque de ≤3 dias de mercado (calendario US∪AR), o local: `fetch_daily --lookback 120` + `run_paper_live --date ...` en tandas + push a `paper-live-data`. |
 | Conflicto al `pull` en `data/market.db` | Puntero LFS: `git checkout --ours data/market.db` (DB local) o `--theirs` (remoto), `git add`, commit merge. No editar `<<<<<<<` en el puntero. |
 | Codigo nuevo en `main` | `git checkout paper-live-data && git merge main` antes de operar localmente. |
 

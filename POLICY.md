@@ -364,7 +364,7 @@ Esta sección norma el orquestador diario `scripts/run_paper_live.py` y el workf
 
 | Regla | Valor | Comportamiento |
 |-------|-------|----------------|
-| **F3** | Máximo **3** días hábiles (lun–vie) entre el último `paper_snapshots.trading_day` y el día objetivo | Si el gap es mayor, el script termina con **código 2** y mensaje de intervención manual. No se procesa catch-up masivo en una sola corrida. |
+| **F3** | Máximo **3** días de mercado entre el último `paper_snapshots.trading_day` y el día objetivo | Cuenta la **unión** de sesiones US (XNYS) y días hábiles AR (XBUE) según `policy.calendar.source_of_truth` — no lun–vie genérico. Si el gap es mayor, el script termina con **código 2** e intervención manual. Fallback lun–vie solo con `--no-calendar` (tests). Ver **ADR-055**. |
 | Recuperación | Tandas de ≤3 días | `workflow_dispatch` con input `date` = último día de cada bloque, o ejecución local equivalente + push a `paper-live-data`. |
 | Día sin barras | Feriado / mercado cerrado / fetch incompleto | **Warning y continuar** con el siguiente día del gap; no abortar todo el rango por un solo día sin OHLCV (**ADR-050**). |
 

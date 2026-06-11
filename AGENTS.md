@@ -94,11 +94,11 @@ El proyecto usa dos ramas con responsabilidades distintas:
 
 - El **workflow** (`paper_live_daily.yml`) vive en `main` (GitHub lee schedule/dispatch del default branch), pero hace `checkout` de `paper-live-data` para ejecutar.
 - **Secretos IOL en GitHub Actions**: `IOL_USER` y `IOL_PASS` deben existir como *repository secrets*. Variables de entorno locales del operador **no** aplican al runner. Sin ellos, fetch AR degrada y el catch-up puede fallar.
-- **Política F3** (`run_paper_live.py`): máximo **3** días hábiles de catch-up por corrida; `exit 2` si el gap es mayor (recuperación manual en tandas). Días sin OHLCV en el gap se **saltan** (warning), no abortan el rango completo (**ADR-050**).
+- **Política F3** (`run_paper_live.py`): máximo **3** días de mercado de catch-up por corrida (unión sesiones US + días hábiles AR según `TradingCalendarStore`; **T1.4** / **ADR-055**); `exit 2` si el gap es mayor (recuperación manual en tandas). Días sin OHLCV en el gap se **saltan** (warning), no abortan el rango completo (**ADR-050**).
 - **Sincronización de código**: `git checkout paper-live-data; git merge main` trae cambios de código sin perder la DB.
 - **Git LFS**: `data/*.db` en `paper-live-data` se trackea con LFS (`.gitattributes`); en `main` la DB está gitignoreada. Conflictos de merge en `market.db`: resolver puntero con `git checkout --ours|--theirs`, nunca editar `<<<<<<<` en el puntero.
 - **Notificación de fallos**: el workflow crea un issue GitHub automáticamente si algún step falla (detección temprana, evita violar F3).
-- Decisiones: **ADR-040** (modelo branches + workflow), **ADR-050** (incidente may–jun 2026, runbook).
+- Decisiones: **ADR-040** (modelo branches + workflow), **ADR-050** (incidente may–jun 2026, runbook), **ADR-055** (auditoría persistencia + F3).
 
 ## Integración largo en paper-live (ADR-044)
 
@@ -118,11 +118,13 @@ El proyecto usa dos ramas con responsabilidades distintas:
 
 ## Paper-live: calendario obligatorio (ADR-054)
 
-- `scripts/run_paper_live.py` carga el YAML de `policy.calendar.source_of_truth` **antes** del catch-up. Si falta o está vacío → `exit 1` (no degradar con `calendar_store=None`).
-- `--no-calendar`: opt-out explícito para tests; desactiva flags de sesión en `MarketOpen` (modo permisivo).
+- `scripts/run_paper_live.py` carga el YAML de `policy.calendar.source_of_truth` **antes** del check F3 y del catch-up. Si falta o está vacío → `exit 1` (no degradar con `calendar_store=None`).
+- `--no-calendar`: opt-out explícito para tests; desactiva flags de sesión en `MarketOpen` (modo permisivo) y usa fallback lun–vie para F3.
 - Regenerar calendario: `python scripts/build_trading_days_yaml.py`. Stub de tests: `tests/fixtures/calendars/trading_days_stub.v1.yaml`.
 - Golden replay (T0.2): `tests/fixtures/replay_golden/` + `tests/test_replay_golden.py` — caracterización de `replay_ledger_from_fills` antes de cambios en persistencia de capital.
 - **`portfolio_meta` (T1.1)**: tabla SQLite `portfolio_meta` — `starting_cash`, `currency` (`ARS`/`USD`), `inception_date` por `mode`. Primera corrida escribe; siguientes validan. Default CLI: 3_000_000 ARS.
+- **`short_cash` en snapshots (T1.3)**: `persist_snapshot(..., short_cash=ledger.short_cash)` — no usar `cash × weights.short` (**ADR-039**, **ADR-055**).
+- **Sim what-if cartera**: `scripts/run_whatif_sim.py` — backtest 30/70 aislado sobre copia de DB; no reemplaza `run_paper_live.py` ni `run_scenario.py`.
 
 ## Convenciones
 

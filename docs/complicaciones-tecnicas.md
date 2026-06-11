@@ -2,7 +2,7 @@
 
 Este documento consolida **todas** las complicaciones técnicas relevantes que enfrentó el proyecto, con su causa raíz, cómo se detectaron y cómo se resolvieron. Está pensado como guion de defensa oral: ante la pregunta *"¿qué complicaciones tuviste?"*, acá está la lista completa con el detalle suficiente para responder con criterio, no de memoria.
 
-**Última actualización**: 2026-06-09. Complementa `docs/project-overview.md` (arquitectura y estado) y `decisiones-tecnicas.md` (**53 ADRs**). La suite del repo tiene **601** tests en CI.
+**Última actualización**: 2026-06-10. Complementa `docs/project-overview.md` (arquitectura y estado) y `decisiones-tecnicas.md` (**54 ADRs**). La suite del repo tiene **601+** tests en CI.
 
 Cada complicación sigue la misma estructura: **Síntoma**, **Causa raíz**, **Cómo se detectó**, **Resolución**, **Estado** y **Lección**.
 
@@ -21,8 +21,10 @@ No reemplaza el registro de decisiones (`decisiones-tecnicas.md`): los ADR citad
 | 7 | Veredicto de señal inflado por datos sucios | Medición de señal | Resuelto (revelado por #6) |
 | 8 | Breadth insuficiente para medir la señal | Medición de señal | **En progreso** (universo ampliado; falta re-medición U2) |
 | 9 | Paper-live CI caído (secretos, F3, feriados, LFS) | Operación / CI | **Resuelto** (verificado 2026-06-02) |
+| 10 | Calendario de producción reemplazado por stub de tests | Config / Riesgo | **Resuelto** (**ADR-054**) |
+| 11 | Cobertura XBUE truncada + ratio CEDEAR sin ajustar | Datos / Valuación sim | **Identificado** (mitigado en `run_whatif_sim.py`) |
 
-Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una tapaba a la otra. El 401 de IOL (#1) ocultaba el bug de mapeo (#3), que a su vez quedaba enmascarado por el fallback silencioso a Byma (#4). La mezcla de monedas (#6) inflaba un veredicto de señal (#7) que, al limpiarse, dejó al descubierto el problema real de fondo: falta de amplitud del universo (#8). En operación, la caída del CI paper-live (#9) mezcló secretos ausentes, F3 y feriados sin barras — resuelto con runbook **ADR-050**. Resolver una capa fue, repetidamente, la condición para ver la siguiente.
+Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una tapaba a la otra. El 401 de IOL (#1) ocultaba el bug de mapeo (#3), que a su vez quedaba enmascarado por el fallback silencioso a Byma (#4). La mezcla de monedas (#6) inflaba un veredicto de señal (#7) que, al limpiarse, dejó al descubierto el problema real de fondo: falta de amplitud del universo (#8). En operación, la caída del CI paper-live (#9) mezcló secretos ausentes, F3 y feriados sin barras — resuelto con runbook **ADR-050**. La auditoría jun 2026 (#10, **ADR-054** / **ADR-055**) y la primera sim de cartera (#11) mostraron que calendario y datos AR incompletos distorsionan PnL tanto como bugs de código. Resolver una capa fue, repetidamente, la condición para ver la siguiente.
 
 ---
 
@@ -155,8 +157,23 @@ Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una t
   2. Mover stub a `tests/fixtures/calendars/trading_days_stub.v1.yaml`.
   3. `load_required_calendar_store()` en `run_paper_live.py` — fail-fast `exit 1` si falta; `--no-calendar` solo para tests.
   4. Golden replay: `tests/fixtures/replay_golden/` antes de persistir capital en DB (**T0.2**).
-- **Estado**: **Resuelto** en codigo y docs; pendiente merge `main` → `paper-live-data` para que CI use el fix.
+- **Estado**: **Resuelto** en codigo y docs (**ADR-054**).
 - **Leccion**: nunca mezclar fixtures de tests con `config/` operativo; degradacion silenciosa de guardrails es peor que un crash.
+
+---
+
+## 11. Cobertura OHLCV XBUE truncada y ratio CEDEAR sin ajustar (jun 2026)
+
+- **Sintoma**: simulaciones what-if de cartera (`run_whatif_sim.py`) con fin > **2026-06-02** muestran equity colapsado (~-48%) pese a operacion aparentemente normal; SPY CEDEAR aparece con perdida ficticia grande.
+- **Causa raiz**:
+  1. **Datos AR**: toda la OHLCV **XBUE** en `market.db` termina **2026-06-02** (XNYS llega a 2026-06-09). Dias posteriores sin barra AR hacen que `mark_to_market` carry-forward use precio **XNYS** (USD) para posiciones compradas en **ARS** — mezcla de monedas en valuacion.
+  2. **Ratio CEDEAR**: SPY en XBUE salta de ~50325 ARS (2026-03-02) a ~18880 ARS (2026-06-01) sin corporate action registrada, mientras en USD sube — perdida aparente por cambio de ratio, no por mercado.
+- **Como se detecto**: primera corrida de `run_whatif_sim.py` (500k / 1M ARS, mar-jun 2026); al acotar fin a 2026-06-02 y aplicar overlay XBUE en resumen, retornos pasan a +6–9%.
+- **Resolucion parcial**:
+  - `run_whatif_sim.py` default `--end 2026-06-02` y resumen con overlay XBUE (ADR-048).
+  - Documentacion en `docs/project-overview.md` y README.
+- **Pendiente**: extender `fetch_daily` / backfill AR mas alla del 02-jun; registrar splits/ratios CEDEAR en `corporate_actions` v1.
+- **Leccion**: antes de interpretar PnL de sims en pesos, verificar `MAX(ts)` por venue y corporate actions; un hueco de datos AR no es “mala estrategia”, es mala valuacion.
 
 ---
 

@@ -128,18 +128,24 @@ La transición a real está planteada como gate, no como salto de fe:
   - `docs/complicaciones-tecnicas.md` — guion de las 8 complicaciones técnicas vividas (IOL 401, mezcla de monedas, breadth, etc.).
 
 - **Paper-live daily orchestrator**:
-  - `scripts/run_paper_live.py` — CLI que ejecuta el pipeline día a día contra OHLCV real en SQLite, con catch-up automático y política F3 (gap > 3 días hábiles → exit(2), intervención manual).
+  - `scripts/run_paper_live.py` — CLI que ejecuta el pipeline día a día contra OHLCV real en SQLite, con catch-up automático y política F3 (gap > 3 días de mercado US∪AR → exit(2), intervención manual).
   - **Calendario obligatorio**: carga `policy.calendar.source_of_truth` antes del catch-up; si falta → `exit 1`. `--no-calendar` solo para tests (**ADR-054**). Regenerar: `python scripts/build_trading_days_yaml.py`.
   - **`portfolio_meta` (T1.1)**: primera corrida persiste `--initial-cash` y `--currency` (default **3_000_000 ARS**); corridas siguientes validan — mismatch → `exit 1`. DB legacy con snapshots sin meta: usar una vez `--init-portfolio-meta --initial-cash 1000 --currency USD` (ajustar al historial real).
+  - **`short_cash` en snapshots (T1.3)**: columna `paper_snapshots.short_cash` persiste `ledger.short_cash` (cash real del bucket corto), no `cash × weights.short` (**ADR-039**, **ADR-055**).
+  - **Gap F3 con calendario real (T1.4)**: el conteo de días para F3 usa la **unión** de sesiones US (XNYS) y días hábiles AR (XBUE) del YAML; el calendario se carga **antes** del check F3. Evita falsos `exit 2` en feriados US y no omite días AR-only (**ADR-055**).
   - Con `--enable-long-engine`, tras el **corto** se construye una copia de `daily_bars` y se **sobrescriben** los precios de las líneas del **`long_term_engine`** con OHLCV **XBUE** cuando el policy usa calendario **AR**, de modo que CEDEAR/pesos (p. ej. `SPY`) no usen cierres **XNYS** por el merge global — ver **ADR-048**.
   - **Soporte para ambos sleeves**: con ese flag se ejecuta short → long sobre el mismo ledger/broker; fills combinados y snapshot final con MTM usando la copia de barras cuando el largo está activo. Sin flag (default), solo corto.
   - `data/storage.py` — `get_last_snapshot_day(mode)` para detectar último día procesado.
   - `.github/workflows/paper_live_daily.yml` — cron Lun–Vie 10:00 UTC (post-cierre US) + `workflow_dispatch` (input opcional `date`); opera sobre branch `paper-live-data` y commitea la DB tras cada corrida. Incluye step de **fetch OHLCV** previo al pipeline (`fetch_daily.py --lookback 5`) y **notificación automática** (issue GitHub) ante fallos.
   - **Secretos GitHub (obligatorio para CI)**: `IOL_USER` y `IOL_PASS` en *Settings → Secrets and variables → Actions*. Variables locales de Windows **no** alimentan el runner. Diagnóstico: `python scripts/diagnose_iol_auth.py`.
-  - **Política F3**: catch-up automático de hasta **3** días hábiles por corrida; gap mayor → `exit(2)` y recuperación manual en tandas (`workflow_dispatch` con `date` o local + push). Días sin barras (feriados) se **saltan con warning** sin abortar todo el rango (**ADR-050**).
+  - **Política F3**: catch-up automático de hasta **3** días de mercado por corrida (unión US + AR según calendario; ver arriba); gap mayor → `exit(2)` y recuperación manual en tandas (`workflow_dispatch` con `date` o local + push). Días sin barras (feriados) se **saltan con warning** sin abortar todo el rango (**ADR-050**).
   - **Branch `paper-live-data`**: rama dedicada para datos operativos diarios (DB + fills + snapshots); `main` se mantiene limpio para evolución de código. Git LFS para `data/*.db` evita inflación del repo por commits binarios diarios. Conflictos en `data/market.db` al hacer merge: resolver puntero LFS con `git checkout --ours` o `--theirs`, no editar marcadores `<<<<<<<` a mano.
   - Tests en `tests/test_data_storage.py`, `tests/test_run_paper_live.py` (gap detection, F3 exit code, single/multi-day integration, idempotencia, **calendario obligatorio**, **feature flag long on/off**) y `tests/test_replay_golden.py` (golden fixture fills → ledger replay).
-  - Decisiones registradas en `decisiones-tecnicas.md` (**ADR-040**, **ADR-044**, **ADR-048**, **ADR-050**, **ADR-054**).
+  - Decisiones registradas en `decisiones-tecnicas.md` (**ADR-040**, **ADR-044**, **ADR-048**, **ADR-050**, **ADR-054**, **ADR-055**).
+
+- **Simulación what-if de cartera** (research / análisis, no paper-live productivo):
+  - `scripts/run_whatif_sim.py` — corre estrategia **30/70** (short + long) día a día sobre **copia aislada** de `market.db`; reporta equity, fills y posiciones. No aplica gate F3 (backtests multi-mes intencionales). Default fin **2026-06-02** (último día con OHLCV XBUE completo al jun 2026).
+  - Diferencia de `run_scenario.py`: este mide **IC de señal** con overrides paramétricos; `run_whatif_sim.py` simula **ejecución completa** con broker, ledger y persistencia en DB scratch (`data/_sim/`).
 
 - **Gate KPI OOS activo** (Fase 5, gate-ramp):
   - `kpi_oos_gate.enabled: true` en `config/policy.v1.yaml` con 7 umbrales bloqueantes pre-registrados (2026-05-11): Sharpe ≥ 0.30, Sortino ≥ 0.40, DD total ≥ -18%, DD corto ≥ -10%, DD largo ≥ -25%, turnover largo ≤ 8%, alpha ≥ -2%.
@@ -177,7 +183,7 @@ La transición a real está planteada como gate, no como salto de fe:
 - `data/venue_policy.py`: contrato único de venue por market tag; evita mezcla USD/ARS en lectores de señal y pre-gate (**ADR-052**).
 - `kpi_oos_gate` + `reporting/kpi_walk_forward` + `scripts/report_kpis_walk_forward.py`: varias ventanas OOS sobre la misma serie, mismo informe v3 por tramo, tabla maestra y gate reproducible opcional (**ADR-034**).
 - `tests/fixtures/kpi_golden` + `tests/test_kpi_regression_golden.py`: regresión con dataset fijo de 60 días y JSON golden en CI (**ADR-035**).
-- `scripts/run_paper_live.py`: orquestador diario paper-live de ambos sleeves — gap detection (F3), catch-up idempotente, **calendario obligatorio** (`load_required_calendar_store`, `--no-calendar` para tests), replay de ledger, persistencia de fills/snapshots bajo mode `paper_live`. Flag `--enable-long-engine` (default off) activa ejecución short → long con **overlay de precios XBUE** para el universo del largo AR (**ADR-048**), fills combinados y MTM consistente con CEDEAR/pesos.
+- `scripts/run_paper_live.py`: orquestador diario paper-live de ambos sleeves — gap detection (F3 con calendario US∪AR), catch-up idempotente, **calendario obligatorio** (`load_required_calendar_store`, `--no-calendar` para tests), replay de ledger, persistencia de fills/snapshots (`short_cash` desde `ledger.short_cash`, **T1.3**). Flag `--enable-long-engine` (default off) activa ejecución short → long con **overlay de precios XBUE** para el universo del largo AR (**ADR-048**), fills combinados y MTM consistente con CEDEAR/pesos.
 - `.github/workflows/paper_live_daily.yml`: cron + dispatch sobre branch `paper-live-data`; fetch OHLCV + pipeline + commit DB + issue on failure.
 - `event_engine`: orquestador diario con soporte para `execution_mode` (auto/semi_auto) y bypass de stop loss en semi_auto.
 - Flujo completo: Data -> Engines -> `risk_guardrails` -> Allocator -> `paper_broker_sim` -> `ledger`; ambos motores convergen en el mismo núcleo para mantener consistencia y auditoría.
@@ -217,14 +223,15 @@ python scripts/run_paper_live.py --date 2026-05-09 --db data/market.db --enable-
 python scripts/fetch_daily.py --lookback 120 --db data/market.db   # backfill OHLCV antes de recuperar gap largo
 python scripts/diagnose_iol_auth.py   # validar credenciales IOL (no imprime secretos)
 python scripts/run_signal_ic_now.py   # medición IC de señal sobre market.db
-python scripts/run_scenario.py --override '{"momentum_lookback_days": 15}'   # escenario what-if
+python scripts/run_scenario.py --override '{"momentum_lookback_days": 15}'   # escenario what-if (IC/señal)
+python scripts/run_whatif_sim.py --start 2026-03-01 --end 2026-06-02 --currency ARS   # sim cartera 30/70 aislada
 ```
 
 **Recuperación paper-live tras fallos de CI** (resumen; detalle en `docs/project-overview.md` §8 y **ADR-050**):
 
 1. Configurar `IOL_USER` / `IOL_PASS` en GitHub Secrets.
 2. `git checkout paper-live-data && git pull && git lfs pull`.
-3. Si gap > 3 días: `fetch_daily --lookback 120` y varias corridas de `run_paper_live --date <último día del bloque>` (≤3 hábiles por tanda) o `workflow_dispatch` equivalente.
+3. Si gap > 3 días de mercado (calendario US∪AR): `fetch_daily --lookback 120` y varias corridas de `run_paper_live --date <último día del bloque>` (≤3 por tanda) o `workflow_dispatch` equivalente.
 4. `git push origin paper-live-data`.
 
 Por módulo (desarrollo acotado):
