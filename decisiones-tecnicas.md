@@ -2,7 +2,7 @@
 
 Este documento registra las decisiones técnicas relevantes del proyecto, su contexto, el porqué, consecuencias y alternativas evaluadas.
 
-**Última actualización**: 2026-06-09 — **53 ADRs** aceptadas (001–053). Las complicaciones técnicas vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`; el overview de arquitectura y estado operativo está en `docs/project-overview.md`.
+**Última actualización**: 2026-06-11 — **56 ADRs** aceptadas (001–057). Las complicaciones técnicas vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`; el overview de arquitectura y estado operativo está en `docs/project-overview.md`.
 
 ## Cómo usar este archivo
 
@@ -11,18 +11,20 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 - Cuando una decisión cambie, no borrar el historial: marcar la anterior como `reemplazada` y enlazar la nueva.
 - Ante conflicto numérico entre `POLICY.md` y `config/policy.v1.yaml`, actualizar ambos en el mismo cambio y anotar el motivo aquí o en el ADR afectado.
 
-## Índice por tema (53 ADRs)
+## Índice por tema (56 ADRs)
 
 | Tema | ADRs |
 |------|------|
 | Filosofía y arquitectura | 001–004, 014 |
 | Riesgo y guardrails | 002, 005, 015, 020, 022, 026, 036, 041, 042, 044, 051 |
 | Motores corto / largo | 011–013, 016–017, 042, 043, 045–048 |
-| Data layer y calidad | 021, 037, 047, 049, 052, 053 |
+| Data layer y calidad | 021, 037, 047, 049, 052, 053, 056 |
 | Simulación y ledger | 008–010, 018–019, 025, 039, 051 |
 | KPI, validación y gates | 027–035, 041 |
-| Paper-live y operación | 040, 044, 048, 050 |
+| Paper-live y operación | 040, 044, 048, 050, 054, 055 |
 | Señal y medición offline | 042, 052, 053 (+ `reporting/signal_ic.py`, `reporting/scenario.py`; ver ADR-052) |
+| Connector AR / IOL | 049, 056 |
+| Testing y convenciones | 057 |
 | Tooling / fixes menores | 023–024, 038 |
 
 ---
@@ -1316,6 +1318,53 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Solo lun–vie**: descartada — origen del hallazgo H3.
 - **Archivos**: `data/storage.py`, `scripts/run_paper_live.py`, `scripts/run_whatif_sim.py`, `tests/test_run_paper_live.py`, `tests/test_data_storage.py`, `POLICY.md`, `README.md`, `AGENTS.md`, `docs/project-overview.md`, `CHANGELOG.md`
 - **Ver también**: **ADR-039** (persistencia fills/snapshots), **ADR-050** (runbook F3), **ADR-054** (calendario obligatorio)
+
+---
+
+## ADR-056 — Robustez del connector IOL: alias de campos + fallback Byma ante respuesta vacía
+
+- **Fecha**: 2026-06-11
+- **Estado**: aceptada
+- **Contexto**: El workflow paper-live (run #27, 2026-06-11) traía data AR **solo por Byma**: IOL no aportaba una sola fila. Dos bugs encadenados en `data/connectors/ar_connector.py`:
+  - **B1 — mapeo de campos**: `_normalize_iol` exigía las keys `fecha` y `volumen`, pero el endpoint `seriehistorica` real de IOL devuelve `fechaHora` y `volumenNominal`. Cada barra lanzaba `DataError "Missing keys"` → IOL devolvía `[]` para **todos** los símbolos AR.
+  - **B2 — fallback solo ante error de red**: `fetch_ar_ohlcv_with_trace` caía a Byma únicamente cuando IOL fallaba por red (`result is None`). Si IOL respondía `200` con **lista vacía** (o `data_error` → `result == []`), retornaba `[]` **sin** consultar Byma. IOL no sirve varios CEDEARs (y algunos Merval como BMA/LOMA) en ese endpoint y devuelve `[]`; el connector aceptaba ese vacío y nunca probaba Byma, que **sí** tiene la serie.
+- **Decisión**:
+  1. **Alias por campo** en `_normalize_iol` (`_IOL_*_KEYS`, primer nombre presente gana): `fechaHora|fecha`, `volumenNominal|volumen`, `ultimoPrecio|cierre`, `apertura`/`maximo`/`minimo`. El volumen usa **solo** `volumenNominal|volumen` (cantidad de nominales), **nunca** `montoOperado` ($), para no corromper el notional `close × volume` del ranking de universo (**ADR-047**). El `DataError` ahora **lista las keys recibidas** → desajuste futuro autodiagnosticable.
+  2. **Fallback ante vacío**: IOL `[]` (sin datos o `data_error`) ya no retorna temprano; cae al fallback Byma (salvo `iol_only`, que respeta su contrato). La atribución de fuente en `fetch_log` mantiene el fallback **visible** (**ADR-049**), evitando el enmascaramiento de la complicación #4.
+- **Por qué**: IOL es **selectivo** sobre qué símbolos sirve en `seriehistorica`; el corte no es "CEDEAR vs Merval" (BMA y LOMA también caen vacíos). Un fallback robusto por símbolo es la solución correcta, no una lista de excepciones. Aceptar el vacío de la fuente primaria como respuesta final ocultaba datos que la secundaria tenía.
+- **Consecuencias**:
+  - Tras el fix (verificado en run_dispatch 2026-06-11): **40/41** símbolos AR con `source=iol`; AR-nativos (GGAL, YPFD, PAMP, ALUA, TXAR…) frescos hasta 2026-06-10 (`rows_by_source={byma:0, iol:3}`). El "corte XBUE 2026-06-02" era consecuencia de B1, no una limitación real.
+  - Los CEDEARs (IOL vacío) ahora se rellenan por Byma; histórico ARS de CEDEAR disponible vía fallback.
+  - Costo: una llamada Byma extra cuando IOL viene vacío. Aceptable frente a la pérdida de datos.
+- **Alternativas consideradas**:
+  - **Renombrar la key fija `fecha`→`fechaHora`**: descartada — frágil; si IOL cambia de nuevo, vuelve a romper. Los alias toleran ambos contratos.
+  - **Whitelist de símbolos "IOL-no-sirve"**: descartada — IOL es selectivo y cambiante; mantener la lista a mano es deuda. El fallback por vacío lo cubre genéricamente.
+  - **`montoOperado` como volumen**: descartada — corrompe el notional (es $, no nominales).
+- **Archivos**: `data/connectors/ar_connector.py`, `tests/test_data_ar_connector.py`
+- **Ver también**: **ADR-049** (fetch_log / atribución de fuente), **ADR-057** (lección de testing), complicaciones #3 y #12
+
+---
+
+## ADR-057 — Convención de testing: el test afirma el comportamiento deseado, no la suposición del código
+
+- **Fecha**: 2026-06-11
+- **Estado**: aceptada
+- **Contexto**: Tres bugs de producción **pasaron CI en verde** porque el test fue escrito desde la **misma suposición equivocada** que el código:
+  - **Mezcla de monedas (#6/ADR-052)**: los unit tests usaban un único venue por símbolo, así que la mezcla USD/ARS nunca aparecía en pruebas; el IC inflado (0.146) se veía sano.
+  - **Mapeo de keys IOL (#3/ADR-056)**: el fixture `_IOL_PAYLOAD` usaba `fecha`/`volumen` — las keys que el código asumía, no las que devuelve la API (`fechaHora`/`volumenNominal`). Test verde, producción sin una fila de IOL.
+  - **Fallback ante vacío (#12/ADR-056)**: dos tests **afirmaban `result == []`** ante IOL `data_error` — es decir, afirmaban el bug como si fuera el contrato deseado.
+- **Decisión**: Convención obligatoria para tests nuevos y al tocar tests existentes:
+  1. El test afirma el **comportamiento de negocio deseado** (qué debería pasar), no replica lo que el código hace hoy.
+  2. Los **fixtures reflejan la realidad de la fuente externa** (contrato real de la API/feed), no la conveniencia del parser. Si no se conoce el contrato real, el test debe documentarlo como supuesto explícito y el error de runtime debe ser autodiagnosticable (volcar lo recibido).
+  3. Ante un caso límite (vacío, error, dato faltante), el test afirma la **acción de recuperación esperada** (p. ej. "cae al fallback"), no el síntoma del bug (p. ej. "retorna vacío").
+- **Por qué**: un test verde **no garantiza nada** si valida la suposición y no la realidad; da una falsa sensación de seguridad y deja pasar exactamente la clase de bug más cara (datos silenciosamente equivocados). Es deuda peor que la falta de test, porque **parece** cubierto.
+- **Consecuencias**:
+  - Al arreglar #3 y #12 se **reescribieron** los tests que codificaban el bug (de "afirma `[]`" a "afirma fallback Byma"); fixture `_IOL_PAYLOAD` corregido al contrato real.
+  - Refuerza el criterio *smart-testing* (testear comportamiento, no implementación) ya usado en el repo.
+- **Alternativas consideradas**:
+  - **Solo subir cobertura**: descartada — cobertura sobre suposiciones equivocadas es ruido; el problema es la *intención* del assert, no la cantidad.
+- **Archivos**: convención transversal; ejemplos en `tests/test_data_ar_connector.py`, `tests/test_signal_ic_venue_filter.py`
+- **Ver también**: **ADR-052** (#6), **ADR-056** (#3, #12), `docs/complicaciones-tecnicas.md`
 
 ---
 

@@ -357,11 +357,25 @@ La estrategia de testing prioriza comportamiento observable:
 - Filtro de venue en senal y pre-gate (`test_venue_policy`, `test_signal_ic_venue_filter`, `test_validation_short_pre_gate_venue`).
 - Escenarios what-if y envelope de calidad (`test_scenario`, `test_data_quality_envelope`).
 
-El repo cuenta con **56 archivos de test** y **635 casos** recolectados (`pytest --collect-only`), abarcando unitarios, integracion y regresion. Cobertura minima de `core_sim` >= 80 % en CI. El objetivo no es "testear por cobertura", sino reducir riesgo de regresiones en decisiones de negocio (riesgo, sizing, ejecucion, validacion y medicion de senal).
+El repo cuenta con **56 archivos de test** y **640 casos** recolectados (`pytest --collect-only`), abarcando unitarios, integracion y regresion. Cobertura minima de `core_sim` >= 80 % en CI. El objetivo no es "testear por cobertura", sino reducir riesgo de regresiones en decisiones de negocio (riesgo, sizing, ejecucion, validacion y medicion de senal).
+
+### La lección más dura: el "test verde" que mentía (**ADR-057**)
+
+> *"Un test verde no garantiza nada si el test fue escrito desde la misma suposición equivocada que el código. El test tiene que afirmar el comportamiento DESEADO, no replicar lo que el código hace."*
+
+Esta es la lección de ingeniería más valiosa del proyecto, y no salió de un libro: se vivió **tres veces**, siempre con el mismo disfraz — CI en verde, falsa seguridad, y abajo un dato silenciosamente equivocado. Los tres casos:
+
+1. **Mezcla de monedas USD/ARS** (ADR-052): los fixtures usaban **un solo venue por símbolo**, así que la mezcla de monedas que corrompía la señal nunca aparecía en pruebas. El IC inflado (0.146 → 0.087 real) se veía sano.
+2. **Mapeo de keys de IOL** (ADR-056): el fixture traía las keys que el **código asumía** (`fecha`/`volumen`), no las que devuelve la API real (`fechaHora`/`volumenNominal`). Test verde, producción sin una sola fila de IOL.
+3. **Fallback ante respuesta vacía** (ADR-056): dos tests **afirmaban `result == []`** ante IOL vacío — es decir, *afirmaban el bug como si fuera el contrato deseado*, en vez de "debe caer al fallback".
+
+El hilo común: **el test y el código compartían la misma creencia equivocada**, así que el test no podía detectar el error — se daba la mano a sí mismo. La cura no fue *más* cobertura (cobertura sobre suposiciones equivocadas es ruido), sino cambiar la **intención del assert**: del síntoma del bug ("retorna vacío") a la acción de negocio esperada ("trae el dato de la otra fuente"). Como apoyo, los errores de runtime ahora **vuelcan lo que recibieron** (el `DataError` de IOL lista las keys recibidas), para que la realidad contradiga la suposición de forma ruidosa, no silenciosa. Detalle en `docs/complicaciones-tecnicas.md` (#3, #6, #12) y convención en **ADR-057**.
+
+En defensa oral, este punto demuestra **criterio propio, no solo ejecución**: entender *por qué* un test puede mentir es más maduro que exhibir un número de cobertura.
 
 ## 11) Decisiones tecnicas clave
 
-Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (**54 ADRs**, hasta ADR-055). Los ejes principales son:
+Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (**56 ADRs**, hasta ADR-057). Los ejes principales son:
 
 - Paper-first como estrategia de construccion.
 - Riesgo deterministico y centralizado.
@@ -376,6 +390,8 @@ Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (**54 AD
 - Valuacion resiliente a huecos de datos en ledger (**ADR-051**): carry-forward + `stale_marks`.
 - Senal sin mezcla de monedas: `data/venue_policy.py` + filtro de venue en lectores de OHLCV (**ADR-052**).
 - Ampliacion del universo (+10 simbolos) para destrabar medicion de senal (**ADR-053**).
+- Robustez del connector IOL: alias de campos (`fechaHora`/`volumenNominal`) + fallback Byma ante respuesta vacia (**ADR-056**); el "corte XBUE 2026-06-02" era sintoma de este bug, ya resuelto.
+- Convencion de testing: el test afirma el comportamiento **deseado**, no la suposicion del codigo (**ADR-057**); ver seccion 10.
 
 Para defensa oral, esta seccion muestra que la arquitectura no salio de una implementacion improvisada, sino de decisiones acumuladas y justificadas. Las complicaciones vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`.
 
@@ -550,7 +566,7 @@ Documentos complementarios:
 - Politica operativa: `POLICY.md`
 - Contrato parseable: `config/policy.v1.yaml`
 - Validacion estructural: `config/policy.v1.schema.json`
-- Registro de decisiones: `decisiones-tecnicas.md` (54 ADRs)
-- Complicaciones tecnicas (guion oral, 9 casos): `docs/complicaciones-tecnicas.md`
+- Registro de decisiones: `decisiones-tecnicas.md` (56 ADRs)
+- Complicaciones tecnicas (guion oral, 12 casos): `docs/complicaciones-tecnicas.md`
 - KPI spec: `docs/kpi_report_spec.v1.md`
 - Listas blancas: `config/symbols/whitelist_us.yaml` (ETFs, stocks, ADRs), `config/symbols/whitelist_ar.yaml`, `config/symbols/whitelist_cedear.yaml`

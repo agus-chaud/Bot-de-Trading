@@ -2,7 +2,7 @@
 
 Este documento consolida **todas** las complicaciones técnicas relevantes que enfrentó el proyecto, con su causa raíz, cómo se detectaron y cómo se resolvieron. Está pensado como guion de defensa oral: ante la pregunta *"¿qué complicaciones tuviste?"*, acá está la lista completa con el detalle suficiente para responder con criterio, no de memoria.
 
-**Última actualización**: 2026-06-11. Complementa `docs/project-overview.md` (arquitectura y estado) y `decisiones-tecnicas.md` (**54 ADRs**). La suite del repo tiene **635** tests en CI (`pytest --collect-only`).
+**Última actualización**: 2026-06-11. Complementa `docs/project-overview.md` (arquitectura y estado) y `decisiones-tecnicas.md` (**56 ADRs**). La suite del repo tiene **640** tests en CI (`pytest --collect-only`).
 
 Cada complicación sigue la misma estructura: **Síntoma**, **Causa raíz**, **Cómo se detectó**, **Resolución**, **Estado** y **Lección**.
 
@@ -14,7 +14,7 @@ No reemplaza el registro de decisiones (`decisiones-tecnicas.md`): los ADR citad
 |---|--------------|------|--------|
 | 1 | IOL histórico 401 — permiso de cuenta | Datos / Auth | Resuelto |
 | 2 | URL incorrecta en el script de diagnóstico | Tooling / Diagnóstico | Identificado |
-| 3 | Bug de mapeo de keys en el connector IOL | Datos / Normalización | **Pendiente** (mitigado por fallback) |
+| 3 | Bug de mapeo de keys en el connector IOL | Datos / Normalización | **Resuelto** (**ADR-056**, verificado 2026-06-11) |
 | 4 | El fallback Byma enmascaraba el bug de IOL | Datos / Observabilidad | Mitigado |
 | 5 | Crash por hueco de datos (TXAR) en `mark_to_market` | Ledger / Valuación | Resuelto |
 | 6 | Mezcla de monedas USD/ARS (contaminación sistémica) | Datos / Señal | Resuelto |
@@ -22,9 +22,12 @@ No reemplaza el registro de decisiones (`decisiones-tecnicas.md`): los ADR citad
 | 8 | Breadth insuficiente para medir la señal | Medición de señal | **En progreso** (universo ampliado; falta re-medición U2) |
 | 9 | Paper-live CI caído (secretos, F3, feriados, LFS) | Operación / CI | **Resuelto** (verificado 2026-06-02) |
 | 10 | Calendario de producción reemplazado por stub de tests | Config / Riesgo | **Resuelto** (**ADR-054**) |
-| 11 | Cobertura XBUE truncada + ratio CEDEAR sin ajustar | Datos / Valuación sim | **Parcial**: ratio CEDEAR **resuelto**; truncamiento XBUE pendiente |
+| 11 | Cobertura XBUE truncada + ratio CEDEAR sin ajustar | Datos / Valuación sim | **Resuelto**: ratio CEDEAR ajustado; truncamiento XBUE era síntoma de #3 (**ADR-056**) |
+| 12 | Fallback Byma no disparaba ante respuesta vacía de IOL (CEDEARs en cero) | Datos / Connector | **Resuelto** (**ADR-056**, verificado 2026-06-11) |
 
-Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una tapaba a la otra. El 401 de IOL (#1) ocultaba el bug de mapeo (#3), que a su vez quedaba enmascarado por el fallback silencioso a Byma (#4). La mezcla de monedas (#6) inflaba un veredicto de señal (#7) que, al limpiarse, dejó al descubierto el problema real de fondo: falta de amplitud del universo (#8). En operación, la caída del CI paper-live (#9) mezcló secretos ausentes, F3 y feriados sin barras — resuelto con runbook **ADR-050**. La auditoría jun 2026 (#10, **ADR-054** / **ADR-055**) y la primera sim de cartera (#11) mostraron que calendario y datos AR incompletos distorsionan PnL tanto como bugs de código. Resolver una capa fue, repetidamente, la condición para ver la siguiente.
+Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una tapaba a la otra. El 401 de IOL (#1) ocultaba el bug de mapeo (#3), que a su vez quedaba enmascarado por el fallback silencioso a Byma (#4). Al arreglar el mapeo (#3, **ADR-056**) apareció un **segundo** bug de fallback (#12): IOL devuelve vacío para varios símbolos y el connector no caía a Byma, así que el "corte XBUE 2026-06-02" (#11) resultó ser otro síntoma de #3, no una limitación real. La mezcla de monedas (#6) inflaba un veredicto de señal (#7) que, al limpiarse, dejó al descubierto el problema real de fondo: falta de amplitud del universo (#8). En operación, la caída del CI paper-live (#9) mezcló secretos ausentes, F3 y feriados sin barras — resuelto con runbook **ADR-050**. La auditoría jun 2026 (#10, **ADR-054** / **ADR-055**) y la primera sim de cartera (#11) mostraron que calendario y datos AR incompletos distorsionan PnL tanto como bugs de código. Resolver una capa fue, repetidamente, la condición para ver la siguiente.
+
+> **Patrón transversal — el test verde que mentía.** Tres de estas complicaciones (#3, #6, #12) **pasaron CI en verde** porque el test estaba escrito desde la misma suposición equivocada que el código. La lección, ahora convención (**ADR-057**): *un test verde no garantiza nada si el test fue escrito desde la misma suposición equivocada que el código; el test tiene que afirmar el comportamiento DESEADO, no replicar lo que el código hace.* Ver detalle al cierre del documento.
 
 ---
 
@@ -53,11 +56,12 @@ Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una t
 ## 3. Bug de mapeo de keys en el connector IOL
 
 - **Síntoma**: con los permisos ya arreglados (ver #1), IOL respondía **200 con datos válidos**, pero el connector devolvía `history_count = 0`: no entraba ninguna fila.
-- **Causa raíz**: desajuste de **nombres de campos** entre la respuesta de IOL y lo que espera el normalizador. `data/connectors/ar_connector.py::_normalize_iol` espera las keys `fecha` y `volumen`, mientras la API devuelve `fechaHora` y `volumenNominal` / `montoOperado`. El mismatch lanza `DataError`, el connector retorna `[]`, **y la rama `DataError` no cae al fallback Byma** (solo lo hace la rama de red), con lo cual IOL nunca aporta datos.
-- **Cómo se detectó**: al cargar los 5 símbolos Merval nuevos, IOL devolvía **200** pero `history_count = 0`. La contradicción "200 sin filas" forzó mirar el normalizador.
-- **Resolución**: **PENDIENTE**. Workaround actual: el **fallback Byma** cubre la data AR, así que el pipeline no se rompe; pero IOL sigue sin aportar.
-- **Estado**: **Pendiente** (mitigado por el fallback Byma).
-- **Lección**: una **segunda capa** de problema puede quedar oculta detrás de la primera. El 401 (#1) tapaba este bug: hasta que no hubo permisos, nunca se llegó a ejecutar el mapeo, así que el desajuste de keys era invisible.
+- **Causa raíz**: desajuste de **nombres de campos** entre la respuesta de IOL y lo que espera el normalizador. `data/connectors/ar_connector.py::_normalize_iol` exigía las keys `fecha` y `volumen`, mientras el endpoint `seriehistorica` real devuelve `fechaHora` y `volumenNominal`. El mismatch lanzaba `DataError "Missing keys"` por cada barra → el connector retornaba `[]` para **todos** los símbolos AR.
+- **Cómo se detectó**: logs del run paper-live #27 (2026-06-11) con `data_error: Missing keys in IOL response item: {'volumen', 'fecha'}` en todos los símbolos AR. Que faltaran **solo** esas dos (y no `apertura`/`maximo`/etc.) delató que IOL las manda con **otro nombre**, no que la respuesta estuviera rota.
+- **Resolución** (**ADR-056**, commit `7e9477a`): `_normalize_iol` tolera **alias por campo** (primer nombre presente gana): `fechaHora|fecha`, `volumenNominal|volumen`, `ultimoPrecio|cierre`, etc. El volumen usa solo `volumenNominal|volumen` (nominales), **nunca** `montoOperado` ($), para no corromper el notional del ranking. El `DataError` ahora **lista las keys recibidas** → un futuro cambio de IOL es autodiagnosticable de un vistazo, no un "falta volumen" opaco.
+- **Verificación**: run `workflow_dispatch` 2026-06-11 → **40/41** símbolos con `source=iol`; AR-nativos con `rows_by_source={byma:0, iol:3}` (datos 100% de IOL). El "corte XBUE 2026-06-02" era consecuencia de este bug y desapareció (AR-nativos frescos al 2026-06-10).
+- **Estado**: **Resuelto**.
+- **Lección**: el test de este parseo **usaba las keys equivocadas** (`fecha`/`volumen`) — las mismas que asumía el código —, así que pasaba en verde mientras producción no traía una fila. Un test que comparte la suposición del código no prueba nada (ver patrón transversal y **ADR-057**). Y un error de datos debe **volcar lo que recibió**: un mensaje opaco esconde la causa.
 
 ---
 
@@ -67,8 +71,8 @@ Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una t
 - **Causa raíz**: un **fallback silencioso**. Ante el fallo de IOL (el bug #3), Byma rellenaba sin dejar señal visible de que la fuente primaria había fallado. El sistema "andaba", pero por la fuente equivocada.
 - **Cómo se detectó**: investigando el caso de IOL 200 con 0 filas (#3) — al rastrear de dónde salían realmente las barras AR, se vio que **siempre** eran de Byma.
 - **Resolución**: observabilidad de fuente. La tabla `fetch_log` y la atribución de fuente (**ADR-049**) hacen visible qué fuente aportó cada barra (`source` / `effective_source`, `rows_by_source`, `partial_fallback`), de modo que un IOL en 0 ya no pasa desapercibido.
-- **Estado**: **Mitigado** por observabilidad (el bug subyacente #3 sigue pendiente, pero ya no es invisible).
-- **Lección**: los **fallbacks silenciosos esconden fallas**. Un fallback sin trazabilidad de fuente convierte un componente roto en un componente "que parece andar". Hace falta saber **siempre** de qué fuente vino el dato.
+- **Estado**: **Mitigado** por observabilidad (el bug subyacente #3 ya está **resuelto** en **ADR-056**; la trazabilidad fue, además, lo que permitió verificar el fix —`source=iol`— y descubrir el segundo bug #12).
+- **Lección**: los **fallbacks silenciosos esconden fallas**. Un fallback sin trazabilidad de fuente convierte un componente roto en un componente "que parece andar". Hace falta saber **siempre** de qué fuente vino el dato — y esa misma trazabilidad es la que después confirma que el arreglo funcionó.
 
 ---
 
@@ -173,9 +177,20 @@ Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una t
   - `scripts/adjust_cedear_ratio.py` — back-adjust **idempotente**: OHLC ÷ factor y volumen × factor para las filas previas a la fecha ex; registra el evento en `corporate_actions` (tipo `cedear_ratio`, inerte para los motores) como marca de idempotencia y auditoria. Aplicado a SPY 1:3 (2026-05-29): 77 filas ajustadas, serie ahora continua.
   - **Guardrail** en `data/normalizer.py`: un cierre que mas que duplica o cae a menos de la mitad del cierre valido anterior se descarta con `suspect_ratio_jump`. Antes, el filtro de outliers (mediana ×10) dejaba pasar un salto de 3×; ahora un cambio de ratio no registrado frena el simbolo en vez de contaminar en silencio.
   - Verificado: escaneo de los 33 simbolos XBUE — SPY era el unico con el salto; produccion `paper_live` **nunca** tuvo posiciones SPY (cero impacto en snapshots reales).
-- **Pendiente (truncamiento XBUE)**: extender `fetch_daily` / backfill AR mas alla del 02-jun para alinear el corte XBUE con XNYS. `run_whatif_sim.py` sigue cerrando por defecto en 2026-06-02 mientras tanto.
-- **Estado**: **Parcial** — ratio CEDEAR **resuelto** (datos ajustados + guardrail + test); truncamiento de cobertura XBUE **pendiente**.
+- **Truncamiento XBUE — resuelto vía #3**: el corte en 2026-06-02 NO era una limitación del feed, era el síntoma del bug de mapeo de IOL (#3). Tras **ADR-056**, los AR-nativos llegan al 2026-06-10. `run_whatif_sim.py` puede extender su `--end` a medida que el fetch backfillea.
+- **Estado**: **Resuelto** — ratio CEDEAR ajustado (datos + guardrail + test); truncamiento XBUE era #3 (**ADR-056**).
 - **Leccion**: antes de interpretar PnL de sims en pesos, verificar `MAX(ts)` por venue y corporate actions; un hueco de datos AR no es "mala estrategia", es mala valuacion. Y un filtro de outliers basado en mediana **no** detecta un cambio de ratio: hace falta un control explicito de salto dia-a-dia.
+
+---
+
+## 12. Fallback Byma no disparaba ante respuesta vacía de IOL (CEDEARs en cero)
+
+- **Síntoma**: tras arreglar el mapeo de keys (#3), los CEDEARs (SPY, AAPL, KO…) y algunos Merval (BMA, LOMA) **seguían sin datos recientes**: `fetch_log` mostraba `rows_by_source={byma:0, iol:0}` y su última barra XBUE quedaba en 2026-06-02.
+- **Causa raíz**: `fetch_ar_ohlcv_with_trace` caía al fallback Byma **solo** cuando IOL fallaba por **red** (`result is None`). Si IOL respondía `200` con **lista vacía** (`result == []`), el connector aceptaba ese vacío como respuesta final y retornaba `[]` **sin** consultar Byma. IOL es **selectivo**: no sirve varios símbolos en `seriehistorica` y devuelve `[]` para ellos.
+- **Cómo se detectó**: como yfinance (Byma) es público y no requiere credenciales, se probó directo: `SPY.BA`, `AAPL.BA`, `KO.BA`, `BMA.BA` **tenían 7 barras hasta 2026-06-11**. El dato existía; el fallback no lo traía. Que BMA (Merval) también cayera vacío descartó la hipótesis "CEDEAR vs Merval": el corte lo decide IOL símbolo por símbolo.
+- **Resolución** (**ADR-056**, commit `0b55c34`): se eliminó el retorno temprano ante IOL vacío; ahora cae al fallback Byma (salvo `iol_only`, que respeta su contrato). La atribución de fuente (**ADR-049**) mantiene el fallback visible.
+- **Estado**: **Resuelto**.
+- **Lección**: aceptar el **vacío de la fuente primaria** como respuesta final esconde datos que la secundaria tiene — es un primo del fallback silencioso (#4), pero al revés: no es que el fallback enmascare, es que **no se activa**. Y de nuevo, **dos tests afirmaban `result == []`** ante IOL vacío: codificaban el bug como contrato. Se reescribieron para afirmar la conducta deseada ("cae a Byma"). Ver patrón transversal y **ADR-057**.
 
 ---
 
@@ -191,15 +206,32 @@ Una complicación menor, no de código sino de **flujo de trabajo**: parte del t
 
 | Documento | Rol |
 |-----------|-----|
-| `decisiones-tecnicas.md` | ADRs versionados (54); fuente de verdad de decisiones |
+| `decisiones-tecnicas.md` | ADRs versionados (56); fuente de verdad de decisiones |
 | `docs/project-overview.md` | Arquitectura, riesgo, paper-live, validación — guion de defensa oral |
 | `POLICY.md` | Política operativa humana (umbrales, ramp-up, F3) |
 | `README.md` | Estado actual del repo y comandos útiles |
-| `CHANGELOG.md` | Cambios recientes (ADR-051–055, runbook ADR-050; fix ratio CEDEAR + lockfile) |
+| `CHANGELOG.md` | Cambios recientes (ADR-051–057, runbook ADR-050; fix ratio CEDEAR, lockfile, mapeo+fallback IOL) |
+
+---
+
+## Patrón transversal: el test verde que mentía
+
+> *"Aprendí que un test verde no garantiza nada si el test fue escrito desde la misma suposición equivocada que el código. El test tiene que afirmar el comportamiento DESEADO, no replicar lo que el código hace."*
+
+Esta es, quizás, la lección más valiosa del proyecto, porque se repitió **tres veces** y siempre con el mismo disfraz: CI en verde, falsa sensación de seguridad, y abajo un dato silenciosamente equivocado. Codificada como convención en **ADR-057**.
+
+| # | El bug | Lo que afirmaba el test (suposición) | Lo que debía afirmar (comportamiento deseado) |
+|---|--------|--------------------------------------|----------------------------------------------|
+| **#6** | Mezcla de monedas USD/ARS | Cada fixture usaba **un solo venue** por símbolo → la mezcla nunca aparecía en pruebas; el IC inflado (0.146) se veía sano | Que una serie con barras de **dos venues** se filtre por moneda y no produzca retornos imposibles |
+| **#3** | Mapeo de keys IOL | El fixture `_IOL_PAYLOAD` traía `fecha`/`volumen` — **las keys que el código asumía**, no las que devuelve la API (`fechaHora`/`volumenNominal`) | Que el parser acepte el **contrato real** de IOL (y tolere alias) |
+| **#12** | Fallback ante IOL vacío | Dos tests afirmaban **`result == []`** ante IOL vacío/error — *afirmaban el bug como si fuera el contrato* | Que ante IOL vacío el connector **caiga a Byma** y traiga el dato |
+
+**El hilo común**: en los tres, el test y el código compartían la misma creencia equivocada, así que el test no podía detectar el error — se daba la mano a sí mismo. La cura no es *más* cobertura (cobertura sobre suposiciones equivocadas es ruido), sino cambiar la **intención del assert**: del síntoma del bug ("retorna vacío") a la acción de negocio esperada ("trae el dato de la otra fuente"). Como apoyo, los errores de runtime ahora **vuelcan lo que recibieron** (p. ej. el `DataError` de IOL lista las keys), para que la realidad contradiga a la suposición de forma ruidosa, no silenciosa.
 
 ### Cómo usar este documento en defensa oral
 
 1. Abrir con la **tabla resumen** y el hilo conductor (complicaciones encadenadas).
 2. Profundizar en **#6–#8** si preguntan por calidad de datos y medición de señal (mezcla USD/ARS → IC inflado → breadth).
 3. Usar **#9** y **ADR-050** si preguntan por operación diaria real (paper-live en GitHub Actions).
-4. Cerrar con **#3 pendiente** (bug IOL de mapeo) para mostrar honestidad técnica sobre deuda viva.
+4. Usar **#3 + #12** (connector IOL) para mostrar diagnóstico encadenado: arreglar un bug destapó el siguiente, y la trazabilidad de fuente fue la que lo hizo visible.
+5. **Cerrar con el "patrón transversal del test verde"** (arriba): es la lección de ingeniería más madura del proyecto y la que mejor demuestra criterio propio, no solo ejecución.
