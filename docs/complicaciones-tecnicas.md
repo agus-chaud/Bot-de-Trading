@@ -2,7 +2,7 @@
 
 Este documento consolida **todas** las complicaciones técnicas relevantes que enfrentó el proyecto, con su causa raíz, cómo se detectaron y cómo se resolvieron. Está pensado como guion de defensa oral: ante la pregunta *"¿qué complicaciones tuviste?"*, acá está la lista completa con el detalle suficiente para responder con criterio, no de memoria.
 
-**Última actualización**: 2026-06-10. Complementa `docs/project-overview.md` (arquitectura y estado) y `decisiones-tecnicas.md` (**54 ADRs**). La suite del repo tiene **601+** tests en CI.
+**Última actualización**: 2026-06-11. Complementa `docs/project-overview.md` (arquitectura y estado) y `decisiones-tecnicas.md` (**54 ADRs**). La suite del repo tiene **635** tests en CI (`pytest --collect-only`).
 
 Cada complicación sigue la misma estructura: **Síntoma**, **Causa raíz**, **Cómo se detectó**, **Resolución**, **Estado** y **Lección**.
 
@@ -22,7 +22,7 @@ No reemplaza el registro de decisiones (`decisiones-tecnicas.md`): los ADR citad
 | 8 | Breadth insuficiente para medir la señal | Medición de señal | **En progreso** (universo ampliado; falta re-medición U2) |
 | 9 | Paper-live CI caído (secretos, F3, feriados, LFS) | Operación / CI | **Resuelto** (verificado 2026-06-02) |
 | 10 | Calendario de producción reemplazado por stub de tests | Config / Riesgo | **Resuelto** (**ADR-054**) |
-| 11 | Cobertura XBUE truncada + ratio CEDEAR sin ajustar | Datos / Valuación sim | **Identificado** (mitigado en `run_whatif_sim.py`) |
+| 11 | Cobertura XBUE truncada + ratio CEDEAR sin ajustar | Datos / Valuación sim | **Parcial**: ratio CEDEAR **resuelto**; truncamiento XBUE pendiente |
 
 Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una tapaba a la otra. El 401 de IOL (#1) ocultaba el bug de mapeo (#3), que a su vez quedaba enmascarado por el fallback silencioso a Byma (#4). La mezcla de monedas (#6) inflaba un veredicto de señal (#7) que, al limpiarse, dejó al descubierto el problema real de fondo: falta de amplitud del universo (#8). En operación, la caída del CI paper-live (#9) mezcló secretos ausentes, F3 y feriados sin barras — resuelto con runbook **ADR-050**. La auditoría jun 2026 (#10, **ADR-054** / **ADR-055**) y la primera sim de cartera (#11) mostraron que calendario y datos AR incompletos distorsionan PnL tanto como bugs de código. Resolver una capa fue, repetidamente, la condición para ver la siguiente.
 
@@ -168,12 +168,14 @@ Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una t
 - **Causa raiz**:
   1. **Datos AR**: toda la OHLCV **XBUE** en `market.db` termina **2026-06-02** (XNYS llega a 2026-06-09). Dias posteriores sin barra AR hacen que `mark_to_market` carry-forward use precio **XNYS** (USD) para posiciones compradas en **ARS** — mezcla de monedas en valuacion.
   2. **Ratio CEDEAR**: SPY en XBUE salta de ~50325 ARS (2026-03-02) a ~18880 ARS (2026-06-01) sin corporate action registrada, mientras en USD sube — perdida aparente por cambio de ratio, no por mercado.
-- **Como se detecto**: primera corrida de `run_whatif_sim.py` (500k / 1M ARS, mar-jun 2026); al acotar fin a 2026-06-02 y aplicar overlay XBUE en resumen, retornos pasan a +6–9%.
-- **Resolucion parcial**:
-  - `run_whatif_sim.py` default `--end 2026-06-02` y resumen con overlay XBUE (ADR-048).
-  - Documentacion en `docs/project-overview.md` y README.
-- **Pendiente**: extender `fetch_daily` / backfill AR mas alla del 02-jun; registrar splits/ratios CEDEAR en `corporate_actions` v1.
-- **Leccion**: antes de interpretar PnL de sims en pesos, verificar `MAX(ts)` por venue y corporate actions; un hueco de datos AR no es “mala estrategia”, es mala valuacion.
+- **Como se detecto**: primera corrida de `run_whatif_sim.py` (500k / 1M ARS, mar-jun 2026); al acotar fin a 2026-06-02 y aplicar overlay XBUE en resumen, retornos pasan a +6–9%. El cuantil de la perdida ficticia de SPY (-30.965 ARS en 500k, -92.670 en 1M) y la paradoja "1M rinde menos que 500k" (mas SPY proporcional por lotaje) apuntaron al ratio como artefacto, no a mala estrategia.
+- **Resolucion del ratio CEDEAR** (**resuelto**, commit `7c86403`):
+  - `scripts/adjust_cedear_ratio.py` — back-adjust **idempotente**: OHLC ÷ factor y volumen × factor para las filas previas a la fecha ex; registra el evento en `corporate_actions` (tipo `cedear_ratio`, inerte para los motores) como marca de idempotencia y auditoria. Aplicado a SPY 1:3 (2026-05-29): 77 filas ajustadas, serie ahora continua.
+  - **Guardrail** en `data/normalizer.py`: un cierre que mas que duplica o cae a menos de la mitad del cierre valido anterior se descarta con `suspect_ratio_jump`. Antes, el filtro de outliers (mediana ×10) dejaba pasar un salto de 3×; ahora un cambio de ratio no registrado frena el simbolo en vez de contaminar en silencio.
+  - Verificado: escaneo de los 33 simbolos XBUE — SPY era el unico con el salto; produccion `paper_live` **nunca** tuvo posiciones SPY (cero impacto en snapshots reales).
+- **Pendiente (truncamiento XBUE)**: extender `fetch_daily` / backfill AR mas alla del 02-jun para alinear el corte XBUE con XNYS. `run_whatif_sim.py` sigue cerrando por defecto en 2026-06-02 mientras tanto.
+- **Estado**: **Parcial** — ratio CEDEAR **resuelto** (datos ajustados + guardrail + test); truncamiento de cobertura XBUE **pendiente**.
+- **Leccion**: antes de interpretar PnL de sims en pesos, verificar `MAX(ts)` por venue y corporate actions; un hueco de datos AR no es "mala estrategia", es mala valuacion. Y un filtro de outliers basado en mediana **no** detecta un cambio de ratio: hace falta un control explicito de salto dia-a-dia.
 
 ---
 
@@ -193,7 +195,7 @@ Una complicación menor, no de código sino de **flujo de trabajo**: parte del t
 | `docs/project-overview.md` | Arquitectura, riesgo, paper-live, validación — guion de defensa oral |
 | `POLICY.md` | Política operativa humana (umbrales, ramp-up, F3) |
 | `README.md` | Estado actual del repo y comandos útiles |
-| `CHANGELOG.md` | Cambios recientes (ADR-051–054, runbook ADR-050) |
+| `CHANGELOG.md` | Cambios recientes (ADR-051–055, runbook ADR-050; fix ratio CEDEAR + lockfile) |
 
 ### Cómo usar este documento en defensa oral
 
