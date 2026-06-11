@@ -165,7 +165,8 @@ Detalle y fuentes en **ADR-047** (`decisiones-tecnicas.md`).
 
 ### Tratamiento de calidad
 
-- Deteccion de outliers (rolling 5d median) y forward-fill acotado (≤3 dias, marcado como `imputed=True`).
+- Deteccion de outliers (rolling 5d median, ×10 / ÷10) y forward-fill acotado (≤3 dias, marcado como `imputed=True`).
+- **Guardrail de salto de ratio** (`suspect_ratio_jump`): un cierre que mas que duplica o cae a menos de la mitad del cierre valido anterior se descarta con warning. Captura cambios de ratio CEDEAR o splits **no registrados** que el filtro de outliers (basado en mediana) dejaba pasar. Caso origen: el CEDEAR de **SPY** cambio de ratio 1:3 el 2026-05-29 (close 56.000 → 18.750 ARS); el back-adjust se aplica con `scripts/adjust_cedear_ratio.py`, que ademas registra el evento en `corporate_actions`.
 - Flags de degradacion para no ocultar problemas.
 - Regla operativa: sin datos confiables, no se aumenta riesgo.
 
@@ -217,7 +218,7 @@ Modulos offline que evaluan si el ranking del motor corto tiene edge predictivo 
 
 Tras limpiar la mezcla USD/ARS, el IC a h=1 cayo de 0.146 a 0.087 (~40 % del edge aparente era artificial). La narrativa completa de complicaciones encadenadas esta en `docs/complicaciones-tecnicas.md`.
 
-**Limitacion de datos (jun 2026)**: OHLCV **XBUE** en `market.db` termina **2026-06-02** mientras **XNYS** llega a 2026-06-09. Backtests o sims que extienden mas alla del 02-jun pueden valuar posiciones AR en pesos con precios USD (fallback) y distorsionar equity. `run_whatif_sim.py` cierra por defecto en 2026-06-02. Pendiente: extender fetch AR y registrar corporate actions de ratio CEDEAR (p. ej. salto SPY 50325→18880 ARS sin ajuste).
+**Limitacion de datos (jun 2026)**: OHLCV **XBUE** en `market.db` termina **2026-06-02** mientras **XNYS** llega a 2026-06-09. Backtests o sims que extienden mas alla del 02-jun pueden valuar posiciones AR en pesos con precios USD (fallback) y distorsionar equity. `run_whatif_sim.py` cierra por defecto en 2026-06-02. El ratio CEDEAR de **SPY** (salto 1:3 del 2026-05-29) ya quedo **ajustado** en la DB (back-adjust + guardrail; ver "Tratamiento de calidad"). Pendiente: extender el fetch AR para alinear el corte XBUE con XNYS.
 
 ### Diagnostico pre-gate (`notebooks/pre_gate_diagnostic.ipynb`)
 
@@ -280,10 +281,10 @@ flowchart LR
 
 ### Workflow automatizado
 
-`.github/workflows/paper_live_daily.yml` corre de lunes a viernes a las 10:00 UTC (post-cierre US) y admite **`workflow_dispatch`** con input opcional `date` (`YYYY-MM-DD`):
+`.github/workflows/paper_live_daily.yml` corre de lunes a viernes a las 10:00 UTC y procesa por defecto el **dia habil de mercado anterior** (no el dia en curso); admite **`workflow_dispatch`** con input opcional `date` (`YYYY-MM-DD`):
 
 1. Checkout de rama **`paper-live-data`** (LFS activo para `data/market.db`).
-2. `pip install -r requirements.txt`.
+2. `pip install -r requirements.lock` — versiones **exactas** (pins `==`) para que el bot instale lo mismo cada dia; `requirements.txt` queda como archivo de intencion (rangos). Python **3.13** (alineado con dev local). Sync a Supabase es dependencia opcional aparte (`requirements-optional.txt`).
 3. Fetch OHLCV (`fetch_daily.py --lookback 5`) con secrets **`IOL_USER`** / **`IOL_PASS`** inyectados desde GitHub Actions (no desde el PC del operador).
 4. `run_paper_live.py` (con `--date` si se disparo dispatch manual).
 5. `git add -f data/market.db` + commit/push si hubo cambios.
@@ -356,11 +357,11 @@ La estrategia de testing prioriza comportamiento observable:
 - Filtro de venue en senal y pre-gate (`test_venue_policy`, `test_signal_ic_venue_filter`, `test_validation_short_pre_gate_venue`).
 - Escenarios what-if y envelope de calidad (`test_scenario`, `test_data_quality_envelope`).
 
-El repo cuenta con **54 archivos de test** y **601 casos** recolectados (`pytest --collect-only`), abarcando unitarios, integracion y regresion. Cobertura minima de `core_sim` >= 80 % en CI. El objetivo no es "testear por cobertura", sino reducir riesgo de regresiones en decisiones de negocio (riesgo, sizing, ejecucion, validacion y medicion de senal).
+El repo cuenta con **56 archivos de test** y **635 casos** recolectados (`pytest --collect-only`), abarcando unitarios, integracion y regresion. Cobertura minima de `core_sim` >= 80 % en CI. El objetivo no es "testear por cobertura", sino reducir riesgo de regresiones en decisiones de negocio (riesgo, sizing, ejecucion, validacion y medicion de senal).
 
 ## 11) Decisiones tecnicas clave
 
-Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (**53 ADRs** a la fecha). Los ejes principales son:
+Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (**54 ADRs**, hasta ADR-055). Los ejes principales son:
 
 - Paper-first como estrategia de construccion.
 - Riesgo deterministico y centralizado.
@@ -527,7 +528,7 @@ El proyecto esta funcional en paper-first con ambos sleeves (corto y largo) inte
 4. **Bug IOL de mapeo de keys** (mitigado por fallback Byma; ver `docs/complicaciones-tecnicas.md` §3): pendiente de fix definitivo en el connector.
 5. Cerrar brechas entre policy y ejecucion en puntos puntuales (por ejemplo, controles de concentracion sectorial en runtime si se habilitan como bloqueantes).
 6. Explorar indicadores complementarios al RSI si el drawdown mensual del bucket corto sigue siendo cuello de botella (4/13 windows passed en walk-forward 180d).
-7. Extender controles CI de cobertura y regresion a modulos fuera de `core_sim` con la misma disciplina (especialmente `validation/` y `reporting/`).
+7. Extender controles CI de calidad a modulos fuera de `core_sim`: el determinismo de dependencias ya esta resuelto (lockfile `requirements.lock` instalado en los 3 workflows), pero falta **piso de cobertura en `data/`** y gates de **lint/tipos** (ruff/mypy), con la misma disciplina, especialmente para `data/`, `validation/` y `reporting/`.
 8. Agregar observabilidad explicita para operacion diaria del largo: metricas minimas por dia (`fills_long_count`, `long_risk_block_count`, `snapshot_long_equity_present`).
 9. **Copiloto de noticias (investigacion)**: pipeline offline con LangChain/CrewAI para resumir eventos diarios y etiquetado **human-validated** hacia `knowledge-base/` — sin acoplar a motores ni a ejecucion (ver seccion 12.2).
 
@@ -549,7 +550,7 @@ Documentos complementarios:
 - Politica operativa: `POLICY.md`
 - Contrato parseable: `config/policy.v1.yaml`
 - Validacion estructural: `config/policy.v1.schema.json`
-- Registro de decisiones: `decisiones-tecnicas.md` (53 ADRs)
+- Registro de decisiones: `decisiones-tecnicas.md` (54 ADRs)
 - Complicaciones tecnicas (guion oral, 9 casos): `docs/complicaciones-tecnicas.md`
 - KPI spec: `docs/kpi_report_spec.v1.md`
 - Listas blancas: `config/symbols/whitelist_us.yaml` (ETFs, stocks, ADRs), `config/symbols/whitelist_ar.yaml`, `config/symbols/whitelist_cedear.yaml`
