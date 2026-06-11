@@ -202,7 +202,8 @@ La transición a real está planteada como gate, no como salto de fe:
 ## Ejecutar validaciones
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.lock   # versiones exactas (reproducible, igual que CI). requirements.txt = intención.
+# Opcional, solo si usás sync a Supabase:  pip install -r requirements-optional.txt
 python -m pytest tests/ -v
 python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
 python scripts/migrate_venue_ar_to_xbue.py --db data/market.db   # una vez si hay filas legacy venue=AR
