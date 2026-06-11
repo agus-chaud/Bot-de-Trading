@@ -38,14 +38,17 @@ from data.iol_api_meter import (
 _START = date(2024, 3, 4)
 _END = date(2024, 3, 6)
 
+# Keys reales del endpoint `seriehistorica` de IOL: fechaHora + volumenNominal.
+# (El fixture viejo usaba fecha/volumen, que NO es lo que devuelve la API —
+# por eso los tests pasaban y producción caía al fallback. Ver complicación #3.)
 _IOL_PAYLOAD = [
     {
-        "fecha": "2024-03-04T00:00:00",
+        "fechaHora": "2024-03-04T00:00:00",
         "apertura": 1000.0,
         "maximo": 1050.0,
         "minimo": 990.0,
         "ultimoPrecio": 1030.0,
-        "volumen": 500_000.0,
+        "volumenNominal": 500_000.0,
     }
 ]
 
@@ -436,6 +439,46 @@ class TestMissingCredentials:
 # ---------------------------------------------------------------------------
 # Partial / malformed data
 # ---------------------------------------------------------------------------
+
+
+class TestIolFieldAliases:
+    """El normalizador IOL tolera alias de nombres de campo (complicación #3)."""
+
+    def test_parses_real_api_keys_fechahora_volumennominal(self):
+        from data.connectors.ar_connector import _normalize_iol
+
+        payload = [{
+            "fechaHora": "2024-03-04T00:00:00",
+            "apertura": 1000.0, "maximo": 1050.0, "minimo": 990.0,
+            "ultimoPrecio": 1030.0, "volumenNominal": 500_000.0,
+        }]
+        rows = _normalize_iol("GGAL", payload)
+        assert len(rows) == 1
+        assert rows[0].ts == date(2024, 3, 4)
+        assert rows[0].close == 1030.0
+        assert rows[0].volume == 500_000.0
+
+    def test_parses_legacy_keys_fecha_volumen(self):
+        from data.connectors.ar_connector import _normalize_iol
+
+        payload = [{
+            "fecha": "2024-03-04T00:00:00",
+            "apertura": 1000.0, "maximo": 1050.0, "minimo": 990.0,
+            "ultimoPrecio": 1030.0, "volumen": 500_000.0,
+        }]
+        rows = _normalize_iol("GGAL", payload)
+        assert len(rows) == 1
+        assert rows[0].volume == 500_000.0
+
+    def test_error_lists_received_keys_when_field_missing(self):
+        from data.connectors.ar_connector import DataError, _normalize_iol
+
+        payload = [{"apertura": 1.0, "maximo": 2.0, "minimo": 0.5, "ultimoPrecio": 1.5}]
+        with pytest.raises(DataError) as exc:
+            _normalize_iol("GGAL", payload)
+        msg = str(exc.value)
+        assert "volume" in msg and "date" in msg
+        assert "Keys received" in msg and "apertura" in msg
 
 
 class TestPartialData:

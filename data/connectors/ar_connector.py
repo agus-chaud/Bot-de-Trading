@@ -575,28 +575,71 @@ def _iol_fetch_once(
     return rows
 
 
+# IOL no es consistente en los nombres de campos según endpoint/versión: el
+# endpoint `seriehistorica` real devuelve `fechaHora` y `volumenNominal`,
+# mientras otras respuestas (y fixtures antiguos) usan `fecha` y `volumen`.
+# Aceptamos alias por campo (primer nombre presente gana) en vez de clavar un
+# único nombre, para no romper si IOL cambia la etiqueta. Ver complicación #3
+# en docs/complicaciones-tecnicas.md.
+_IOL_DATE_KEYS = ("fechaHora", "fecha")
+_IOL_VOLUME_KEYS = ("volumenNominal", "volumen")  # ambos = cantidad de nominales (NO montoOperado, que es $)
+_IOL_OPEN_KEYS = ("apertura",)
+_IOL_HIGH_KEYS = ("maximo",)
+_IOL_LOW_KEYS = ("minimo",)
+_IOL_CLOSE_KEYS = ("ultimoPrecio", "cierre")
+
+_MISSING = object()
+
+
+def _first_present(item: dict, keys: tuple[str, ...]) -> Any:
+    """Return the value of the first key present (non-None), else _MISSING."""
+    for key in keys:
+        value = item.get(key)
+        if value is not None:
+            return value
+    return _MISSING
+
+
 def _normalize_iol(symbol: str, payload: list[dict]) -> list[OHLCVRow]:
     """Convert IOL JSON response to list[OHLCVRow].
 
-    IOL returns a list of dicts with keys: apertura, maximo, minimo, ultimoPrecio,
-    volumen, fecha — keys verified against the live API contract.
+    Tolera alias de nombres de campo (ver `_IOL_*_KEYS`). Si falta algún campo
+    bajo todos sus alias, el error lista las keys realmente recibidas para que
+    el desajuste sea diagnosticable de un vistazo (no un 'falta volumen' opaco).
     """
-    required_keys = {"apertura", "maximo", "minimo", "ultimoPrecio", "volumen", "fecha"}
+    field_specs = (
+        ("open", _IOL_OPEN_KEYS),
+        ("high", _IOL_HIGH_KEYS),
+        ("low", _IOL_LOW_KEYS),
+        ("close", _IOL_CLOSE_KEYS),
+        ("volume", _IOL_VOLUME_KEYS),
+        ("date", _IOL_DATE_KEYS),
+    )
     rows: list[OHLCVRow] = []
     for item in payload:
-        missing = required_keys - set(item.keys())
+        resolved: dict[str, Any] = {}
+        missing: list[str] = []
+        for field, keys in field_specs:
+            value = _first_present(item, keys)
+            if value is _MISSING:
+                missing.append(f"{field} (tried {'/'.join(keys)})")
+            else:
+                resolved[field] = value
         if missing:
-            raise DataError(f"Missing keys in IOL response item: {missing}")
-        bar_date = date.fromisoformat(item["fecha"][:10])
+            raise DataError(
+                "IOL item missing required field(s): "
+                f"{'; '.join(missing)}. Keys received: {sorted(item.keys())}"
+            )
+        bar_date = date.fromisoformat(str(resolved["date"])[:10])
         rows.append(
             OHLCVRow(
                 symbol=symbol,
                 ts=bar_date,
-                open=float(item["apertura"]),
-                high=float(item["maximo"]),
-                low=float(item["minimo"]),
-                close=float(item["ultimoPrecio"]),
-                volume=float(item["volumen"]),
+                open=float(resolved["open"]),
+                high=float(resolved["high"]),
+                low=float(resolved["low"]),
+                close=float(resolved["close"]),
+                volume=float(resolved["volume"]),
                 currency=_CURRENCY,
                 venue=_VENUE,
                 imputed=False,
