@@ -132,11 +132,11 @@ class TestSelectDynamicUniverse:
                     _bar(start + timedelta(days=1), 1.0, 100.0, "GGAL"),
                     _bar(start + timedelta(days=2), 1.0, 900.0, "GGAL"),
                 ]
-            if symbol == "YPF":
+            if symbol == "YPFD":
                 return [
-                    _bar(start, 1.0, 500.0, "YPF"),
-                    _bar(start + timedelta(days=1), 1.0, 500.0, "YPF"),
-                    _bar(start + timedelta(days=2), 1.0, 500.0, "YPF"),
+                    _bar(start, 1.0, 500.0, "YPFD"),
+                    _bar(start + timedelta(days=1), 1.0, 500.0, "YPFD"),
+                    _bar(start + timedelta(days=2), 1.0, 500.0, "YPFD"),
                 ]
             if symbol == "MELI":
                 return [
@@ -154,7 +154,7 @@ class TestSelectDynamicUniverse:
             as_of_date=sel_day,
             fetch_fn=fetch_fn,
         )
-        assert out.merval_symbols[:2] == ["YPF", "GGAL"]
+        assert out.merval_symbols[:2] == ["YPFD", "GGAL"]
         assert out.cedear_symbols[0] == "AAPL"
         ggal_rows = [r for r in out.snapshot_rows if r.symbol == "GGAL" and r.bucket == "merval"]
         assert len(ggal_rows) == 1
