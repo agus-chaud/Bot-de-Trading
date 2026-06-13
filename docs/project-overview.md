@@ -215,6 +215,7 @@ Modulos offline que evaluan si el ranking del motor corto tiene edge predictivo 
 | `scripts/run_signal_ic_now.py` | CLI de medicion IC sobre `data/market.db` |
 | `scripts/run_scenario.py` | CLI de escenarios what-if (IC / señal) |
 | `scripts/run_whatif_sim.py` | Simulacion what-if de **cartera** 30/70 sobre copia aislada de DB (fills, equity, posiciones); no paper-live productivo |
+| `scripts/run_wf_research_sim.py` + `reporting/twr_walk_forward.py` | Simulador **walk-forward de investigacion**: aportes mensuales (DCA) + metricas **TWR** (excluye aportes) + ventanas configurables. Modo research, separado del gate congelado (**ADR-058**, `docs/research_wf_sim.md`) |
 
 Tras limpiar la mezcla USD/ARS, el IC a h=1 cayo de 0.146 a 0.087 (~40 % del edge aparente era artificial). La narrativa completa de complicaciones encadenadas esta en `docs/complicaciones-tecnicas.md`.
 

@@ -1368,6 +1368,28 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-058 — Simulador walk-forward de investigación: aportes mensuales + TWR (separado del gate)
+
+- **Fecha**: 2026-06-13
+- **Estado**: aceptada
+- **Contexto**: Para entender la estrategia hacía falta (a) un modelo de capital más realista que "monto inicial y nunca más" — el usuario aporta plata todos los meses (DCA) — y (b) poder explorar ventanas walk-forward libres (p. ej. 120+60) sin tocar el gate congelado. Dos riesgos: los **aportes rompen las métricas** si se miden ingenuamente (un depósito se lee como ganancia gigante — misma familia de artefacto que #3/#6/#11), y aflojar el gate por conveniencia sería **p-hacking** (lo que el gate congelado previene, POLICY.md §13).
+- **Decisión**: Separar **dos modos** explícitamente:
+  1. **Modo investigación** (este ADR): `scripts/run_wf_research_sim.py` + `reporting/twr_walk_forward.py`. Corre el pipeline 30/70 día a día sobre una **copia aislada** (por defecto la backfilleada), con **aportes mensuales** (primer día hábil de cada mes el `starting_cash` crece y los motores despliegan la plata nueva). Métricas con **TWR** (time-weighted): cada aporte se **excluye de la base** antes de medir (`r_t = V_t/(V_{t-1}+C_t)-1`). Drawdown sobre el **índice TWR** (no sobre el equity, que los aportes esconden). MWR/TIR como secundario (experiencia real en pesos). Ventanas walk-forward **configurables** (default 120/60/30).
+  2. **Modo compromiso** (gate, **ADR-041**): sigue **congelado** (252+60, pre-registrado). El simulador imprime y marca `mode: research` en todos sus outputs para que nadie confunda una corrida exploratoria con el gate.
+- **Por qué**: el TWR es el estándar para medir habilidad de la estrategia con flujos de caja externos; sin él, los aportes inflan Sharpe y esconden drawdown. La separación research/gate permite explorar libremente **sin** erosionar la integridad anti-overfitting del gate. Si alguna vez se quiere un gate 120+60, el camino legítimo es `gate.v2` pre-registrado + ADR — no bajar el congelado tras ver resultados.
+- **Consecuencias**:
+  - Módulo `reporting/twr_walk_forward.py` puro y testeado (la corrección del TWR ante aportes se prueba sin correr el bot: un día de puro aporte con mercado plano da retorno 0, no un spike).
+  - Reusa la valuación resiliente por venue nativo (`_resilient_snapshot`, fix de feriados AR) — el simulador no colapsa en feriados.
+  - Vive en rama `research/wf-sim` (worktree); no se mezcla con el pipeline productivo.
+- **Alternativas consideradas**:
+  - **Bajar el gate a 120+60**: descartada — p-hacking; el gate se cambia con pre-registro, no por conveniencia.
+  - **Medir con retorno crudo del equity**: descartada — los aportes lo envenenan (artefacto demostrado en tests).
+  - **`montoOperado`/equity con aportes para drawdown**: descartada — esconde las pérdidas reales.
+- **Archivos**: `reporting/twr_walk_forward.py`, `scripts/run_wf_research_sim.py`, `tests/test_twr_walk_forward.py`
+- **Ver también**: **ADR-041** (gate OOS congelado), **ADR-051** (valuación resiliente), **ADR-057** (lección de testing)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
