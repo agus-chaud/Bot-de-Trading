@@ -59,6 +59,23 @@ class PortfolioLedger:
         # cuando un día falta la barra (hueco de datos). Evita crashear la corrida.
         self._last_mark: dict[str, float] = {}
 
+    def reset_last_marks(self) -> None:
+        """Vaciar el carry-forward. La capa sim lo usa para descartar marks
+        intermedios (p. ej. una barra en moneda equivocada que un motor valuó) antes
+        de re-hidratar con el último close legítimo y producir el snapshot autoritativo."""
+        self._last_mark.clear()
+
+    def seed_last_mark(self, symbol: str, price: float) -> None:
+        """Sembrar el último mark conocido para carry-forward (no-op si ya hay uno).
+
+        La capa de orquestación reconstruye un ledger nuevo por día (replay de fills),
+        por lo que `_last_mark` arranca vacío y el carry-forward del ADR-051 no tendría
+        de dónde arrastrar. Este setter permite hidratarlo con el último close conocido
+        antes de valuar, sin meter lógica de precios en el ledger. No pisa un mark
+        aprendido en el día (p. ej. de una barra fresca)."""
+        if price > 0 and symbol not in self._last_mark:
+            self._last_mark[symbol] = float(price)
+
     def apply_fills(
         self,
         trading_day: date,

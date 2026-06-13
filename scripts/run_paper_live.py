@@ -192,6 +192,77 @@ def _overlay_ar_long_sleeve_bars_from_db(
         }
 
 
+def _mtm_bars_for_ledger(
+    db: MarketDB,
+    day: date,
+    ledger: PortfolioLedger,
+) -> dict[str, dict[str, float]]:
+    """Barras para valuar posiciones ABIERTAS, cada una en el venue en que se operó.
+
+    El ``daily_bars`` que consumen los motores keya los CEDEAR por su tag del merge
+    (US→XNYS), así que un feriado AR (con US abierto) una posición en pesos quedaría
+    revaluada a su cierre USD de XNYS (colapso ~24-147×). Acá valuamos por
+    ``position.market`` (AR→XBUE): una posición AR sólo se precia desde XBUE; si XBUE
+    no tiene barra ese día (feriado), el símbolo simplemente queda ausente y el ledger
+    arrastra el último close conocido (ADR-051) en vez de colapsar.
+    """
+    bars: dict[str, dict[str, float]] = {}
+    for symbol, position in ledger.positions.items():
+        market = str(position.market).upper()
+        venue = _VENUE_MAP.get(market, market)
+        rows = db.get_ohlcv(symbol, day, day, venue)
+        if rows:
+            bar = rows[0]
+            bars[symbol] = {
+                "open": bar.open,
+                "high": bar.high,
+                "low": bar.low,
+                "close": bar.close,
+                "volume": bar.volume,
+            }
+    return bars
+
+
+def _hydrate_last_marks_from_db(
+    db: MarketDB,
+    day: date,
+    ledger: PortfolioLedger,
+    *,
+    lookback_days: int = 120,
+) -> None:
+    """Sembrar ``ledger._last_mark`` con el close más reciente anterior a ``day``,
+    en el venue nativo de cada posición abierta, para que el carry-forward sobreviva
+    a la reconstrucción diaria del ledger (el replay aplica fills pero nunca valúa)."""
+    start = day - timedelta(days=lookback_days)
+    end = day - timedelta(days=1)
+    for symbol, position in ledger.positions.items():
+        market = str(position.market).upper()
+        venue = _VENUE_MAP.get(market, market)
+        rows = db.get_ohlcv(symbol, start, end, venue)
+        if rows:
+            ledger.seed_last_mark(symbol, float(rows[-1].close))
+
+
+def _resilient_snapshot(
+    db: MarketDB,
+    day: date,
+    ledger: PortfolioLedger,
+) -> dict[str, Any]:
+    """Snapshot de valuación autoritativo, robusto a barras en moneda equivocada.
+
+    Los motores valúan varias veces dentro de ``run_day`` con un ``daily_bars`` que keya
+    los CEDEAR por su tag del merge (US→XNYS, en USD), lo que puede envenenar el
+    carry-forward (``_last_mark``) de una posición en pesos. Acá reseteamos ese estado y
+    lo re-hidratamos desde el último close en el venue NATIVO de cada posición, y valuamos
+    cada posición en su propio venue. Resultado: un feriado AR arrastra el close XBUE
+    (stale) en vez de colapsar al cierre USD de XNYS (ADR-051)."""
+    ledger.reset_last_marks()
+    _hydrate_last_marks_from_db(db, day, ledger)
+    return ledger.mark_to_market(
+        trading_day=day, daily_bars=_mtm_bars_for_ledger(db, day, ledger)
+    )
+
+
 def _build_long_pipeline_context(
     ledger: PortfolioLedger,
     snap: dict[str, Any],
@@ -316,9 +387,7 @@ def run_catch_up(
             bars_for_long_and_mtm = dict(daily_bars)
             _overlay_ar_long_sleeve_bars_from_db(db, day, policy_doc, bars_for_long_and_mtm)
 
-            snap_for_long = ledger.mark_to_market(
-                trading_day=day, daily_bars=bars_for_long_and_mtm
-            )
+            snap_for_long = _resilient_snapshot(db, day, ledger)
             long_ctx = _build_long_pipeline_context(ledger, snap_for_long, calendar_store)
 
             long_backtester = create_long_term_monthly_backtester(
@@ -339,9 +408,7 @@ def run_catch_up(
                 all_fills.extend(long_fills)
                 long_fills_count = len(long_fills)
 
-        snap = ledger.mark_to_market(
-            trading_day=day, daily_bars=bars_for_long_and_mtm
-        )
+        snap = _resilient_snapshot(db, day, ledger)
         run_id = f"paper_live_{day.isoformat()}_{uuid.uuid4().hex[:8]}"
 
         if all_fills:

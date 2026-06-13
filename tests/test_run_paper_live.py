@@ -19,8 +19,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from data.schema import OHLCVRow
 from data.storage import MarketDB, PortfolioMetaConflictError
+from core_sim.ledger import PortfolioLedger
 from scripts.run_paper_live import (
     _build_long_pipeline_context,
+    _hydrate_last_marks_from_db,
+    _mtm_bars_for_ledger,
     _overlay_ar_long_sleeve_bars_from_db,
     compute_trading_days_gap,
     load_required_calendar_store,
@@ -831,3 +834,81 @@ class TestArLongXBUEOverlay:
         }
         _overlay_ar_long_sleeve_bars_from_db(db, day, policy_doc, daily_bars)
         assert daily_bars["SPY"]["close"] == 777.0
+
+
+# ===========================================================================
+# 3.11 — AR holiday valuation: carry-forward, not USD collapse (ADR-051)
+# ===========================================================================
+
+
+class TestArHolidayValuationCarryForward:
+    """Un feriado AR con US abierto NO debe colapsar las posiciones AR a su cierre USD.
+
+    Repro del bug: GGAL/SPY se etiquetan US en el merge, así que el ``daily_bars`` que
+    consumen los motores las keya en XNYS. Un feriado AR (sin barra XBUE) esa barra USD
+    sobrevivía y revaluaba la posición en pesos ~24-147× más baja, hundiendo el equity
+    intra-período a ~la caja. La valuación debe arrastrar el último close XBUE (stale).
+    """
+
+    DAY_PREV = date(2026, 3, 23)      # hábil AR: hay barra XBUE
+    DAY_HOLIDAY = date(2026, 3, 24)   # feriado AR (Día de la Memoria), US abierto
+
+    @staticmethod
+    def _bar(sym: str, day: date, close: float, venue: str, cur: str) -> OHLCVRow:
+        return OHLCVRow(
+            symbol=sym, ts=day, open=close, high=close, low=close, close=close,
+            volume=1_000_000.0, currency=cur, venue=venue, imputed=False,
+        )
+
+    def _db_with_ar_position(self) -> tuple[MarketDB, PortfolioLedger]:
+        db = MarketDB(":memory:")
+        db.upsert_ohlcv([
+            # XBUE (ARS): existe el día hábil, NO el feriado
+            self._bar("GGAL", self.DAY_PREV, 6_500.0, "XBUE", "ARS"),
+            # XNYS (USD): el mercado US está abierto el feriado AR
+            self._bar("GGAL", self.DAY_PREV, 44.4, "XNYS", "USD"),
+            self._bar("GGAL", self.DAY_HOLIDAY, 44.0, "XNYS", "USD"),
+        ])
+        # Posición AR en pesos: 100 GGAL @ 6500 ARS (avg_cost en pesos).
+        ledger = PortfolioLedger(starting_cash=1_000_000.0)
+        ledger.apply_fills(self.DAY_PREV, [{
+            "symbol": "GGAL", "side": "BUY", "qty": 100.0, "price": 6_500.0,
+            "market": "AR", "bucket": "long", "fee": 0.0,
+        }])
+        return db, ledger
+
+    def test_mtm_bars_skip_usd_bar_for_ar_position_on_holiday(self):
+        """`_mtm_bars_for_ledger` NO inyecta la barra XNYS/USD para la posición AR."""
+        db, ledger = self._db_with_ar_position()
+        bars = _mtm_bars_for_ledger(db, self.DAY_HOLIDAY, ledger)
+        assert "GGAL" not in bars, "no debe valuar una posición AR con barra USD de XNYS"
+
+    def test_holiday_valuation_carries_forward_xbue_close(self):
+        """El feriado arrastra el close XBUE (650k), no colapsa al USD (~4.4k)."""
+        db, ledger = self._db_with_ar_position()
+
+        _hydrate_last_marks_from_db(db, self.DAY_HOLIDAY, ledger)
+        snap = ledger.mark_to_market(
+            trading_day=self.DAY_HOLIDAY,
+            daily_bars=_mtm_bars_for_ledger(db, self.DAY_HOLIDAY, ledger),
+        )
+
+        pos = snap["positions"]["GGAL"]
+        # Arrastra 6500 ARS * 100 = 650k, NO 44 USD * 100 = 4.4k.
+        assert pos["market_value"] == pytest.approx(650_000.0)
+        assert "GGAL" in snap["stale_marks"], "debe marcarse stale (carry-forward)"
+        assert pos["stale"] is True
+        # Compró 650k a avg_cost → caja 350k + mv 650k = 1M (sin PnL). El colapso USD
+        # habría dado mv ~4.4k → equity ~354k. Probamos que NO colapsa.
+        assert snap["equity_total"] == pytest.approx(1_000_000.0)
+        assert snap["equity_total"] > 900_000.0
+
+    def test_business_day_prices_from_xbue_not_xnys(self):
+        """El día hábil valúa desde XBUE (6500 ARS), nunca desde XNYS (44 USD)."""
+        db, ledger = self._db_with_ar_position()
+        bars = _mtm_bars_for_ledger(db, self.DAY_PREV, ledger)
+        assert bars["GGAL"]["close"] == pytest.approx(6_500.0)
+
+        snap = ledger.mark_to_market(trading_day=self.DAY_PREV, daily_bars=bars)
+        assert snap["positions"]["GGAL"]["stale"] is False
+        assert snap["positions"]["GGAL"]["market_value"] == pytest.approx(650_000.0)
