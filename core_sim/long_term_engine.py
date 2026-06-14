@@ -137,8 +137,12 @@ def validate_long_term_engine_config(config: LongTermEngineConfig) -> None:
 
     core = dict(config.core_lines)
     sat = dict(config.satellite_lines)
-    if len(core) < 2 or len(core) > 3:
-        raise ValueError("long_term_engine v1 expects 2–3 core lines")
+    # ADR-060: se amplía el máximo de core lines (3→8) para permitir un sleeve
+    # diversificado (50% AR + 50% global). El mínimo queda en 2 para no romper el
+    # default de producción; la regla "mín 3 títulos por lado" se aplica en la config
+    # diversificada (policy.research_diversified.v1.yaml), no como tope global.
+    if len(core) < 2 or len(core) > 8:
+        raise ValueError("long_term_engine expects 2–8 core lines")
 
     if len(sat) > int(config.satellite_limits.max_satellite_names):
         raise ValueError("satellite line count exceeds max_satellite_names")

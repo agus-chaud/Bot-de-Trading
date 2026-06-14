@@ -2,7 +2,7 @@
 
 Este documento registra las decisiones técnicas relevantes del proyecto, su contexto, el porqué, consecuencias y alternativas evaluadas.
 
-**Última actualización**: 2026-06-13 — **58 ADRs** aceptadas (001–059). Las complicaciones técnicas vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`; el overview de arquitectura y estado operativo está en `docs/project-overview.md`.
+**Última actualización**: 2026-06-13 — **59 ADRs** aceptadas (001–060). Las complicaciones técnicas vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`; el overview de arquitectura y estado operativo está en `docs/project-overview.md`.
 
 ## Cómo usar este archivo
 
@@ -11,7 +11,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 - Cuando una decisión cambie, no borrar el historial: marcar la anterior como `reemplazada` y enlazar la nueva.
 - Ante conflicto numérico entre `POLICY.md` y `config/policy.v1.yaml`, actualizar ambos en el mismo cambio y anotar el motivo aquí o en el ADR afectado.
 
-## Índice por tema (58 ADRs)
+## Índice por tema (59 ADRs)
 
 | Tema | ADRs |
 |------|------|
@@ -21,7 +21,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 | Data layer y calidad | 021, 037, 047, 049, 052, 053, 056 |
 | Simulación y ledger | 008–010, 018–019, 025, 039, 051 |
 | KPI, validación y gates | 027–035, 041 |
-| Investigación walk-forward y perfil de riesgo | 058, 059 |
+| Investigación walk-forward y perfil de riesgo | 058, 059, 060 |
 | Paper-live y operación | 040, 044, 048, 050, 054, 055 |
 | Señal y medición offline | 042, 052, 053 (+ `reporting/signal_ic.py`, `reporting/scenario.py`; ver ADR-052) |
 | Connector AR / IOL | 049, 056 |
@@ -1411,6 +1411,44 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Aflojar el gate para que pase**: descartada — p-hacking (**ADR-057**, **ADR-041**).
 - **Archivos**: análisis sobre `data/market_backfill.db` + `data/_sim/wf_research_report.json`; narrativa en `docs/project-overview.md` y `docs/complicaciones-tecnicas.md` (#13).
 - **Ver también**: **ADR-058** (simulador), **ADR-041** (gate), **ADR-053** (ampliación de universo — primer paso de diversificación)
+
+---
+
+## ADR-060 — Sleeve largo diversificado 50% AR + 50% global (variante en evaluación)
+
+- **Fecha**: 2026-06-13
+- **Estado**: propuesta — **evaluación positiva** (drawdown -25,7%→-11,5%, retorno +24,75%→+39,46%); NO promovida al default todavía (sigue 5/7, falta cubrir el régimen global con el corto).
+- **Contexto**: **ADR-059** mostró que el sleeve largo concentraba ~60% del capital en GGAL+PAMP, mismo factor (riesgo-país AR), con drawdowns de -25% en selloffs locales. Decisión de rediseño para romper la concentración mono-factor.
+- **Decisión** (variante de investigación, `config/policy.research_diversified.v1.yaml`):
+  1. **50% AR + 50% global**, mínimo **3 títulos por lado**, sectores distintos:
+     - AR (riesgo-país): **GGAL** (banco) 0,167, **PAMP** (energía) 0,167, **TXAR** (acero/materiales) 0,166.
+     - Global (riesgo mundial vía CEDEAR en ARS): **SPY** (broad) 0,167, **QQQ** (tech) 0,167, **KO** (consumo defensivo) 0,166.
+  2. Las 6 líneas van en `core_lines` (satélites vacío). Se amplió el tope del motor de **3 a 8 core lines** (`validate_long_term_engine_config`, mínimo se mantiene en 2 para no romper el default).
+  3. **Medir, no asumir** la diversificación: `scripts/measure_correlation.py` calcula la matriz de correlación de retornos (XBUE/ARS).
+- **Evidencia de correlación** (2025-01 → 2026-06, 347 días):
+  - GGAL–PAMP **0,77** (confirmado: mismo factor).
+  - **AR ↔ global: 0,02** (prácticamente nulo → el bloque global SÍ diversifica el factor).
+  - KO–GGAL **-0,31** (KO se mueve a contramano de GGAL: cobertura real).
+  - Observación: SPY–QQQ **0,96** (casi idénticos; QQQ aporta poco sobre SPY — candidato a revisar).
+- **Por qué (metodología)**: la variante se evalúa con el walk-forward de investigación (**ADR-058**) **antes** de promoverla al default. Cambiar el default rompería ~8 tests que asumen la cartera de 3 nombres; promover sólo si el drawdown de las ventanas malas baja de forma material. El gate congelado (**ADR-041**) no se toca.
+- **Resultado del walk-forward** (concentrada vs diversificada, mismo período/aportes):
+  | Métrica | Concentrada (baseline) | Diversificada |
+  |---------|------------------------|---------------|
+  | TWR acumulado | +24,75% | **+39,46%** |
+  | Ventanas OOS que pasan | 3/7 | **5/7** |
+  | Peor drawdown OOS | -25,7% | **-11,5%** |
+  | Ventanas 0/1 (selloff AR mid-2025) | -25,7% DD | **+8,2% / +3,1%** (positivas) |
+  - **Veredicto**: la diversificación **cumplió** — cortó el peor drawdown a la mitad (-25,7% → -11,5%) y subió el retorno. Las ventanas que antes morían en el selloff argentino ahora aguantan (el bloque global descorrelacionado, corr 0,02, cubrió).
+  - **Matiz honesto**: sigue sin pasar el agregado (5/7). Las ventanas **4 y 5** (dic-2025 → abr-2026) todavía fallan (-10,7% / -2,1% TWR, DD ~-11,5%): fue un período donde cayeron **AR y global a la vez** (riesgo global, no solo país), que la diversificación AR/global no cubre. Para esos regímenes haría falta el tercer frente: que el **sleeve corto cubra de verdad** (hoy no aporta retorno descorrelacionado).
+  - **Bug encontrado y corregido en el camino**: QQQ no estaba en `whitelist_cedear.yaml` → el motor largo abortaba el ciclo (`symbol_not_whitelisted`) y no invertía. Agregado a la whitelist.
+- **Consecuencias**:
+  - Producción (`policy.v1.yaml`) **intacta** mientras se evalúa. Promoción futura = ADR de seguimiento + actualizar tests dependientes + (opcional) subir el mínimo de core lines a 3.
+  - Requiere QQQ en XBUE (backfilleado en la DB de investigación).
+- **Alternativas consideradas**:
+  - **Cambiar el default directo**: descartada — romper tests + promover sin medir es el anti-patrón que venimos evitando.
+  - **Diversificar por sector dentro de AR solamente**: descartada — sectores AR comparten factor país (corr alta); hace falta el eje AR/global.
+- **Archivos**: `config/policy.research_diversified.v1.yaml`, `core_sim/long_term_engine.py` (tope core 3→8), `scripts/run_wf_research_sim.py` (`--policy`), `scripts/measure_correlation.py`
+- **Ver también**: **ADR-059** (hallazgo), **ADR-058** (simulador), **ADR-041** (gate)
 
 ---
 

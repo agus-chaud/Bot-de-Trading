@@ -2,6 +2,7 @@
 # Ampliar según liquidez real; la selección dinámica reduce a top N por volumen.
 stocks:
   - SPY
+  - QQQ
   - AAPL
   - MSFT
   - GOOGL

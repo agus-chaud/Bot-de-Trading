@@ -221,6 +221,7 @@ def run_research_sim(
 def main() -> int:
     p = argparse.ArgumentParser(description="Simulador walk-forward de investigación (TWR + aportes)")
     p.add_argument("--db", type=Path, default=DEFAULT_DB)
+    p.add_argument("--policy", type=Path, default=REPO_ROOT / "config" / "policy.v1.yaml")
     p.add_argument("--start", type=_parse_date, default=date(2025, 1, 1))
     p.add_argument("--end", type=_parse_date, default=date.today())
     p.add_argument("--contrib", type=float, default=DEFAULT_CONTRIB, help="Aporte mensual (ARS)")
@@ -237,7 +238,7 @@ def main() -> int:
         print(json.dumps({"error": "db_not_found", "db": str(args.db)}))
         return 2
 
-    policy_doc = yaml.safe_load((REPO_ROOT / "config" / "policy.v1.yaml").open(encoding="utf-8"))
+    policy_doc = yaml.safe_load(args.policy.open(encoding="utf-8"))
     sim_path = _prepare_sim_db(args.db)
     db = MarketDB(str(sim_path))
     calendar_store = load_required_calendar_store(policy_doc)

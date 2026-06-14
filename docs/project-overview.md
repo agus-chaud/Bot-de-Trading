@@ -375,6 +375,26 @@ riesgo real, y el resultado **refuerza** el valor del gate congelado — aflojar
 habría sido autoengaño. El backlog (§13) ataca los tres frentes: concentración, factor y
 cobertura del corto.
 
+#### 9.2) Primer experimento de diversificación (ADR-060)
+
+Se probó una cartera diversificada **50% AR + 50% global** (GGAL/PAMP/TXAR + SPY/QQQ/KO, mín
+3 por lado), como variante de investigación (`policy.research_diversified.v1.yaml`), midiendo
+la correlación **antes** de asumir nada: GGAL–PAMP **0,77** (mismo factor confirmado),
+**AR↔global 0,02** (descorrelacionado de verdad), KO–GGAL **-0,31** (cobertura). Resultado del
+walk-forward vs el baseline concentrado:
+
+| Métrica | Concentrada | Diversificada |
+|---------|-------------|---------------|
+| TWR acumulado | +24,75% | **+39,46%** |
+| Ventanas que pasan | 3/7 | **5/7** |
+| Peor drawdown | -25,7% | **-11,5%** |
+
+La diversificación **cortó el peor drawdown a la mitad** y subió el retorno: las ventanas que
+antes morían en el selloff argentino ahora aguantan. **Matiz honesto**: aún no pasa el
+agregado (5/7) — las ventanas dic-2025→abr-2026 caen porque AR **y** global bajaron juntos
+(riesgo global), régimen que el eje AR/global no cubre. Eso pide el tercer frente: un sleeve
+corto que cubra de verdad. Detalle en **ADR-060** y `docs/research_wf_sim.md`.
+
 ## 10) Testing y calidad
 
 La estrategia de testing prioriza comportamiento observable:

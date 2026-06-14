@@ -94,3 +94,19 @@ congelado**: aflojarlo para "pasar" habría sido autoengaño.
   120+60. Por eso existe el backfill (`market_backfill.db`, ~360 días desde 2024-12-30).
 - Es paper sobre datos históricos: una ventana linda no prueba edge. El juez sigue siendo el
   gate OOS congelado con suficiente historia real.
+
+## Experimento de diversificación (ADR-060)
+
+Variante `policy.research_diversified.v1.yaml`: 50% AR (GGAL/PAMP/TXAR) + 50% global
+(SPY/QQQ/KO), mín 3 por lado. Correlación medida con `scripts/measure_correlation.py`:
+AR↔global **0,02** (descorrelacionado), GGAL–PAMP **0,77** (mismo factor), KO–GGAL **-0,31**.
+
+| Métrica | Concentrada | Diversificada |
+|---------|-------------|---------------|
+| TWR acumulado | +24,75% | +39,46% |
+| Ventanas que pasan | 3/7 | 5/7 |
+| Peor drawdown | -25,7% | -11,5% |
+
+Funcionó (drawdown a la mitad, más retorno), pero sigue 5/7: las ventanas dic-2025→abr-2026
+caen porque AR y global bajaron juntos (riesgo global). Falta el tercer frente: que el sleeve
+corto cubra. Comando: `python scripts/run_wf_research_sim.py --policy config/policy.research_diversified.v1.yaml`.
