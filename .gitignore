@@ -46,6 +46,7 @@ secrets/
 
 # Local market DB + SQLite sidecars (regenerable con fetch / pipeline)
 data/*.db
+data/_sim/
 !data/market.db
 data/market_defensa*.db
 data/defensa_sim.log
@@ -62,3 +63,11 @@ alerts/kill_switch_*.json
 # Cursor/local agent state
 .cursor/sessions/
 .cursor/logs/
+.engram/manifest.json
+data/_sim/sim_1M_equity.csv
+data/_sim/sim_1M_trades.csv
+data/_sim/sim_1M_fills.csv
+data/_sim/sim_500k_fills.csv
+data/market.db.bak-20260611-154911
+data/market_backfill_log.txt
+.engram/chunks/6e26dae9.jsonl.gz
