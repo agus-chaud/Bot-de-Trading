@@ -5,22 +5,52 @@ Este documento esta pensado para dos usos:
 - Servir como guion tecnico para una defensa oral.
 - Permitir lectura simple para alguien que entra por primera vez al repo.
 
+**¿Te perdés con algún término técnico?** Está todo explicado en lenguaje llano en el **Glosario (sección 0)**, abajo. Cada palabra técnica del documento está ahí en una línea.
+
 No busca reemplazar la documentacion normativa (`POLICY.md`) ni el registro de decisiones (`decisiones-tecnicas.md`), sino unir arquitectura, criterio y estado actual.
+
+## 0) Glosario en lenguaje llano (leer primero)
+
+Este proyecto usa términos técnicos. Acá están explicados una vez, simple, para no perderse:
+
+| Término | Qué significa, en criollo |
+|---------|---------------------------|
+| **Paper trading** | Operar "de mentira": con datos reales del mercado pero sin plata real. Como un simulador de vuelo antes de pilotear. |
+| **Sleeve** (bucket) | Un "bolsillo" de la cartera con su propia estrategia. Acá hay dos: el **corto** (táctico, 30% del dinero) y el **largo** (estratégico, 70%). |
+| **OHLCV** | Los datos de precio de cada día: Open (apertura), High (máximo), Low (mínimo), Close (cierre) y Volume (volumen operado). |
+| **CEDEAR** | Un certificado que cotiza en Argentina (en pesos) y representa una acción extranjera (ej.: SPY = el índice S&P 500 de EE.UU., comprable en pesos). |
+| **Venue / mercado** | Dónde cotiza un papel. `XNYS` = bolsa de Nueva York (en dólares); `XBUE` = bolsa de Buenos Aires (en pesos). |
+| **Momentum** | Tendencia reciente: si un papel viene subiendo con fuerza, "tiene momentum". |
+| **RSI** | Un indicador (0 a 100) que mide si un papel está "sobrecomprado" (subió demasiado rápido, puede corregir) o no. |
+| **Rebalanceo / drift** | Volver la cartera a sus pesos objetivo. El **drift** es cuánto se desvió de esos pesos; si supera una banda, se rebalancea. |
+| **Guardrail / kill switch** | Frenos de riesgo automáticos. El **kill switch** congela el motor si las pérdidas pasan un límite. |
+| **Drawdown** | La caída desde el punto más alto. Un drawdown de -25% = perdiste 25% desde tu mejor momento. Mide el dolor máximo. |
+| **Sharpe / Sortino** | Notas de "rendimiento ajustado por riesgo": cuánto ganás por unidad de riesgo. Más alto = mejor. Sortino penaliza solo las caídas. |
+| **Benchmark** | Una referencia para comparar (ej.: una cartera pasiva). Si rendís más que el benchmark, generaste **alpha** (valor agregado). |
+| **Turnover** | Cuánto comprás y vendés. Alto turnover = mucha rotación = más costos. |
+| **Walk-forward / OOS** | Forma honesta de testear: el sistema "estudia" un período y se evalúa en el siguiente que **nunca vio** (OOS = *out-of-sample*, fuera de muestra). Se repite avanzando en el tiempo. |
+| **Gate** | Una barrera de aprobación. El **gate KPI OOS** son umbrales (Sharpe mínimo, drawdown máximo, etc.) que el sistema debe pasar **antes** de operar con plata real. |
+| **Ramp-up** | Subir la exposición de a poco (paper → 10% → 25% → … → 100% del capital), no de golpe. |
+| **TWR / MWR** | Dos formas de medir rendimiento cuando hay aportes mensuales. **TWR** mide la estrategia sin el efecto de los aportes; **MWR/TIR** mide tu experiencia real en pesos. |
+| **Factor** | La fuerza macro que mueve a un activo (ej.: "riesgo-país argentino"). Dos papeles de distinto sector pueden compartir factor y caer juntos. |
+| **IC** (information coefficient) | Qué tan bien la señal del bot predice el rendimiento futuro. Cerca de 0 = no predice; más alto = mejor. |
+
+> Para la defensa: si el jurado se pierde con un término, está acá en una línea.
 
 ## 1) El problema y la filosofia
 
-El problema que resuelve el proyecto es evitar decisiones de inversion manuales impulsivas y no reproducibles. El foco esta en construir un proceso estable, medible y auditable.
+El problema que resuelve el proyecto es evitar decisiones de inversion manuales e impulsivas, que no se pueden repetir ni revisar. El foco esta en construir un **proceso**: estable (da la misma respuesta ante la misma situacion), medible (todo se puede cuantificar) y auditable (siempre se puede explicar por que hizo lo que hizo).
 
-La filosofia base es:
+La filosofia base es (los terminos estan en el glosario, sección 0):
 
-- **Paper-first**: primero validar en simulacion con datos reales.
-- **Riesgo deterministico en codigo**: los guardrails no dependen de prompts ni heuristicas opacas.
-- **Proceso antes que rentabilidad**: subir exposicion solo despues de pasar gates definidos.
-- **Trazabilidad completa**: cada regla relevante queda versionada en YAML, validada por schema y explicada en politica.
+- **Paper-first**: primero se prueba "de mentira" (paper trading) con datos reales, antes de arriesgar plata.
+- **Riesgo en codigo, no en opiniones**: los frenos de riesgo (guardrails) son reglas fijas escritas en el programa, no le preguntan a una inteligencia artificial que decida. Misma situacion → misma decision, siempre.
+- **Proceso antes que rentabilidad**: la exposicion con plata real sube solo despues de pasar barreras de aprobacion (gates) definidas de antemano.
+- **Trazabilidad completa**: cada regla vive en un archivo de configuracion versionado (queda registro de cada cambio) y explicada en la politica.
 
 ## 2) Arquitectura general
 
-La arquitectura separa responsabilidades: data, engines, riesgo, ejecucion simulada, contabilidad y reporting. Esto permite evolucionar un bloque sin romper el resto.
+El sistema esta dividido en piezas, cada una con un trabajo claro: **datos** (traer precios), **motores** (decidir que comprar/vender), **riesgo** (frenar si algo va mal), **ejecucion simulada** (simular las ordenes), **contabilidad** (llevar la cuenta) y **reportes** (medir resultados). Separarlo asi permite mejorar una pieza sin romper las demas — como los modulos de un auto.
 
 ```mermaid
 flowchart LR
@@ -41,14 +71,14 @@ flowchart LR
 
 ### Decisiones clave de arquitectura
 
-- Se separan **engines por horizonte** (`short_term_engine` diario y `long_term_engine` semanal) para no mezclar logicas con distintos tiempos de decision.
-- El modulo `risk_guardrails` concentra reglas de bloqueo para tener un unico punto auditable.
-- `event_engine` coordina el pipeline diario y evita que cada modulo defina su propio "orden de pasos".
-- `paper_broker_sim` y `ledger` modelan ejecucion y PnL de forma estable antes de hablar de capital real.
+- Hay **dos motores separados por horizonte de tiempo**: el corto (decide todos los dias) y el largo (decide cada semana). Se separan para no mezclar logicas que operan a ritmos distintos.
+- Un solo modulo de riesgo (`risk_guardrails`) concentra todos los frenos, asi hay **un unico lugar** que auditar.
+- Un coordinador (`event_engine`) fija el orden de los pasos de cada dia, para que ningun modulo improvise su propia secuencia.
+- El simulador de broker (`paper_broker_sim`) y la contabilidad (`ledger`) modelan las ordenes y las ganancias/perdidas (PnL = *profit and loss*) de forma estable antes de hablar de plata real.
 
 ## 3) Gestion de riesgo
 
-El riesgo se implementa como reglas operativas explicitas, no como recomendaciones "blandas". El objetivo es que ante la misma entrada, la decision sea siempre la misma.
+El riesgo son **reglas fijas**, no recomendaciones "blandas". La idea: ante la misma situacion, la misma decision, siempre — para poder confiar y auditar.
 
 ### Guardrails del bloque corto
 
@@ -606,6 +636,7 @@ Este capitulo existe para evitar una narrativa "cerrada". El sistema se presenta
 
 ## Como usar este documento en defensa oral
 
+- **Tener a mano el glosario (sección 0)**: si el jurado se traba con un término, está definido en una línea. Conviene leerlo antes de la defensa.
 - Abrir con secciones 1 y 2 (problema + arquitectura) para marcar contexto.
 - Profundizar en 3, 4, 5 y 6 para explicar decisiones tecnicas de motores y datos.
 - Usar 6 (medicion de senal + complicaciones) para mostrar honestidad tecnica sobre calidad de datos y edge real.
