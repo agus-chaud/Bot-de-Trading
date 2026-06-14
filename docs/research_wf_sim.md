@@ -71,6 +71,23 @@ Reusa la valuación resiliente por venue nativo (`_resilient_snapshot`) — no c
 feriados AR. Excluye los símbolos del sleeve largo (SPY/GGAL/PAMP) del universo del corto
 para evitar el conflicto "market mismatch" (mismo símbolo en dos monedas).
 
+## Resultado de la corrida de referencia (2025-01 → 2026-06, 500k/mes)
+
+| Métrica | Valor |
+|---------|-------|
+| Período | 2025-01-02 → 2026-06-12 (371 días) |
+| Total aportado | 9.000.000 ARS (500k × 18 meses) |
+| Equity final | 11.376.099 ARS |
+| **TWR acumulado** (estrategia, sin aportes) | **+24,75%** |
+| **TIR / MWR anual** (experiencia real) | **+35,86%** |
+| Walk-forward 120+60 paso 30 | **7 ventanas — 3 pasan, 4 fallan → agregado NO** |
+
+Las 4 ventanas que fallan coinciden con **selloffs de equity argentino** (drawdowns de hasta
+-25,7%); las 3 que pasan, con rallies (la mejor: +56% TWR, Sharpe 3,87, capturando GGAL +111%
+en octubre-2025). Diagnóstico de régimen y causa raíz (concentración en un solo factor) en
+**ADR-059** y `docs/complicaciones-tecnicas.md` #13. El resultado **refuerza el gate
+congelado**: aflojarlo para "pasar" habría sido autoengaño.
+
 ## Límites conocidos
 
 - Requiere historia larga: con la DB de producción (forward-only, ~4 meses) no alcanza para

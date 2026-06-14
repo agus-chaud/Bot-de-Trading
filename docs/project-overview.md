@@ -346,6 +346,35 @@ Flujo del notebook (**ADR-046**, pasos 3–4):
 4. Cuatro vistas: subplot grid base 100, tabla pivote, barra de retorno promedio, MDD agrupado por ventana.
 5. Corrida continua sobre todo el calendario (paso 5): tres curvas superpuestas en USD y en base 100.
 
+### 9.1) Perfil de riesgo revelado por el walk-forward de investigación (ADR-058/059)
+
+El simulador walk-forward de investigación (aportes mensuales + TWR, **ADR-058**) corrido
+sobre 360 días backfilleados (2025-01 → 2026-06, 500k/mes, 120+60 paso 30) dio TWR
+acumulado **+24,75%** (TIR real +35,86%) pero **NO pasa el agregado**: 3 de 7 ventanas OOS
+pasan, 4 fallan. El análisis del régimen es el hallazgo de riesgo más importante del
+proyecto (**ADR-059**):
+
+| Ventana | Resultado | Régimen subyacente (GGAL/PAMP) |
+|---------|-----------|-------------------------------|
+| V2 (sep–dic 25) | ✅ +56% TWR, Sharpe 3,87 | rally: GGAL **+111%** en oct-2025 |
+| V3 (oct–ene) | ✅ +29% | cola del rally |
+| V6 (mar–may 26) | ✅ +12% | recuperación (GGAL +23,8% may) |
+| V0/V1 (jun–oct 25) | ❌ DD **-25,7%** | selloff: GGAL -20,5% ago, -18,3% sep |
+| V4 (dic–mar) | ❌ DD -17,9% | selloff: GGAL -19,0% feb-2026 |
+| V5 (ene–abr) | ❌ DD -18,3% | selloff feb + -9,7% abr |
+
+**Causa raíz**: el sleeve largo (70% del capital) concentra **GGAL 42% + PAMP 43% = 85% del
+largo ≈ 60% del total** en dos acciones argentinas que **comparten factor** (riesgo-país AR)
+y caen juntas en los selloffs. SPY (satélite 15%) fue el único diversificador que aguantó en
+meses malos, pero su peso es chico; el sleeve corto US (30%) termina casi flat (no aporta
+retorno descorrelacionado). **No es un sistema diversificado: es una apuesta direccional a
+equity argentino.** El régimen que la hace sufrir: **selloffs de la bolsa local.**
+
+Para defensa oral, este es el punto de mayor madurez: el walk-forward **expuso** el perfil de
+riesgo real, y el resultado **refuerza** el valor del gate congelado — aflojarlo para "pasar"
+habría sido autoengaño. El backlog (§13) ataca los tres frentes: concentración, factor y
+cobertura del corto.
+
 ## 10) Testing y calidad
 
 La estrategia de testing prioriza comportamiento observable:
@@ -376,7 +405,7 @@ En defensa oral, este punto demuestra **criterio propio, no solo ejecución**: e
 
 ## 11) Decisiones tecnicas clave
 
-Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (**56 ADRs**, hasta ADR-057). Los ejes principales son:
+Las decisiones se documentan en ADRs dentro de `decisiones-tecnicas.md` (**58 ADRs**, hasta ADR-059). Los ejes principales son:
 
 - Paper-first como estrategia de construccion.
 - Riesgo deterministico y centralizado.
@@ -548,6 +577,8 @@ El proyecto esta funcional en paper-first con ambos sleeves (corto y largo) inte
 7. Extender controles CI de calidad a modulos fuera de `core_sim`: el determinismo de dependencias ya esta resuelto (lockfile `requirements.lock` instalado en los 3 workflows), pero falta **piso de cobertura en `data/`** y gates de **lint/tipos** (ruff/mypy), con la misma disciplina, especialmente para `data/`, `validation/` y `reporting/`.
 8. Agregar observabilidad explicita para operacion diaria del largo: metricas minimas por dia (`fills_long_count`, `long_risk_block_count`, `snapshot_long_equity_present`).
 9. **Copiloto de noticias (investigacion)**: pipeline offline con LangChain/CrewAI para resumir eventos diarios y etiquetado **human-validated** hacia `knowledge-base/` — sin acoplar a motores ni a ejecucion (ver seccion 12.2).
+10. **Concentracion y factor (ADR-059, prioritario antes de capital real)**: el walk-forward de investigacion mostro que ~60% del capital esta en GGAL+PAMP, mismo factor (riesgo-pais AR) → drawdowns de -25% en selloffs locales. Tres frentes: (a) **bajar concentracion** del largo (mas nombres, menos peso por nombre); (b) **diversificar el factor** subiendo el peso de exposicion global (CEDEARs) frente al equity AR puro; (c) que el **sleeve corto cubra de verdad** (hoy termina flat, no aporta retorno descorrelacionado) o reducir su asignacion.
+11. **Bug latente market mismatch**: con `--enable-long-engine`, el corto puede operar un simbolo del largo (SPY en dos monedas) → el ledger rechaza. Fix ya aplicado en el simulador de investigacion; pendiente en `run_paper_live.py` (excluir simbolos del largo del universo del corto).
 
 Este capitulo existe para evitar una narrativa "cerrada". El sistema se presenta como una base robusta en evolucion, con backlog tecnico explicitado.
 
@@ -567,7 +598,7 @@ Documentos complementarios:
 - Politica operativa: `POLICY.md`
 - Contrato parseable: `config/policy.v1.yaml`
 - Validacion estructural: `config/policy.v1.schema.json`
-- Registro de decisiones: `decisiones-tecnicas.md` (56 ADRs)
-- Complicaciones tecnicas (guion oral, 12 casos): `docs/complicaciones-tecnicas.md`
+- Registro de decisiones: `decisiones-tecnicas.md` (58 ADRs)
+- Complicaciones tecnicas (guion oral, 13 casos): `docs/complicaciones-tecnicas.md`
 - KPI spec: `docs/kpi_report_spec.v1.md`
 - Listas blancas: `config/symbols/whitelist_us.yaml` (ETFs, stocks, ADRs), `config/symbols/whitelist_ar.yaml`, `config/symbols/whitelist_cedear.yaml`

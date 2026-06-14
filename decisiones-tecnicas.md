@@ -2,7 +2,7 @@
 
 Este documento registra las decisiones técnicas relevantes del proyecto, su contexto, el porqué, consecuencias y alternativas evaluadas.
 
-**Última actualización**: 2026-06-11 — **56 ADRs** aceptadas (001–057). Las complicaciones técnicas vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`; el overview de arquitectura y estado operativo está en `docs/project-overview.md`.
+**Última actualización**: 2026-06-13 — **58 ADRs** aceptadas (001–059). Las complicaciones técnicas vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`; el overview de arquitectura y estado operativo está en `docs/project-overview.md`.
 
 ## Cómo usar este archivo
 
@@ -11,7 +11,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 - Cuando una decisión cambie, no borrar el historial: marcar la anterior como `reemplazada` y enlazar la nueva.
 - Ante conflicto numérico entre `POLICY.md` y `config/policy.v1.yaml`, actualizar ambos en el mismo cambio y anotar el motivo aquí o en el ADR afectado.
 
-## Índice por tema (56 ADRs)
+## Índice por tema (58 ADRs)
 
 | Tema | ADRs |
 |------|------|
@@ -21,6 +21,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 | Data layer y calidad | 021, 037, 047, 049, 052, 053, 056 |
 | Simulación y ledger | 008–010, 018–019, 025, 039, 051 |
 | KPI, validación y gates | 027–035, 041 |
+| Investigación walk-forward y perfil de riesgo | 058, 059 |
 | Paper-live y operación | 040, 044, 048, 050, 054, 055 |
 | Señal y medición offline | 042, 052, 053 (+ `reporting/signal_ic.py`, `reporting/scenario.py`; ver ADR-052) |
 | Connector AR / IOL | 049, 056 |
@@ -1387,6 +1388,29 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **`montoOperado`/equity con aportes para drawdown**: descartada — esconde las pérdidas reales.
 - **Archivos**: `reporting/twr_walk_forward.py`, `scripts/run_wf_research_sim.py`, `tests/test_twr_walk_forward.py`
 - **Ver también**: **ADR-041** (gate OOS congelado), **ADR-051** (valuación resiliente), **ADR-057** (lección de testing)
+
+---
+
+## ADR-059 — Hallazgo: la estrategia es una apuesta concentrada a un solo factor (equity AR)
+
+- **Fecha**: 2026-06-13
+- **Estado**: aceptada (hallazgo + decisiones derivadas)
+- **Contexto**: El simulador walk-forward de investigación (**ADR-058**) corrido sobre 360 días backfilleados (2025-01 → 2026-06, aportes 500k/mes, 120+60 paso 30) dio TWR acumulado **+24,75%** pero **NO pasa el agregado**: 3 de 7 ventanas OOS pasan, 4 fallan. El análisis del régimen mostró la causa raíz, no un detalle de implementación.
+- **Hallazgo**:
+  - El destino de la estrategia está **pegado a GGAL y PAMP** (las dos acciones AR del sleeve largo). Ventanas que fallan = selloffs de equity argentino (GGAL **-20,5%** ago-2025, **-19,0%** feb-2026); ventana que más rinde (+56% TWR, Sharpe 3,87) = rally de octubre-2025 (GGAL **+111%** en el mes).
+  - **Concentración**: el largo es 70% del capital; core GGAL 42% + PAMP 43% = **85% del largo ≈ 60% del total** en dos nombres.
+  - **Factor único**: GGAL (banco) y PAMP (energía) parecen diversificadas pero **caen juntas** en los selloffs (mismo factor: riesgo-país AR). La correlación destruye la diversificación aparente.
+  - **Diversificadores insuficientes**: SPY (satélite, 15% del largo) fue el único que aguantó en meses malos (ago +2,6%, abr +10,4% mientras GGAL caía), pero su peso es muy chico para compensar. El sleeve corto US (30%) termina casi flat — no aporta retorno descorrelacionado.
+  - Conclusión: **no es un sistema diversificado, es una apuesta direccional apalancada-en-criterio a equity argentino, con adornos.** El walk-forward lo expuso: -25% de drawdown en regímenes bajistas locales.
+- **Decisiones derivadas**:
+  1. **Mantener en paper**: el resultado **refuerza** el valor del gate congelado (**ADR-041**). Aflojarlo para "pasar" habría sido autoengaño; el gate dijo la verdad incómoda.
+  2. **Antes de cualquier capital real**, trabajar tres frentes (ver backlog): bajar concentración del largo, diversificar el factor (más peso a riesgo global vía CEDEARs), y que el corto genere cobertura real o se reduzca su asignación.
+- **Por qué (registrarlo)**: es el hallazgo de riesgo más importante del proyecto. Para defensa oral, demuestra criterio: entender *de qué depende* el retorno (y el drawdown) vale más que el número.
+- **Alternativas consideradas**:
+  - **Reportar solo el +24,75%**: descartada — esconde el perfil de riesgo; deshonesto.
+  - **Aflojar el gate para que pase**: descartada — p-hacking (**ADR-057**, **ADR-041**).
+- **Archivos**: análisis sobre `data/market_backfill.db` + `data/_sim/wf_research_report.json`; narrativa en `docs/project-overview.md` y `docs/complicaciones-tecnicas.md` (#13).
+- **Ver también**: **ADR-058** (simulador), **ADR-041** (gate), **ADR-053** (ampliación de universo — primer paso de diversificación)
 
 ---
 

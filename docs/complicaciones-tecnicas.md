@@ -2,7 +2,7 @@
 
 Este documento consolida **todas** las complicaciones técnicas relevantes que enfrentó el proyecto, con su causa raíz, cómo se detectaron y cómo se resolvieron. Está pensado como guion de defensa oral: ante la pregunta *"¿qué complicaciones tuviste?"*, acá está la lista completa con el detalle suficiente para responder con criterio, no de memoria.
 
-**Última actualización**: 2026-06-11. Complementa `docs/project-overview.md` (arquitectura y estado) y `decisiones-tecnicas.md` (**56 ADRs**). La suite del repo tiene **640** tests en CI (`pytest --collect-only`).
+**Última actualización**: 2026-06-13. Complementa `docs/project-overview.md` (arquitectura y estado) y `decisiones-tecnicas.md` (**58 ADRs**). La suite del repo tiene **656** tests en CI (`pytest --collect-only`).
 
 Cada complicación sigue la misma estructura: **Síntoma**, **Causa raíz**, **Cómo se detectó**, **Resolución**, **Estado** y **Lección**.
 
@@ -24,6 +24,7 @@ No reemplaza el registro de decisiones (`decisiones-tecnicas.md`): los ADR citad
 | 10 | Calendario de producción reemplazado por stub de tests | Config / Riesgo | **Resuelto** (**ADR-054**) |
 | 11 | Cobertura XBUE truncada + ratio CEDEAR sin ajustar | Datos / Valuación sim | **Resuelto**: ratio CEDEAR ajustado; truncamiento XBUE era síntoma de #3 (**ADR-056**) |
 | 12 | Fallback Byma no disparaba ante respuesta vacía de IOL (CEDEARs en cero) | Datos / Connector | **Resuelto** (**ADR-056**, verificado 2026-06-11) |
+| 13 | Estrategia concentrada en un solo factor (equity AR) — drawdowns de -25% | Estrategia / Riesgo | **Identificado** (**ADR-059**); backlog de diversificación |
 
 Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una tapaba a la otra. El 401 de IOL (#1) ocultaba el bug de mapeo (#3), que a su vez quedaba enmascarado por el fallback silencioso a Byma (#4). Al arreglar el mapeo (#3, **ADR-056**) apareció un **segundo** bug de fallback (#12): IOL devuelve vacío para varios símbolos y el connector no caía a Byma, así que el "corte XBUE 2026-06-02" (#11) resultó ser otro síntoma de #3, no una limitación real. La mezcla de monedas (#6) inflaba un veredicto de señal (#7) que, al limpiarse, dejó al descubierto el problema real de fondo: falta de amplitud del universo (#8). En operación, la caída del CI paper-live (#9) mezcló secretos ausentes, F3 y feriados sin barras — resuelto con runbook **ADR-050**. La auditoría jun 2026 (#10, **ADR-054** / **ADR-055**) y la primera sim de cartera (#11) mostraron que calendario y datos AR incompletos distorsionan PnL tanto como bugs de código. Resolver una capa fue, repetidamente, la condición para ver la siguiente.
 
@@ -191,6 +192,17 @@ Hilo conductor: varias de estas complicaciones estaban **encadenadas** — una t
 - **Resolución** (**ADR-056**, commit `0b55c34`): se eliminó el retorno temprano ante IOL vacío; ahora cae al fallback Byma (salvo `iol_only`, que respeta su contrato). La atribución de fuente (**ADR-049**) mantiene el fallback visible.
 - **Estado**: **Resuelto**.
 - **Lección**: aceptar el **vacío de la fuente primaria** como respuesta final esconde datos que la secundaria tiene — es un primo del fallback silencioso (#4), pero al revés: no es que el fallback enmascare, es que **no se activa**. Y de nuevo, **dos tests afirmaban `result == []`** ante IOL vacío: codificaban el bug como contrato. Se reescribieron para afirmar la conducta deseada ("cae a Byma"). Ver patrón transversal y **ADR-057**.
+
+---
+
+## 13. Estrategia concentrada en un solo factor (equity AR)
+
+- **Síntoma**: el simulador walk-forward de investigación (aportes 500k/mes, 120+60, 360 días backfilleados) dio TWR **+24,75%** pero **no pasa el agregado**: 4 de 7 ventanas OOS fallan con drawdowns de hasta **-25,7%**. No era ruido aleatorio: las ventanas que fallan coinciden exactamente con los selloffs de la bolsa argentina.
+- **Causa raíz**: el sleeve largo (70% del capital) concentra **GGAL 42% + PAMP 43% = 85% del largo ≈ 60% del total** en dos acciones argentinas que **comparten factor** (riesgo-país AR) y caen juntas (agosto-2025: GGAL -20,5% y PAMP -10,1% el mismo mes; febrero-2026: GGAL -19,0%). La diversificación es aparente: "banco + energía" responden al mismo macro. SPY (satélite 15%) sí descorrelaciona pero pesa poco; el sleeve corto US (30%) termina flat.
+- **Cómo se detectó**: cruzando las ventanas OOS del walk-forward con los retornos mensuales de GGAL/PAMP/SPY. Ventana ganadora (+56% TWR, Sharpe 3,87) = rally de octubre-2025 (GGAL **+111%** en el mes); ventanas perdedoras = selloffs. La correlación era 1:1 con el equity argentino.
+- **Resolución**: **identificado, no resuelto** — es un cambio de diseño de la estrategia, no un bug. Backlog (**ADR-059**, project-overview §13): bajar concentración, diversificar el factor (más peso global vía CEDEARs), y que el corto cubra o se reduzca. Decisión inmediata: **mantener en paper** — el hallazgo refuerza el gate congelado.
+- **Estado**: **Identificado** (**ADR-059**).
+- **Lección**: un retorno lindo (+24,75%) puede esconder un **perfil de riesgo concentrado**. El walk-forward existe precisamente para exponer *de qué depende* el retorno: acá, de que la bolsa argentina suba. Diversificar por *sector* (banco/energía) no es diversificar si todos comparten el mismo *factor* macro. Y —otra vez el mismo aprendizaje— el número agregado mentía hasta que se miró por régimen.
 
 ---
 
