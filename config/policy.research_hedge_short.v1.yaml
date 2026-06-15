@@ -111,20 +111,24 @@ short_hedge:
   hedge_weight_total: 0.20           # 2/3 del bucket corto → cobertura anti-factor
   tactical_weight_total: 0.10        # 1/3 del bucket corto → momentum corto existente
   drift_rebalance_threshold_pp: 2.0  # rebalanceo por bandas (copiado del largo)
-  # Canasta de cobertura (Fase 0/1): GLD + KO, corr en crisis <= 0 vs GGAL/PAMP.
+  # Canasta de cobertura (Fase 0/1): GLD + WMT, corr en crisis <= 0 vs GGAL/PAMP.
+  # KO medía mejor (-0,41) pero ya está en el largo diversificado; el ledger no permite
+  # el mismo símbolo en dos buckets → se usa WMT (-0,38), el mejor defensivo sin solape.
   # Pesos internos del bloque hedge (suman 1.0 dentro de hedge_weight_total).
   hedge_lines:
     - symbol: GLD
       target_weight: 0.50
-    - symbol: KO
+    - symbol: WMT
       target_weight: 0.50
-  # Regla de des-riesgo a cash para el crash GLOBAL (ventanas 4/5): se DEFINE en Fase 4.
-  # Umbrales pre-registrados en Fase 3 (anti p-hacking). Placeholder declarado, apagado.
+  # Regla de des-riesgo a cash para el crash GLOBAL (ventanas 4/5). Dispara cuando el
+  # factor AR (GGAL) Y el global (SPY) están AMBOS en drawdown bajo el piso. Los pisos
+  # son una decisión de diseño a-priori (un -10% es un selloff material), NO ajustados
+  # a resultados — la corrida (Fase 5) todavía no se hizo.
   derisk_to_cash:
-    enabled: false
+    enabled: true
     trigger: ar_factor_and_global_both_in_drawdown
-    ar_factor_drawdown_floor: null    # a pre-registrar (Fase 3)
-    global_drawdown_floor: null       # a pre-registrar (Fase 3)
+    ar_factor_drawdown_floor: -0.10
+    global_drawdown_floor: -0.10
 
 # Parámetros del short_term_engine (sleeve táctico del 10%)
 short_term_engine:

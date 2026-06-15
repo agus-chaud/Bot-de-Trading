@@ -6,8 +6,14 @@
 #      AR (GGAL/PAMP). El promedio no alcanza: lo que decide es la crisis.
 #
 # Medición (scripts/measure_correlation.py --hedge), corr media en crisis vs GGAL/PAMP:
-#   GLD (oro)              -0,28  -> incluido
-#   KO  (consumo defensivo) -0,41  -> incluido
+#   GLD (oro)               -0,28  -> incluido
+#   WMT (consumo defensivo) -0,38  -> incluido
+#
+# Nota sobre KO: KO medía aún mejor (-0,41) PERO ya está en el sleeve largo diversificado
+# (ADR-060). El ledger prohíbe el mismo símbolo en dos buckets (long y short) —
+# `bucket mismatch` en ledger.py:234. Se reemplazó por el mejor defensivo NO presente en
+# el largo: WMT (-0,38), el más cercano a KO entre los candidatos sin solapamiento
+# (WMT -0,38 > MCD -0,34 > PEP -0,23 > PFE -0,21). Mismo criterio de Fase 1.
 #
 # DESCARTADOS (evaluados y rechazados):
 #   AL30 / GD30 (bonos soberanos AR): corr POSITIVA que empeora en crisis (+0,46 / +0,44)
@@ -16,4 +22,4 @@
 # Venue: XBUE (CEDEAR en pesos). Pesos objetivo en la policy (short_hedge.hedge_lines).
 hedge:
   - GLD
-  - KO
+  - WMT
