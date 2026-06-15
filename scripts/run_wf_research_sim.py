@@ -54,8 +54,10 @@ from core_sim.short_term_day_runner import (  # noqa: E402
 from data.storage import MarketDB  # noqa: E402
 from reporting.twr_walk_forward import (  # noqa: E402
     DailyPoint,
+    annualized_twr,
     cumulative_twr,
     evaluate_walk_forward,
+    max_drawdown,
     money_weighted_return,
     time_weighted_daily_returns,
 )
@@ -356,6 +358,13 @@ def main() -> int:
     cashflows = [(pt.day, -pt.contribution) for pt in series if pt.contribution > 0]
     mwr = money_weighted_return(cashflows, final_equity, series[-1].day) if series else None
 
+    # Calmar agregado (criterio pre-registrado, Fase 3): annualized_twr / |max_drawdown|
+    # sobre la serie diaria continua. max_drawdown se mide sobre el índice TWR (excluye
+    # los aportes). Mismo cálculo para las 3 carteras → comparación A/B/C reproducible.
+    ann_twr = annualized_twr(returns)
+    mdd = max_drawdown(returns)
+    calmar = (ann_twr / abs(mdd)) if mdd < 0 else None
+
     summary = {
         "mode": "research",
         "window_config": {"burn_in": args.burn_in, "oos": args.oos, "step": args.step},
@@ -365,6 +374,9 @@ def main() -> int:
         "total_contributed": total_contrib,
         "final_equity": final_equity,
         "twr_cumulative_pct": cumulative_twr(returns) * 100.0,
+        "annualized_twr_pct": ann_twr * 100.0,
+        "max_drawdown_pct": mdd * 100.0,
+        "calmar": calmar,
         "mwr_annualized_pct": (mwr * 100.0) if mwr is not None else None,
         "walk_forward": report,
     }
@@ -387,6 +399,9 @@ def _print_report(s: dict[str, Any]) -> None:
     print(f"  Total aportado   : {s['total_contributed']:,.0f} ARS")
     print(f"  Equity final     : {s['final_equity']:,.0f} ARS")
     print(f"  TWR acumulado    : {s['twr_cumulative_pct']:+.2f}%  (rendimiento de la estrategia, sin aportes)")
+    cal = s.get("calmar")
+    print(f"  TWR anualizado   : {s.get('annualized_twr_pct', 0.0):+.2f}%   MaxDD: {s.get('max_drawdown_pct', 0.0):.2f}%")
+    print(f"  Calmar (criterio): {cal:.3f}" if cal is not None else "  Calmar (criterio): n/d (sin drawdown)")
     mwr = s.get("mwr_annualized_pct")
     print(f"  TIR (MWR) anual  : {mwr:+.2f}%" if mwr is not None else "  TIR (MWR) anual  : n/d")
     print(f"\n  Walk-forward {wf['config']['burn_in']}+{wf['config']['oos']} paso {wf['config']['step']}: {wf['num_windows']} ventanas OOS")
