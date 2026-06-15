@@ -1452,6 +1452,38 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-061 — Connector IOL trae títulos públicos (bonos) vía `sinAjustar`; bonos AR descartados como hedge
+
+- **Fecha**: 2026-06-15
+- **Estado**: aceptada (fix de connector); hallazgo de research que descarta los bonos como cobertura.
+- **Contexto**: ejecutando las Fases 0–1 del plan de cobertura anti-factor (`docs/plan_hedge_short.md`, tercer frente de **ADR-059/060**), se asumía que los bonos AL30/GD30 "no estaban en el pipeline / requerían un connector distinto". Cuestionada esa suposición, se verificó contra la API real de IOL en vez de darla por buena.
+- **Hallazgo de disponibilidad (causa raíz)**: los bonos **sí** existen en bCBA vía IOL. El connector hardcodeaba el segmento `/ajustada` de la URL de `seriehistorica`; las acciones/CEDEARs responden en `ajustada`, pero los **títulos públicos sólo entregan serie en `sinAjustar`** (en `ajustada` devuelven `200 []`). No era un connector distinto: era un segmento de URL.
+- **Decisión (fix de connector)** — `data/connectors/ar_connector.py`:
+  1. URL parametrizada por modo de ajuste (`_IOL_ADJUST_PRIMARY="ajustada"`, `_IOL_ADJUST_FALLBACK="sinAjustar"`); helper `_iol_history_get` para una GET por modo.
+  2. `_iol_fetch_once` prueba `ajustada` y, **sólo si viene vacío**, reintenta en `sinAjustar`. El camino de acciones/CEDEARs (payload no vacío) queda idéntico → cero regresión.
+  3. **Dedup por fecha** en `_normalize_iol`: los bonos devuelven varias filas por día (plazos CI/48hs); se conserva la de **mayor volumen** por fecha. Para acciones/CEDEARs (una fila por día) es no-op. Verificado: AL30 1917 filas crudas → 352 limpias, 0 duplicados.
+- **Hallazgo de research (los bonos NO sirven como hedge)**: medida la correlación **condicional a crisis** (ventanas selloff ago-sep 2025 y feb 2026) de cada candidato vs el factor GGAL/PAMP:
+  | Candidato | corr TOTAL | corr CRISIS | Veredicto |
+  |-----------|:---:|:---:|:---:|
+  | KO (defensivo) | -0,24 | **-0,41** | ✅ sirve |
+  | GLD (oro) | -0,18 | **-0,28** | ✅ sirve |
+  | AL30 (bono) | +0,31 | **+0,46** | ❌ no cubre |
+  | GD30 (bono) | +0,26 | **+0,44** | ❌ no cubre |
+  - Los bonos soberanos AR tienen correlación **positiva** con el equity AR y **sube en la crisis** (AL30–GGAL 0,31→0,53): comparten el mismo factor riesgo-país. Poder traerlos (ingeniería) no los hace útiles como cobertura (finanzas).
+- **Por qué (metodología)**: confirma la mejora #2 del plan — medir la correlación **en crisis**, no en promedio, y verificar supuestos contra la realidad antes de diseñar la canasta. Igual disciplina que **ADR-052/056/057** (verificar contra la API real, no contra la suposición del código).
+- **Consecuencias**:
+  - El connector ahora cubre acciones, CEDEARs y bonos sin lista hardcodeada; los bonos quedan disponibles en el pipeline para usos futuros (p. ej. valuación de tenencias), aunque **descartados como hedge**.
+  - **Canasta de cobertura viable (Fase 0/1): GLD + KO.** Insumo para la Fase 2.
+  - Nota de calidad: AL30 disparó ~9 warnings `ohlc_inconsistency` (close apenas fuera del high/low del plazo elegido); filas almacenadas como limpias. A revisar si los bonos se usaran para valuar, no sólo para correlación.
+  - `measure_correlation.py` extendido con modo `--hedge` (ventanas de crisis); no altera el modo matriz existente (**ADR-060**).
+- **Alternativas consideradas**:
+  - **Lista hardcodeada de bonos → `sinAjustar`**: descartada — frágil; el fallback por respuesta vacía es genérico y autodescubre el modo correcto.
+  - **Mantener los bonos en la canasta de hedge**: descartada por la evidencia — correlación positiva que empeora en crisis.
+- **Archivos**: `data/connectors/ar_connector.py`, `tests/test_data_ar_connector.py` (test del fallback bono), `scripts/measure_correlation.py`, `docs/plan_hedge_short.md`
+- **Ver también**: **ADR-056** (robustez connector IOL), **ADR-052** (venue/moneda), **ADR-059/060** (factor y diversificación), `docs/plan_hedge_short.md`
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

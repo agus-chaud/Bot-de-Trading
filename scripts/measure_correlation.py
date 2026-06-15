@@ -35,6 +35,75 @@ import sqlite3  # noqa: E402
 _AR_NATIVE = {"GGAL", "PAMP", "TXAR", "YPFD", "BMA", "CEPU", "ALUA", "SUPV",
               "TGSU2", "CRES", "TECO2", "LOMA", "MIRG", "IRSA"}
 
+# Ventanas de selloff de la bolsa AR (ADR-059). La correlacion que importa para una
+# cobertura NO es el promedio del periodo (se ve baja y engania): es la correlacion
+# DURANTE las crisis, cuando todo tiende a correlacionar a 1. Un hedge sirve solo si
+# se mantiene <= 0 con el factor (GGAL/PAMP) en estas ventanas.
+_CRISIS_WINDOWS: list[tuple[str, date, date]] = [
+    ("selloff ago-sep 2025", date(2025, 8, 1), date(2025, 9, 30)),
+    ("selloff feb 2026", date(2026, 2, 1), date(2026, 2, 28)),
+]
+
+
+def _in_crisis(d: date) -> bool:
+    return any(lo <= d <= hi for _, lo, hi in _CRISIS_WINDOWS)
+
+
+def _corr_on_dates(
+    rets_a: dict[date, float], rets_b: dict[date, float], days: list[date]
+) -> tuple[float, int]:
+    xs = [rets_a[d] for d in days if d in rets_a and d in rets_b]
+    ys = [rets_b[d] for d in days if d in rets_a and d in rets_b]
+    return _pearson(xs, ys), len(xs)
+
+
+def _run_hedge_analysis(
+    conn: sqlite3.Connection,
+    hedge_symbols: list[str],
+    factor_symbols: list[str],
+    start: date,
+    end: date,
+) -> int:
+    """Fase 1 del plan_hedge_short: correlacion condicional a crisis.
+
+    Para cada candidato de cobertura, compara su correlacion con el factor (GGAL/PAMP)
+    en TODO el periodo vs SOLO durante los selloffs. El criterio de aceptacion es la
+    correlacion en crisis, no el promedio.
+    """
+    universe = list(dict.fromkeys(hedge_symbols + factor_symbols))
+    rets = {s: _daily_returns(conn, s, start, end) for s in universe}
+
+    all_days = sorted(set().union(*(set(r) for r in rets.values())) if rets else set())
+    crisis_days = [d for d in all_days if _in_crisis(d)]
+
+    print(f"\nFase 1 - Correlacion condicional a crisis (XBUE/ARS)")
+    print(f"  Periodo total : {start} -> {end}  ({len(all_days)} dias)")
+    print(f"  Dias en crisis: {len(crisis_days)}  ventanas={[w[0] for w in _CRISIS_WINDOWS]}\n")
+
+    header = f"{'hedge':>7} {'vs factor':>10} {'corr TOTAL':>11} {'corr CRISIS':>12} {'n_crisis':>9}  veredicto"
+    print(header)
+    print("-" * len(header))
+
+    verdicts: dict[str, list[float]] = {}
+    for h in hedge_symbols:
+        for f in factor_symbols:
+            c_all, _ = _corr_on_dates(rets[h], rets[f], all_days)
+            c_cri, n_cri = _corr_on_dates(rets[h], rets[f], crisis_days)
+            verdicts.setdefault(h, []).append(c_cri)
+            ok = c_cri == c_cri and c_cri <= 0.0
+            mark = "OK (<=0)" if ok else ("alto (>0)" if c_cri == c_cri else "sin datos")
+            print(f"{h:>7} {f:>10} {c_all:>11.2f} {c_cri:>12.2f} {n_cri:>9}  {mark}")
+
+    print(f"\nVeredicto por candidato (criterio: corr media en crisis vs factor <= 0):")
+    for h in hedge_symbols:
+        vals = [v for v in verdicts.get(h, []) if v == v]
+        avg = sum(vals) / len(vals) if vals else float("nan")
+        ok = avg == avg and avg <= 0.0
+        print(f"  {h:>7}: corr media en crisis = {avg:>6.2f}  -> {'SIRVE como hedge' if ok else 'NO cubre en crisis'}")
+    print("\n  Nota: una correlacion baja en el promedio puede ser alta en el crash.")
+    print("  El unico numero que decide es la columna corr CRISIS.\n")
+    return 0
+
 
 def _daily_returns(conn: sqlite3.Connection, symbol: str, start: date, end: date) -> dict[date, float]:
     cur = conn.execute(
@@ -70,7 +139,26 @@ def main() -> int:
     p.add_argument("--policy", type=Path, default=REPO_ROOT / "config" / "policy.research_diversified.v1.yaml")
     p.add_argument("--start", type=lambda s: date.fromisoformat(s), default=date(2025, 1, 1))
     p.add_argument("--end", type=lambda s: date.fromisoformat(s), default=date.today())
+    p.add_argument("--hedge", action="store_true",
+                   help="Fase 1: correlacion condicional a crisis de candidatos de cobertura")
+    p.add_argument("--hedge-symbols", nargs="*", default=["GLD", "KO"],
+                   help="Candidatos de cobertura a evaluar (default: GLD KO)")
+    p.add_argument("--factor-symbols", nargs="*", default=["GGAL", "PAMP"],
+                   help="Simbolos del factor a cubrir (default: GGAL PAMP)")
     args = p.parse_args()
+
+    if args.hedge:
+        conn = sqlite3.connect(str(args.db))
+        try:
+            return _run_hedge_analysis(
+                conn,
+                [s.upper() for s in args.hedge_symbols],
+                [s.upper() for s in args.factor_symbols],
+                args.start,
+                args.end,
+            )
+        finally:
+            conn.close()
 
     lt = yaml.safe_load(args.policy.open(encoding="utf-8"))["long_term_engine"]
     symbols = [str(it["symbol"]).upper() for it in (lt.get("core_lines", []) + lt.get("satellite_lines", []))]

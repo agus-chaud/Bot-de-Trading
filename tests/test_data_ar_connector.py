@@ -508,6 +508,49 @@ class TestPartialData:
         assert len(result) == 1
         assert result[0].venue == "XBUE"
 
+    def test_should_retry_sinajustar_when_ajustada_empty_for_bonds(self):
+        """Bonos (AL30/GD30): IOL devuelve [] en 'ajustada' pero serie en 'sinAjustar'.
+        El connector debe reintentar el segundo modo antes de declarar vacío. (ADR-061)"""
+        seen_urls: list[str] = []
+
+        def get_side_effect(url, **kwargs):
+            seen_urls.append(url)
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            if url.endswith("/ajustada"):
+                mock_resp.json.return_value = []          # bono: vacío en ajustada
+            else:
+                mock_resp.json.return_value = _IOL_PAYLOAD  # serie en sinAjustar
+            return mock_resp
+
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with patch("data.connectors.ar_connector.requests.get", side_effect=get_side_effect):
+                    result = fetch_ar_ohlcv("AL30", _START, _END, iol_only=True)
+
+        assert result is not None and len(result) == 1
+        assert result[0].symbol == "AL30"
+        assert any(u.endswith("/ajustada") for u in seen_urls)
+        assert any(u.endswith("/sinAjustar") for u in seen_urls)
+
+    def test_should_dedup_multiple_plazos_per_date_keeping_max_volume(self):
+        """Los bonos traen varias filas por fecha (plazos CI/48hs); _normalize_iol
+        deja una por fecha, la de mayor volumen. (ADR-061)"""
+        from data.connectors.ar_connector import _normalize_iol
+
+        payload = [
+            {"fechaHora": "2024-03-04T00:00:00", "apertura": 100.0, "maximo": 110.0,
+             "minimo": 95.0, "ultimoPrecio": 105.0, "volumenNominal": 10.0},   # CI, vol bajo
+            {"fechaHora": "2024-03-04T00:00:00", "apertura": 101.0, "maximo": 111.0,
+             "minimo": 96.0, "ultimoPrecio": 106.0, "volumenNominal": 999.0},  # 48hs, vol alto
+        ]
+        rows = _normalize_iol("AL30", payload)
+        assert len(rows) == 1
+        assert rows[0].ts == date(2024, 3, 4)
+        assert rows[0].volume == pytest.approx(999.0)
+        assert rows[0].close == pytest.approx(106.0)
+
     def test_iol_only_does_not_fall_back_to_byma_on_empty(self):
         """Con iol_only=True, IOL vacío NO debe caer a Byma (contrato de iol_only)."""
         with patch.dict("os.environ", _IOL_ENV):

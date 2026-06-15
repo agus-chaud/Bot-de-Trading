@@ -51,8 +51,14 @@ _MAX_ATTEMPTS = 3
 # Auth contract (POST only — GET returns UnsupportedApiVersion in browser):
 # https://api.invertironline.com/Help/Autenticacion
 _IOL_TOKEN_URL = "https://api.invertironline.com/token"
-_IOL_HISTORY_URL = "https://api.invertironline.com/api/v2/{mercado}/Titulos/{symbol}/Cotizacion/seriehistorica/{start}/{end}/ajustada"
+_IOL_HISTORY_URL = "https://api.invertironline.com/api/v2/{mercado}/Titulos/{symbol}/Cotizacion/seriehistorica/{start}/{end}/{ajuste}"
 _IOL_MERCADO = "bCBA"  # Bolsas y Mercados Argentinos via IOL
+# Modo de ajuste de la serie histórica. Acciones/CEDEARs traen datos en 'ajustada';
+# los títulos públicos (bonos: AL30/GD30) devuelven [] en 'ajustada' y solo entregan
+# serie en 'sinAjustar'. Probamos 'ajustada' primero y caemos a 'sinAjustar' si viene
+# vacío — así el mismo connector cubre acciones, CEDEARs y bonos sin lista hardcodeada.
+_IOL_ADJUST_PRIMARY = "ajustada"
+_IOL_ADJUST_FALLBACK = "sinAjustar"
 _IOL_BEARER_TTL_SECONDS = 15 * 60
 _IOL_EXPIRES_SKEW_SECONDS = 120
 
@@ -528,15 +534,18 @@ def _iol_get_access_token(iol_user: str, iol_pass: str, timeout: int) -> str:
         return _iol_apply_token_payload(body, iol_user)
 
 
-def _iol_fetch_once(
+def _iol_history_get(
     symbol: str,
     start_date: date,
     end_date: date,
     timeout: int,
     token: str,
     meter_kind: str,
-) -> list[OHLCVRow]:
-    """Single IOL fetch attempt. Raises NetworkError or DataError."""
+    ajuste: str,
+) -> list[dict]:
+    """Una GET a seriehistorica con un modo de ajuste. Devuelve el payload (lista,
+    posiblemente vacía). Consume slot de presupuesto y registra la llamada. Raises
+    NetworkError / IolUnauthorized."""
     if not try_consume_iol_job_slot():
         raise IolJobBudgetExhausted("max_calls_per_job exceeded before IOL history GET")
     url = _IOL_HISTORY_URL.format(
@@ -544,6 +553,7 @@ def _iol_fetch_once(
         symbol=symbol,
         start=start_date.isoformat(),
         end=(end_date + timedelta(days=1)).isoformat(),  # IOL end is exclusive
+        ajuste=ajuste,
     )
     try:
         resp = requests.get(
@@ -560,8 +570,32 @@ def _iol_fetch_once(
     except Exception as exc:
         raise NetworkError(f"IOL history request failed: {exc}") from exc
 
+    record_iol_call(meter_kind)
+    return payload or []
+
+
+def _iol_fetch_once(
+    symbol: str,
+    start_date: date,
+    end_date: date,
+    timeout: int,
+    token: str,
+    meter_kind: str,
+) -> list[OHLCVRow]:
+    """Single IOL fetch attempt. Raises NetworkError or DataError.
+
+    Prueba 'ajustada' (acciones/CEDEARs) y, si IOL devuelve vacío, reintenta en
+    'sinAjustar' (títulos públicos / bonos como AL30/GD30). Ver complicación #12 y
+    docs/plan_hedge_short.md.
+    """
+    payload = _iol_history_get(
+        symbol, start_date, end_date, timeout, token, meter_kind, _IOL_ADJUST_PRIMARY
+    )
     if not payload:
-        record_iol_call(meter_kind)
+        payload = _iol_history_get(
+            symbol, start_date, end_date, timeout, token, meter_kind, _IOL_ADJUST_FALLBACK
+        )
+    if not payload:
         return []
 
     try:
@@ -569,7 +603,6 @@ def _iol_fetch_once(
     except Exception as exc:
         raise DataError(f"IOL normalization failed: {exc}") from exc
 
-    record_iol_call(meter_kind)
     return rows
 
 
@@ -643,6 +676,18 @@ def _normalize_iol(symbol: str, payload: list[dict]) -> list[OHLCVRow]:
                 imputed=False,
             )
         )
+
+    # Dedup por fecha: para títulos públicos (bonos) IOL devuelve varias filas por día,
+    # una por plazo de liquidación (contado inmediato, 48hs). Nos quedamos con la de
+    # mayor volumen por fecha (la más representativa). Para acciones/CEDEARs (una fila
+    # por día) es un no-op. Salida ordenada por fecha ascendente.
+    if rows:
+        best: dict[date, OHLCVRow] = {}
+        for r in rows:
+            cur = best.get(r.ts)
+            if cur is None or r.volume > cur.volume:
+                best[r.ts] = r
+        rows = [best[d] for d in sorted(best)]
     return rows
 
 
