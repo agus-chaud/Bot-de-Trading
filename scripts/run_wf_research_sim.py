@@ -40,9 +40,16 @@ if str(REPO_ROOT) not in sys.path:
 
 from core_sim.long_term_monthly_runner import create_long_term_monthly_backtester  # noqa: E402
 from core_sim.paper_broker_sim import PaperBrokerSim  # noqa: E402
+from core_sim.short_hedge_engine import (  # noqa: E402
+    build_hedge_orders_intent,
+    short_hedge_config_from_policy_dict,
+    should_derisk_to_cash,
+    trailing_drawdown,
+)
 from core_sim.short_term_day_runner import (  # noqa: E402
     create_short_term_daily_backtester,
     load_merged_whitelist,
+    orders_intent_to_broker_orders,
 )
 from data.storage import MarketDB  # noqa: E402
 from reporting.twr_walk_forward import (  # noqa: E402
@@ -101,6 +108,84 @@ def _trading_days(db: MarketDB, start: date, end: date) -> list[date]:
     return [date.fromisoformat(r[0]) for r in cur.fetchall()]
 
 
+def _load_hedge_whitelist(repo_root: Path, policy_doc: dict[str, Any]) -> frozenset[str]:
+    """Símbolos de la canasta de cobertura desde `whitelist_hedge_file`."""
+    rel = policy_doc.get("symbols", {}).get("whitelist_hedge_file")
+    if not rel:
+        return frozenset()
+    doc = yaml.safe_load((repo_root / str(rel)).open(encoding="utf-8")) or {}
+    return frozenset(str(s).strip().upper() for s in (doc.get("hedge") or []))
+
+
+def _xbue_closes(db: MarketDB, symbol: str, day: date, lookback_days: int) -> list[float]:
+    """Cierres XBUE ascendentes por fecha (para drawdown de proxies del des-riesgo)."""
+    rows = db.get_ohlcv(symbol, day - timedelta(days=lookback_days), day, "XBUE")
+    return [float(r.close) for r in sorted(rows, key=lambda r: r.ts)]
+
+
+def _run_hedge_sleeve(
+    db: MarketDB,
+    day: date,
+    ledger: Any,
+    broker: Any,
+    hedge_cfg: Any,
+    hedge_whitelist: frozenset[str],
+    weights_short: float,
+) -> list[dict]:
+    """Ejecuta el sleeve corto como COBERTURA (reemplaza al momentum). Devuelve fills.
+
+    Reglas (entendidas en el análisis de contabilidad del ledger):
+      (3) budget = equity_total × weights.short (NO equity_short, que es PnL).
+      (4) deploya su budget completo, igual que lo hacía el momentum (misma estructura
+          de apalancamiento que la cartera B → comparación justa).
+    """
+    snap_pre = _resilient_snapshot(db, day, ledger)
+    equity_total = float(snap_pre.get("equity_total", 0.0))
+    budget = equity_total * weights_short
+    if budget <= 0:
+        return []
+
+    hedge_bars: dict[str, dict[str, float]] = {}
+    for sym in hedge_whitelist:
+        rows = db.get_ohlcv(sym, day, day, "XBUE")
+        if rows:
+            b = rows[0]
+            hedge_bars[sym] = {"open": b.open, "high": b.high, "low": b.low,
+                               "close": b.close, "volume": b.volume}
+    prices = {s: hb["close"] for s, hb in hedge_bars.items()}
+    positions_qty = {
+        s: float(p.get("qty", 0.0))
+        for s, p in (snap_pre.get("positions") or {}).items()
+        if str(p.get("bucket")) == "short" and s in hedge_whitelist
+    }
+
+    # Regla de des-riesgo a cash: AR (GGAL) y global (SPY) ambos en drawdown bajo el piso.
+    derisk = False
+    if hedge_cfg.derisk_enabled:
+        ar_dd = trailing_drawdown(_xbue_closes(db, "GGAL", day, 200))
+        gl_dd = trailing_drawdown(_xbue_closes(db, "SPY", day, 200))
+        derisk = should_derisk_to_cash(
+            ar_drawdown=ar_dd, global_drawdown=gl_dd,
+            ar_drawdown_floor=float(hedge_cfg.derisk_ar_drawdown_floor),
+            global_drawdown_floor=float(hedge_cfg.derisk_global_drawdown_floor),
+        )
+
+    intents, _skips, _metrics = build_hedge_orders_intent(
+        hedge_cfg,
+        hedge_bucket_mtm=budget,
+        hedge_cash=budget,  # deploya el budget completo (regla 4: misma estructura que B)
+        positions_qty=positions_qty,
+        prices=prices,
+        whitelist_hedge=hedge_whitelist,
+        derisk_to_cash=derisk,
+    )
+    if not intents:
+        return []
+    orders = orders_intent_to_broker_orders(intents)
+    fills = broker.fill_orders(day, orders, hedge_bars)
+    return list(fills) if isinstance(fills, list) else []
+
+
 def run_research_sim(
     db: MarketDB,
     days: list[date],
@@ -133,6 +218,15 @@ def run_research_sim(
         for item in (lt.get("core_lines", []) + lt.get("satellite_lines", []))
     }
 
+    # Sleeve corto como cobertura (plan_hedge_short Fase 4): si está activo, el corto se
+    # maneja como hedge_static y REEMPLAZA al momentum táctico (el split 20/10 con ambos
+    # activos no es enforceable con un solo short_cash; v1 corre el hedge sobre el 30%).
+    sh_raw = policy_doc.get("short_hedge") or {}
+    hedge_enabled = bool(sh_raw.get("enabled", False))
+    hedge_cfg = short_hedge_config_from_policy_dict(sh_raw) if hedge_enabled else None
+    hedge_whitelist = _load_hedge_whitelist(REPO_ROOT, policy_doc) if hedge_enabled else frozenset()
+    weights_short = float(policy_doc["weights"]["short"])
+
     cumulative_contrib = 0.0
     seen_months: set[tuple[int, int]] = set()
     series: list[DailyPoint] = []
@@ -148,15 +242,6 @@ def run_research_sim(
         ledger = db.replay_ledger_from_fills(mode, starting_cash=cumulative_contrib)
         cost_model = _cost_model_from_policy(policy_doc)
         broker = PaperBrokerSim(ledger=ledger, cost_model=cost_model)
-        short_backtester = create_short_term_daily_backtester(
-            policy_doc=policy_doc,
-            repo_root=REPO_ROOT,
-            ledger=ledger,
-            broker=broker,
-            calendar_store=calendar_store,
-            corporate_actions_store=None,
-            db=db,
-        )
 
         daily_bars: dict[str, dict[str, float]] = {}
         for sym, market in merged_whitelist.items():
@@ -171,25 +256,34 @@ def run_research_sim(
         if not daily_bars:
             continue
 
-        # Universo del corto = todo MENOS los símbolos del largo (evita el conflicto SPY).
-        short_bars = {s: b for s, b in daily_bars.items() if s not in long_symbols}
-
-        history_by_symbol: dict[str, list[dict[str, float]]] = {}
-        for sym, market in merged_whitelist.items():
-            if sym not in short_bars:
-                continue
-            venue = _VENUE_MAP.get(market, market)
-            history_by_symbol[sym] = _build_history_from_db(
-                db, sym, day, venue, lookback_days=history_cap
+        if hedge_enabled:
+            # Cobertura: el sleeve corto se rebalancea hacia la canasta (o cash si des-riesga).
+            all_fills: list[dict] = _run_hedge_sleeve(
+                db, day, ledger, broker, hedge_cfg, hedge_whitelist, weights_short
             )
-
-        short_events = short_backtester.run_day(
-            trading_day=day,
-            daily_bars=short_bars,
-            pipeline_context={"history_by_symbol": history_by_symbol},
-        )
-        short_fills = short_events[4].payload
-        all_fills: list[dict] = list(short_fills) if isinstance(short_fills, list) else []
+        else:
+            short_backtester = create_short_term_daily_backtester(
+                policy_doc=policy_doc, repo_root=REPO_ROOT, ledger=ledger,
+                broker=broker, calendar_store=calendar_store,
+                corporate_actions_store=None, db=db,
+            )
+            # Universo del corto = todo MENOS los símbolos del largo (evita el conflicto SPY).
+            short_bars = {s: b for s, b in daily_bars.items() if s not in long_symbols}
+            history_by_symbol: dict[str, list[dict[str, float]]] = {}
+            for sym, market in merged_whitelist.items():
+                if sym not in short_bars:
+                    continue
+                venue = _VENUE_MAP.get(market, market)
+                history_by_symbol[sym] = _build_history_from_db(
+                    db, sym, day, venue, lookback_days=history_cap
+                )
+            short_events = short_backtester.run_day(
+                trading_day=day,
+                daily_bars=short_bars,
+                pipeline_context={"history_by_symbol": history_by_symbol},
+            )
+            short_fills = short_events[4].payload
+            all_fills = list(short_fills) if isinstance(short_fills, list) else []
 
         if enable_long:
             bars_long = dict(daily_bars)
