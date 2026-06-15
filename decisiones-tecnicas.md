@@ -1484,6 +1484,42 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-062 — Sleeve corto como cobertura (GLD+WMT): pasa el Calmar pre-registrado, pero el win es direccional al oro → NO se promueve
+
+- **Fecha**: 2026-06-15
+- **Estado**: propuesta — **criterio pre-registrado CUMPLIDO**, pero **NO promovida**: el resultado está confundido por un rally del oro in-sample y la protección real es modesta. Mantener en investigación; falta robustez out-of-sample. El gate congelado (**ADR-041**) no se toca.
+- **Contexto**: tercer frente de **ADR-059/060**. El sleeve corto (30%) hacía momentum-long en otro mercado y terminaba flat: no cubría. El plan (`docs/plan_hedge_short.md`) lo rediseñó como cobertura anti-factor explícita y pre-registró el criterio de éxito **antes** de medir (`docs/hedge_short_criterio_preregistrado.md`, Fase 3) para evitar p-hacking.
+- **Qué se construyó** (Fases 0–4):
+  - Disponibilidad + correlación **en crisis** (no promedio): canasta **GLD** (oro, corr en crisis -0,28) + **WMT** (defensivo, -0,38). KO medía mejor (-0,41) pero ya está en el largo diversificado y el ledger prohíbe el mismo símbolo en dos buckets (`ledger.py:234`) → se usó el mejor defensivo sin solape (WMT > MCD > PEP > PFE). Bonos AL30/GD30 descartados: correlación positiva que **empeora** en crisis (**ADR-061**).
+  - Motor `core_sim/short_hedge_engine.py` (modo `hedge_static`: rebalanceo por bandas hacia la canasta) + **regla de des-riesgo a cash** (vende la canasta cuando el factor AR **y** el global están ambos en drawdown bajo -10%). Cableado en `run_wf_research_sim.py` (el hedge reemplaza al momentum; budget = equity_total × weights.short).
+- **Métrica primaria pre-registrada**: Calmar = annualized_twr ÷ |max_drawdown| del walk-forward agregado (2025-01-01 → 2026-06-12, 500k/mes, ventanas 120/60/30).
+
+  | Cartera | TWR acum | MaxDD agreg | **Calmar** | Ventanas OOS |
+  |---------|----------|-------------|------------|--------------|
+  | A — concentrada | +24,8% | -26,8% | 0,607 | 3/7 |
+  | B — diversificada (ADR-060) | +29,4% | -13,0% | 1,476 | 4/7 |
+  | C — diversificada + hedge | +50,3% | -13,8% | **2,311** | 5/7 |
+
+- **Veredicto contra el criterio** (binario, pre-registrado):
+  - Primaria: Calmar(C) 2,311 ≥ 1,05 × Calmar(B) = 1,55 → **PASA** (+56% relativo).
+  - Guardrail anti-degenerado: TWR(C) +50,3% ≥ 0,85 × TWR(B) = +25,0% → **PASA** (el retorno subió, no se mató).
+  - **Conclusión literal**: C cumple el criterio congelado.
+- **Por qué NO se promueve (el matiz honesto, lo importante)**:
+  1. **El win es por retorno, no por protección.** El drawdown agregado **empeoró** levemente (-13,0% → -13,8%). El Calmar subió porque el retorno se disparó, no porque cubriera mejor.
+  2. **Es una apuesta direccional al oro que pagó in-sample.** En el período, **GLD +100%** y **WMT +71%** en ARS, contra GGAL +2% / PAMP +21%. El sleeve "cobertura" fue la parte que más rindió. El oro no rallea +100% todos los períodos: gran parte de la mejora de Calmar es suerte de régimen, no protección estructural. Es exactamente el riesgo de **ADR-059** (un retorno lindo esconde de qué depende).
+  3. **La protección real existe pero es modesta**: en la ventana **V4** (lo peor del crash global dic-2025 → mar-2026, objetivo del hedge) C mejoró de -9,9% a -4,7% (DD -10,5% → -7,5%); **V5** quedó ~igual. El anti-factor + la regla de cash ayudaron donde apuntaban, pero poco.
+- **Decisión**: mantener la variante en investigación. **Antes de cualquier promoción** hace falta: (a) robustez en un régimen donde el oro **no** rallee (sub-período / out-of-sample); (b) aislar la contribución protectora de la beta al oro (¿cuánto del Calmar es hedge real vs exposición direccional?); (c) evaluar el turnover/costos del rebalanceo por bandas diario.
+- **Consecuencias**:
+  - Producción (`policy.v1.yaml`) y el gate (**ADR-041**) intactos. El connector IOL ahora trae bonos (**ADR-061**), subproducto reutilizable.
+  - El walk-forward volvió a cumplir su función: **expuso** que la "cobertura" es en parte una apuesta al oro, igual que antes expuso la concentración GGAL/PAMP. La disciplina (pre-registro + medir en crisis + escepticismo ante el número lindo) evitó promover sobre una ilusión.
+- **Alternativas consideradas**:
+  - **Promover C al default por pasar el criterio**: descartada — pasar el bar no basta si el mecanismo del éxito (rally del oro) no es robusto; promover sería el autoengaño que el proyecto evita.
+  - **Declarar el hedge un fracaso**: descartada — la evidencia protectora en V4 es real; el approach merece el test de robustez, no el descarte.
+- **Archivos**: `core_sim/short_hedge_engine.py`, `tests/test_short_hedge_engine.py`, `scripts/run_wf_research_sim.py`, `scripts/measure_correlation.py`, `config/symbols/whitelist_hedge.yaml`, `config/policy.research_hedge_short.v1.yaml`, `docs/hedge_short_criterio_preregistrado.md`, `docs/plan_hedge_short.md`
+- **Ver también**: **ADR-061** (connector bonos + canasta), **ADR-059** (factor concentrado), **ADR-060** (diversificación), **ADR-058** (simulador WF), **ADR-041** (gate congelado), **ADR-057** (test verde)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
