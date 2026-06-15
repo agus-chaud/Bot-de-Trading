@@ -1,0 +1,19 @@
+# Canasta de cobertura anti-factor — plan_hedge_short Fase 0/1 (ADR-061).
+#
+# Criterio de inclusión (los dos, no uno):
+#   1. Datos XBUE/ARS reales en el pipeline, >=300 días limpios.
+#   2. Correlación EN CRISIS (selloffs ago-sep 2025 y feb 2026) <= 0 con el factor
+#      AR (GGAL/PAMP). El promedio no alcanza: lo que decide es la crisis.
+#
+# Medición (scripts/measure_correlation.py --hedge), corr media en crisis vs GGAL/PAMP:
+#   GLD (oro)              -0,28  -> incluido
+#   KO  (consumo defensivo) -0,41  -> incluido
+#
+# DESCARTADOS (evaluados y rechazados):
+#   AL30 / GD30 (bonos soberanos AR): corr POSITIVA que empeora en crisis (+0,46 / +0,44)
+#   -> comparten el mismo factor riesgo-país. Poder traerlos (ADR-061) no los hace hedge.
+#
+# Venue: XBUE (CEDEAR en pesos). Pesos objetivo en la policy (short_hedge.hedge_lines).
+hedge:
+  - GLD
+  - KO
