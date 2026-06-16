@@ -54,6 +54,7 @@ from core_sim.short_term_day_runner import (  # noqa: E402
 from data.storage import MarketDB  # noqa: E402
 from reporting.twr_walk_forward import (  # noqa: E402
     DailyPoint,
+    annualized_sharpe,
     annualized_twr,
     cumulative_twr,
     evaluate_walk_forward,
@@ -364,6 +365,7 @@ def main() -> int:
     ann_twr = annualized_twr(returns)
     mdd = max_drawdown(returns)
     calmar = (ann_twr / abs(mdd)) if mdd < 0 else None
+    sharpe = annualized_sharpe(returns)
 
     summary = {
         "mode": "research",
@@ -377,6 +379,7 @@ def main() -> int:
         "annualized_twr_pct": ann_twr * 100.0,
         "max_drawdown_pct": mdd * 100.0,
         "calmar": calmar,
+        "sharpe_annualized": sharpe,
         "mwr_annualized_pct": (mwr * 100.0) if mwr is not None else None,
         "walk_forward": report,
     }
@@ -402,6 +405,8 @@ def _print_report(s: dict[str, Any]) -> None:
     cal = s.get("calmar")
     print(f"  TWR anualizado   : {s.get('annualized_twr_pct', 0.0):+.2f}%   MaxDD: {s.get('max_drawdown_pct', 0.0):.2f}%")
     print(f"  Calmar (criterio): {cal:.3f}" if cal is not None else "  Calmar (criterio): n/d (sin drawdown)")
+    shp = s.get("sharpe_annualized")
+    print(f"  Sharpe anualizado: {shp:.3f}" if shp is not None else "  Sharpe anualizado: n/d")
     mwr = s.get("mwr_annualized_pct")
     print(f"  TIR (MWR) anual  : {mwr:+.2f}%" if mwr is not None else "  TIR (MWR) anual  : n/d")
     print(f"\n  Walk-forward {wf['config']['burn_in']}+{wf['config']['oos']} paso {wf['config']['step']}: {wf['num_windows']} ventanas OOS")
