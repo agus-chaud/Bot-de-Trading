@@ -48,7 +48,7 @@ jobs:
           if [ -n "${{ github.event.inputs.date }}" ]; then
             DATE_ARG="--date ${{ github.event.inputs.date }}"
           fi
-          python scripts/run_paper_live.py $DATE_ARG --db data/market.db --initial-cash 1000000 --currency ARS
+          python scripts/run_paper_live.py $DATE_ARG --db data/market.db --initial-cash 1000000 --currency ARS --enable-long-engine
 
       - name: Commit and push DB changes
         run: |

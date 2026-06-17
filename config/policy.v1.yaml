@@ -30,6 +30,7 @@ symbols:
   whitelist_us_file: config/symbols/whitelist_us.yaml
   whitelist_ar_file: config/symbols/whitelist_ar.yaml
   whitelist_cedear_file: config/symbols/whitelist_cedear.yaml
+  whitelist_hedge_file: config/symbols/whitelist_hedge.yaml   # canasta de cobertura (ADR-064)
   inline_us: []
   inline_ar: []
   # Selección dinámica top volumen (IOL) — desactivada por defecto hasta cablear fetch/runner

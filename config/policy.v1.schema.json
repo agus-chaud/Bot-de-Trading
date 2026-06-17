@@ -85,6 +85,7 @@
         "whitelist_us_file": { "type": "string", "minLength": 1 },
         "whitelist_ar_file": { "type": "string", "minLength": 1 },
         "whitelist_cedear_file": { "type": "string", "minLength": 1 },
+        "whitelist_hedge_file": { "type": "string", "minLength": 1 },
         "inline_us": {
           "type": "array",
           "items": { "type": "string" }
