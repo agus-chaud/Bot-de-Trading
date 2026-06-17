@@ -101,6 +101,27 @@ long_term_engine:
     max_weight_per_satellite_line: 0.15
     max_satellite_names: 3
 
+# Sleeve corto como COBERTURA (ADR-064): el 30% corto se maneja como hedge_static
+# (canasta anti-factor GLD/WMT + regla de des-riesgo a cash) en vez de momentum táctico.
+# Override explícito: se promueve pese a que el win está en parte confundido con el rally
+# del oro (ADR-062). v1 corre el hedge sobre el 30% completo (táctico diferido).
+short_hedge:
+  enabled: true
+  mode: hedge_static
+  hedge_weight_total: 0.30
+  tactical_weight_total: 0.0
+  drift_rebalance_threshold_pp: 2.0
+  hedge_lines:
+    - symbol: GLD
+      target_weight: 0.50
+    - symbol: WMT
+      target_weight: 0.50
+  derisk_to_cash:
+    enabled: true
+    trigger: ar_factor_and_global_both_in_drawdown
+    ar_factor_drawdown_floor: -0.10
+    global_drawdown_floor: -0.10
+
 # Parámetros explícitos del short_term_engine v1 (Fase 3, señal diaria auditable)
 short_term_engine:
   momentum_lookback_days: 20         # N días para retorno acumulado

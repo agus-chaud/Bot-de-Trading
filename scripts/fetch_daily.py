@@ -290,6 +290,14 @@ def main() -> None:
             universe_report=universe_report,
         )
         symbols_ar = list(universe_report.get("symbols_ar_effective") or [])
+        # ADR-064: si el corto opera como cobertura, asegurar que la canasta (GLD/WMT)
+        # se fetchee como AR/XBUE — sino el runner del hedge no tendría barras en producción.
+        sh = policy.get("short_hedge") or {}
+        if sh.get("enabled"):
+            from core_sim.short_hedge_runner import load_hedge_whitelist
+            hedge_syms = sorted(load_hedge_whitelist(_REPO_ROOT, policy))
+            symbols_ar = list(dict.fromkeys(list(symbols_ar) + hedge_syms))
+            universe_report["hedge_symbols_added"] = hedge_syms
         iol_only = os.environ.get("FETCH_IOL_ONLY", "").strip().lower() in (
             "1",
             "true",

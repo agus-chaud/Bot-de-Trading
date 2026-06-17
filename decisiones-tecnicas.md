@@ -1548,6 +1548,31 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-064 — Promoción de la cobertura (cartera C) a producción — OVERRIDE explícito de ADR-062
+
+- **Fecha**: 2026-06-16
+- **Estado**: aceptada — **override explícito** de la postura de no-promoción de **ADR-062**. El sleeve corto pasa de momentum a **cobertura (hedge_static GLD/WMT + regla de des-riesgo a cash)** en producción (`policy.v1.yaml`).
+- **Contexto**: **ADR-062** dejó la cartera C en investigación porque su mejora de Calmar (1,48→2,31) estaba **confundida con el rally del oro** (GLD +100% in-sample) y el drawdown agregado no mejoró (-13,0%→-13,8%). El **Check 1** (descomposición rally/crisis) dio **mixto**: hay protección real en los selloffs argentinos (V0/V1/V4: C le ganó a B +8,6 / +6,8 / +5,2pp), pero el viento de cola del oro contamina la magnitud en todas las ventanas. El **Check 2** (re-correr C sin oro) **no se corrió**. Decisión del usuario: promover igual, asumiendo el riesgo con los ojos abiertos.
+- **Decisión**:
+  - `policy.v1.yaml` → bloque **`short_hedge`** `enabled: true` (hedge_static, canasta GLD/WMT 50/50, `drift_rebalance_threshold_pp` 2,0, regla de des-riesgo a cash con pisos -10%/-10%). v1 corre el hedge sobre el 30% completo (táctico diferido).
+  - **Runner compartido** `core_sim/short_hedge_runner.py` (`run_hedge_sleeve_day` + `compute_derisk_to_cash` + `load_hedge_whitelist`): única fuente de verdad del cableado, usada por **producción** (`run_paper_live.py`) y **research** (`run_wf_research_sim.py`) — bifurcan short→hedge cuando `short_hedge.enabled`. DRY (se eliminó la duplicación previa del sim).
+  - `policy.v1.schema.json` → propiedad `short_hedge` agregada (el `additionalProperties:false` la requería).
+  - `fetch_daily.py` → cuando el hedge está activo, agrega GLD/WMT al fetch AR/XBUE (sin esto el runner no tendría barras en producción).
+  - **Tests** (`tests/test_short_hedge_runner.py`, 7 casos, smart-testing — DB/ledger/broker reales): compra de la canasta, sizing desde equity total, sin fills sin barras, regla de cash dispara/ vende a cash, y guard de que producción tiene el hedge activo. Suite **679 verde**.
+- **Riesgo asumido (honesto, NO se oculta)**: la ventaja de C depende en parte de un rally del oro que **no es estructural ni se garantiza repetir**; el max drawdown agregado **no mejoró**; el Check 2 (aislar la beta al oro) quedó **pendiente**. Esto se promueve **por decisión explícita, NO porque la evidencia de robustez esté completa**. La advertencia de **ADR-062** sigue vigente.
+- **Mitigaciones**:
+  - Es **paper-first**: esto cambia lo que opera el bot en paper, no autoriza capital real. El **gate MVP** (**ADR-063**) y el gate pleno (**ADR-041**) siguen gobernando el capital real.
+  - La **regla de des-riesgo a cash** está activa (sube cash si AR y global caen juntos).
+  - El flag `--enable-long-engine` sigue **off** por defecto.
+- **Pendiente (recomendado antes de cualquier capital real con C)**: correr el **Check 2** (C sin oro) para validar o revertir esta decisión. Si la protección no sobrevive sin el oro, revertir el `short_hedge.enabled` a `false` (rollback de una línea).
+- **Alternativas consideradas**:
+  - **Correr el Check 2 primero** (recomendado por el análisis): no elegida — el usuario optó por promover ya.
+  - **Dejar C en investigación** (postura ADR-062): reemplazada por esta decisión.
+- **Archivos**: `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `core_sim/short_hedge_runner.py`, `scripts/run_paper_live.py`, `scripts/run_wf_research_sim.py`, `scripts/fetch_daily.py`, `tests/test_short_hedge_runner.py`
+- **Ver también**: **ADR-062** (no-promoción, override de esta), **ADR-061** (canasta GLD/WMT + connector), **ADR-063** (cartera diversificada + gate MVP), **ADR-059** (factor)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

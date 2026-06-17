@@ -32,6 +32,11 @@ from core_sim.long_term_engine import (  # noqa: E402
 )
 from core_sim.long_term_monthly_runner import create_long_term_monthly_backtester  # noqa: E402
 from core_sim.paper_broker_sim import PaperBrokerSim  # noqa: E402
+from core_sim.short_hedge_engine import short_hedge_config_from_policy_dict  # noqa: E402
+from core_sim.short_hedge_runner import (  # noqa: E402
+    load_hedge_whitelist,
+    run_hedge_sleeve_day,
+)
 from core_sim.short_term_day_runner import create_short_term_daily_backtester  # noqa: E402
 from core_sim.short_term_pre_gate import build_history_before_day  # noqa: E402
 from data.storage import MarketDB, PortfolioMetaConflictError  # noqa: E402
@@ -317,6 +322,14 @@ def run_catch_up(
     from core_sim.short_term_day_runner import load_merged_whitelist
     merged_whitelist = load_merged_whitelist(REPO_ROOT, policy_doc)
 
+    # Sleeve corto como cobertura (ADR-064): si short_hedge.enabled, el corto se maneja
+    # como hedge_static (GLD/WMT + regla de cash) y REEMPLAZA al momentum táctico.
+    sh_raw = policy_doc.get("short_hedge") or {}
+    hedge_enabled = bool(sh_raw.get("enabled", False))
+    hedge_cfg = short_hedge_config_from_policy_dict(sh_raw) if hedge_enabled else None
+    hedge_whitelist = load_hedge_whitelist(REPO_ROOT, policy_doc) if hedge_enabled else frozenset()
+    weights_short = float(policy_doc["weights"]["short"])
+
     calendar_store = _resolve_calendar_store(
         policy_doc,
         calendar_store=calendar_store,
@@ -332,16 +345,6 @@ def run_catch_up(
         ledger = db.replay_ledger_from_fills(mode, starting_cash=initial_cash)
         cost_model = _cost_model_from_policy(policy_doc)
         broker = PaperBrokerSim(ledger=ledger, cost_model=cost_model)
-        short_backtester = create_short_term_daily_backtester(
-            policy_doc=policy_doc,
-            repo_root=REPO_ROOT,
-            ledger=ledger,
-            broker=broker,
-            calendar_store=calendar_store,
-            corporate_actions_store=None,
-            db=db,
-        )
-
         daily_bars: dict[str, dict[str, float]] = {}
         for sym, market in merged_whitelist.items():
             venue = _VENUE_MAP.get(market, market)
@@ -363,23 +366,38 @@ def run_catch_up(
             )
             continue
 
-        history_by_symbol: dict[str, list[dict[str, float]]] = {}
-        for sym, market in merged_whitelist.items():
-            if sym not in daily_bars:
-                continue
-            venue = _VENUE_MAP.get(market, market)
-            history_by_symbol[sym] = _build_history_from_db(
-                db, sym, day, venue, lookback_days=history_cap
+        if hedge_enabled:
+            # Sleeve corto como COBERTURA (ADR-064): hedge_static reemplaza al momentum.
+            all_fills: list[dict] = run_hedge_sleeve_day(
+                db=db, day=day, ledger=ledger, broker=broker,
+                hedge_cfg=hedge_cfg, hedge_whitelist=hedge_whitelist,
+                weights_short=weights_short, resilient_snapshot=_resilient_snapshot,
             )
-
-        short_events = short_backtester.run_day(
-            trading_day=day,
-            daily_bars=daily_bars,
-            pipeline_context={"history_by_symbol": history_by_symbol},
-        )
-
-        short_fills = short_events[4].payload
-        all_fills: list[dict] = list(short_fills) if isinstance(short_fills, list) else []
+        else:
+            short_backtester = create_short_term_daily_backtester(
+                policy_doc=policy_doc,
+                repo_root=REPO_ROOT,
+                ledger=ledger,
+                broker=broker,
+                calendar_store=calendar_store,
+                corporate_actions_store=None,
+                db=db,
+            )
+            history_by_symbol: dict[str, list[dict[str, float]]] = {}
+            for sym, market in merged_whitelist.items():
+                if sym not in daily_bars:
+                    continue
+                venue = _VENUE_MAP.get(market, market)
+                history_by_symbol[sym] = _build_history_from_db(
+                    db, sym, day, venue, lookback_days=history_cap
+                )
+            short_events = short_backtester.run_day(
+                trading_day=day,
+                daily_bars=daily_bars,
+                pipeline_context={"history_by_symbol": history_by_symbol},
+            )
+            short_fills = short_events[4].payload
+            all_fills = list(short_fills) if isinstance(short_fills, list) else []
         long_fills_count = 0
 
         bars_for_long_and_mtm = daily_bars

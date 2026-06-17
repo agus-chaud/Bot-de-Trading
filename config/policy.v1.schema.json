@@ -310,6 +310,39 @@
         "allow_leverage": { "type": "boolean" }
       }
     },
+    "short_hedge": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "mode": { "type": "string" },
+        "hedge_weight_total": { "type": "number", "minimum": 0, "maximum": 1 },
+        "tactical_weight_total": { "type": "number", "minimum": 0, "maximum": 1 },
+        "drift_rebalance_threshold_pp": { "type": "number", "exclusiveMinimum": 0 },
+        "hedge_lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["symbol", "target_weight"],
+            "properties": {
+              "symbol": { "type": "string" },
+              "target_weight": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "derisk_to_cash": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "trigger": { "type": "string" },
+            "ar_factor_drawdown_floor": { "type": ["number", "null"] },
+            "global_drawdown_floor": { "type": ["number", "null"] }
+          }
+        }
+      }
+    },
     "markets": {
       "type": "object",
       "additionalProperties": false,
