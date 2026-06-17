@@ -51,13 +51,16 @@ def _ohlcv_row(
 
 
 def _make_db_with_data(tmp_path: Path, trading_days: list[date]) -> MarketDB:
-    """MarketDB with XBUE calendars + OHLCV for GGAL/PAMP/SPY (policy largo AR)."""
+    """MarketDB with XBUE calendars + OHLCV para la cartera diversificada AR (ADR-063)."""
     db = MarketDB(str(tmp_path / "test.db"))
     db.upsert_calendars("XBUE", trading_days)
     symbols_prices = {
         "GGAL": 1000.0,
         "PAMP": 500.0,
+        "TXAR": 300.0,
         "SPY": 200.0,
+        "QQQ": 400.0,
+        "KO": 600.0,
     }
     rows: list[OHLCVRow] = []
     for sym, price in symbols_prices.items():

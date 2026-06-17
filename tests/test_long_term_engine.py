@@ -26,10 +26,21 @@ from core_sim.long_term_engine import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# Precios de prueba para el bloque largo AR del policy.v1.yaml por defecto (GGAL / PAMP / SPY CEDEAR).
+# Precios de prueba para el bloque largo AR diversificado (ADR-063): GGAL/PAMP/TXAR + SPY/QQQ/KO.
 _PX_GGAL = 1000.0
 _PX_PAMP = 500.0
 _PX_SPY = 200.0
+_PX = {"GGAL": _PX_GGAL, "PAMP": _PX_PAMP, "TXAR": 300.0,
+       "SPY": _PX_SPY, "QQQ": 400.0, "KO": 600.0}
+
+
+def _prices_for(cfg) -> dict:
+    return {s: _PX[s] for s in target_weights(cfg)}
+
+
+def _on_target_qty(cfg, mtm: float) -> dict:
+    """Cantidades que dejan cada línea EXACTAMENTE en su peso objetivo (drift 0)."""
+    return {s: w * mtm / _PX[s] for s, w in target_weights(cfg).items()}
 
 
 def _policy_cfg():
@@ -46,7 +57,7 @@ def test_repo_policy_long_term_block_is_consistent():
     validate_long_term_engine_config(cfg)
     tw = target_weights(cfg)
     assert abs(sum(tw.values()) - 1.0) < 1e-9
-    assert set(tw) == {"GGAL", "PAMP", "SPY"}
+    assert set(tw) == {"GGAL", "PAMP", "TXAR", "SPY", "QQQ", "KO"}
 
 
 def test_is_first_us_trading_day_of_week_picks_earliest_session_in_week():
@@ -161,14 +172,10 @@ def test_on_weekly_rebalance_day_within_drift_band_emits_no_orders():
     cfg = _lt_from_repo()
     ar = frozenset({date(2026, 4, 1), date(2026, 4, 2), date(2026, 4, 3)})
     day = date(2026, 4, 1)
-    prices = {"GGAL": _PX_GGAL, "PAMP": _PX_PAMP, "SPY": _PX_SPY}
     mtm = 100_000.0
-    qty = {
-        "GGAL": 0.42 * mtm / _PX_GGAL,
-        "PAMP": 0.43 * mtm / _PX_PAMP,
-        "SPY": 0.15 * mtm / _PX_SPY,
-    }
-    wl = frozenset({"GGAL", "PAMP", "SPY"})
+    prices = _prices_for(cfg)
+    qty = _on_target_qty(cfg, mtm)  # todas las líneas en su objetivo → drift 0
+    wl = frozenset(target_weights(cfg))
     intents, skips, _metrics = build_long_term_orders_intent(
         cfg,
         trading_day=day,
@@ -187,10 +194,12 @@ def test_on_weekly_rebalance_day_out_of_band_generates_sell_and_buy_intents():
     cfg = _lt_from_repo()
     ar = frozenset({date(2026, 4, 1)})
     day = date(2026, 4, 1)
-    prices = {"GGAL": _PX_GGAL, "PAMP": _PX_PAMP, "SPY": _PX_SPY}
     mtm = 100_000.0
-    qty = {"GGAL": 900.0, "PAMP": 100.0, "SPY": 50.0}
-    wl = frozenset({"GGAL", "PAMP", "SPY"})
+    prices = _prices_for(cfg)
+    wl = frozenset(target_weights(cfg))
+    qty = _on_target_qty(cfg, mtm)
+    qty["GGAL"] *= 3.0   # GGAL sobreponderado → SELL
+    qty["KO"] = 0.0      # KO subponderado → BUY
     intents, skips, metrics = build_long_term_orders_intent(
         cfg,
         trading_day=day,
@@ -213,10 +222,11 @@ def test_missing_price_aborts_whole_cycle_without_partial_rebalance():
     cfg = _lt_from_repo()
     ar = frozenset({date(2026, 4, 1)})
     day = date(2026, 4, 1)
-    prices = {"GGAL": _PX_GGAL, "PAMP": _PX_PAMP}
     mtm = 100_000.0
-    qty = {"GGAL": 900.0, "PAMP": 100.0, "SPY": 50.0}
-    wl = frozenset({"GGAL", "PAMP", "SPY"})
+    qty = _on_target_qty(cfg, mtm)
+    wl = frozenset(target_weights(cfg))
+    prices = _prices_for(cfg)
+    del prices["SPY"]  # falta un precio del universo → aborta el ciclo completo
     intents, skips, _metrics = build_long_term_orders_intent(
         cfg,
         trading_day=day,
@@ -237,14 +247,12 @@ def test_split_adjusted_qty_and_price_leave_weights_stable_so_band_can_hold():
     ar = frozenset({date(2026, 4, 1)})
     day = date(2026, 4, 1)
     mtm = 100_000.0
-    pre_split_px = 1000.0
-    qty = {
-        "GGAL": 0.42 * mtm / pre_split_px * 2.0,
-        "PAMP": 0.43 * mtm / _PX_PAMP,
-        "SPY": 0.15 * mtm / _PX_SPY,
-    }
-    prices = {"GGAL": pre_split_px / 2.0, "PAMP": _PX_PAMP, "SPY": _PX_SPY}
-    wl = frozenset({"GGAL", "PAMP", "SPY"})
+    qty = _on_target_qty(cfg, mtm)
+    prices = _prices_for(cfg)
+    # GGAL con split 2:1 ya aplicado: qty ×2 y precio /2 → mismo market value, peso estable.
+    qty["GGAL"] *= 2.0
+    prices["GGAL"] = _PX_GGAL / 2.0
+    wl = frozenset(target_weights(cfg))
     cur = current_weights_mtm(long_bucket_mtm=mtm, positions_qty=qty, prices=prices, universe=target_weights(cfg))
     drift = drift_per_line_pp(target_weights(cfg), cur)
     assert should_rebalance_long(is_rebalance_day=True, drift_pp_by_symbol=drift, drift_threshold_pp=2.0) is False

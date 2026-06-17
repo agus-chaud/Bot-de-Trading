@@ -78,14 +78,24 @@ long_term_engine:
   max_long_rebalance_turnover_pct: null     # opcional: tope a sum(|Δw|) del sleeve; null = sin tope en engine v1
   satellite_markets:
     - AR
+  # ADR-063: cartera diversificada promovida desde investigación (ADR-060).
+  # 50% AR (GGAL/PAMP/TXAR) + 50% global vía CEDEAR (SPY/QQQ/KO). Rompe la
+  # concentración de factor GGAL+PAMP que el walk-forward expuso (ADR-059):
+  # la peor caída pasó de -25% a -11% en la sim de investigación.
   core_lines:
     - symbol: GGAL
-      target_weight: 0.42
+      target_weight: 0.167
     - symbol: PAMP
-      target_weight: 0.43
-  satellite_lines:
+      target_weight: 0.167
+    - symbol: TXAR
+      target_weight: 0.166
     - symbol: SPY
-      target_weight: 0.15
+      target_weight: 0.167
+    - symbol: QQQ
+      target_weight: 0.167
+    - symbol: KO
+      target_weight: 0.166
+  satellite_lines: []
   satellite_limits:
     max_satellite_weight_total: 0.20
     max_weight_per_satellite_line: 0.15

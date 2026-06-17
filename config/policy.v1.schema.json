@@ -245,7 +245,7 @@
         "core_lines": {
           "type": "array",
           "minItems": 2,
-          "maxItems": 3,
+          "maxItems": 8,
           "items": {
             "type": "object",
             "additionalProperties": false,

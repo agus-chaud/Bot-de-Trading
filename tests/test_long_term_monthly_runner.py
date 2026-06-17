@@ -22,6 +22,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 _PX_GGAL = 1000.0
 _PX_PAMP = 500.0
 _PX_SPY = 200.0
+# Cartera diversificada (ADR-063): 6 líneas. Precio de prueba por símbolo.
+_PX = {"GGAL": _PX_GGAL, "PAMP": _PX_PAMP, "TXAR": 300.0,
+       "SPY": _PX_SPY, "QQQ": 400.0, "KO": 600.0}
 
 # ---------------------------------------------------------------------------
 # Fixtures compartidos
@@ -53,11 +56,7 @@ def _make_broker(ledger: PortfolioLedger) -> PaperBrokerSim:
 
 
 def _daily_bars() -> dict[str, dict[str, float]]:
-    return {
-        "GGAL": {"close": _PX_GGAL, "volume": 1_000_000},
-        "PAMP": {"close": _PX_PAMP, "volume": 500_000},
-        "SPY": {"close": _PX_SPY, "volume": 200_000},
-    }
+    return {s: {"close": px, "volume": 500_000} for s, px in _PX.items()}
 
 
 # Primer día hábil AR de la semana ISO (solo mi-mi-j en el set ⇒ 2026-04-01)
@@ -73,17 +72,17 @@ _AR_BUSINESS_APRIL = frozenset(
 
 _LONG_MTM = 100_000.0
 
-_QTY_ON_TARGET = {
-    "GGAL": 0.42 * _LONG_MTM / _PX_GGAL,
-    "PAMP": 0.43 * _LONG_MTM / _PX_PAMP,
-    "SPY": 0.15 * _LONG_MTM / _PX_SPY,
+_LONG_TARGETS = {
+    str(row["symbol"]): float(row["target_weight"])
+    for row in _policy_doc()["long_term_engine"]["core_lines"]
 }
+_QTY_ON_TARGET = {s: w * _LONG_MTM / _PX[s] for s, w in _LONG_TARGETS.items()}
 
-_QTY_OUT_OF_BAND = {
-    "GGAL": 900.0,
-    "PAMP": 100.0,
-    "SPY": 50.0,
-}
+# Fuera de banda: GGAL sobreponderado (→ SELL); SPY y KO en cero (→ BUY).
+_QTY_OUT_OF_BAND = dict(_QTY_ON_TARGET)
+_QTY_OUT_OF_BAND["GGAL"] *= 3.0
+_QTY_OUT_OF_BAND["SPY"] = 0.0
+_QTY_OUT_OF_BAND["KO"] = 0.0
 
 
 def _base_ctx(
@@ -358,19 +357,11 @@ def test_split_adjusted_qty_leaves_weights_stable_at_runner_level():
     h = create_long_term_pipeline_handlers(policy, REPO_ROOT, ledger)
 
     ggal_price_post_split = 500.0
-    ggal_qty_pre_split = _QTY_ON_TARGET["GGAL"]
 
-    positions_pre_split = {
-        "GGAL": ggal_qty_pre_split,
-        "PAMP": _QTY_ON_TARGET["PAMP"],
-        "SPY": _QTY_ON_TARGET["SPY"],
-    }
+    positions_pre_split = dict(_QTY_ON_TARGET)  # 6 líneas on-target (GGAL pre-split)
 
-    daily_bars_post_split = {
-        "GGAL": {"close": ggal_price_post_split, "volume": 1_000_000},
-        "PAMP": {"close": _PX_PAMP, "volume": 500_000},
-        "SPY": {"close": _PX_SPY, "volume": 200_000},
-    }
+    daily_bars_post_split = _daily_bars()
+    daily_bars_post_split["GGAL"] = {"close": ggal_price_post_split, "volume": 1_000_000}
 
     corporate_actions = [
         {"date": str(_REBALANCE_DAY), "symbol": "GGAL", "action_type": "split", "value": 2.0}

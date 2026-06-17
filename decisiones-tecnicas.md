@@ -1520,6 +1520,34 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-063 — Promoción de la cartera diversificada a producción + gate MVP (paso 10%)
+
+- **Fecha**: 2026-06-16
+- **Estado**: aceptada — la cartera diversificada (**ADR-060**) pasa a ser el **default de producción** (`policy.v1.yaml`). El sleeve de cobertura (**ADR-062**) queda en investigación. Se define un **gate MVP** liviano y explícito para habilitar el primer escalón de capital.
+- **Contexto**: el walk-forward de investigación expuso que la cartera concentrada (GGAL 42% + PAMP 43% + SPY 15%) dependía de un solo factor (riesgo-país AR) con drawdowns de -25% (**ADR-059**). La variante diversificada redujo el peor drawdown a -11% **por una razón estructural y medida** (correlaciones), no por suerte de régimen. A diferencia del hedge (**ADR-062**, confundido con el rally del oro), la diversificación es una mejora robusta y lista para promover.
+- **Decisión 1 — Promoción de la cartera**:
+  - `config/policy.v1.yaml` → `long_term_engine.core_lines` pasa de 3 líneas (GGAL/PAMP + satélite SPY) a **6 líneas**: AR (GGAL 0,167 / PAMP 0,167 / TXAR 0,166) + global vía CEDEAR (SPY 0,167 / QQQ 0,167 / KO 0,166); `satellite_lines: []`.
+  - `config/policy.v1.schema.json` → `core_lines.maxItems` de **3 a 8** (alineado con la validación de código de **ADR-060**).
+  - Tests actualizados para afirmar la cartera diversificada, **derivando los datos del config** (precios/qty/whitelist desde `target_weights`) para no volver a romperse ante un cambio de cartera: `test_long_term_engine.py`, `test_long_term_monthly_runner.py`, `test_validation_long_engine.py`. Suite completa en verde (672).
+  - **No se promueve** el sleeve de cobertura: el corto sigue siendo el momentum táctico (la cartera C queda en `policy.research_hedge_short.v1.yaml`).
+- **Decisión 2 — Gate MVP** (`docs/mvp_gate.md`):
+  - Barrera **anterior y más liviana** que el gate pleno (**ADR-041**), para habilitar solo el **paso 10%** del ramp-up sin esperar ~15 meses.
+  - Clave metodológica: como el sistema es **determinístico** (no ajusta a datos), el **burn-in puede ser histórico** sin contaminar; solo el tramo **OOS (examen) debe ser forward post-congelamiento**. Así basta **~1 ventana OOS forward (~60 días hábiles ≈ 2-3 meses)** en vez de 312 días nuevos.
+  - **Los umbrales de calidad NO se aflojan** (los 7 de ADR-041). La única relajación es cuántas ventanas forward se exigen (1) y el techo de capital (10%).
+- **Por qué (metodología)**: promover la diversificación es evidencia-driven y de bajo riesgo (mejora estructural, código del motor ya probado, cambio chico vs producción). El gate MVP baja el **listón de evidencia de forma explícita y documentada** —no oculta—, distinguiendo "opero con capital chico" de "autorizo capital pleno".
+- **Consecuencias**:
+  - El largo de producción ahora es diversificado; el flag `--enable-long-engine` sigue **off** por defecto (la activación en paper-live es paso aparte, ver project-overview §13).
+  - El gate pleno (**ADR-041**) y sus umbrales quedan intactos. El gate MVP está **definido pero no cableado** (pendiente: bloque `mvp_gate` en policy + runner; hoy se evalúa manual con `report_kpis_walk_forward.py`).
+  - Requiere que el universo de ingesta cubra TXAR/QQQ/KO en XBUE (ya en whitelists).
+- **Alternativas consideradas**:
+  - **Promover también el hedge (C)**: descartada — su ventaja está confundida con el rally del oro (**ADR-062**); falta robustez.
+  - **Esperar el gate pleno (~15 meses) antes de cualquier capital real**: descartada — bloquea el MVP sin necesidad; el burn-in histórico + OOS forward da una barrera honesta mucho antes.
+  - **Aflojar los umbrales para un MVP**: descartada — bajar la exigencia por trade es el autoengaño que el proyecto evita; se baja la cantidad de evidencia y el capital, no la calidad.
+- **Archivos**: `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `docs/mvp_gate.md`, `tests/test_long_term_engine.py`, `tests/test_long_term_monthly_runner.py`, `tests/test_validation_long_engine.py`
+- **Ver también**: **ADR-060** (diversificación en investigación), **ADR-059** (hallazgo de factor), **ADR-062** (hedge no promovido), **ADR-041** (gate congelado), **POLICY.md §14** (ramp-up)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
