@@ -22,5 +22,8 @@ for (const src of sources) {
   }
 }
 
-console.error("copy-payload: no dashboard_payload.json found (expected data/ or fixtures/)");
+console.error(
+  "copy-payload: no dashboard_payload.json found. Tried:",
+  sources.map((s) => path.relative(webRoot, s)).join(", "),
+);
 process.exit(1);

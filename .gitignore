@@ -56,8 +56,10 @@ data/*.db-shm
 
 # Reportes generados (run_validation_wf, run_long_engine_wf, etc.)
 validation_reports/*.json
-dashboard_payload.json
+# Export JSON (raíz y data/); NO ignorar web/fixtures/ (fallback de build Vercel)
+/dashboard_payload.json
 data/dashboard_payload.json
+!web/fixtures/dashboard_payload.json
 
 # Next.js demo (F1-04)
 web/node_modules/
