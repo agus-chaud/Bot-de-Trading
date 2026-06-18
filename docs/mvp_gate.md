@@ -69,3 +69,4 @@ paper-live, fijando `--wf-burn-in` con histórico y `--wf-oos 60`.
 - **ADR-063** (promoción de la cartera diversificada + este gate)
 - **ADR-041** (gate KPI OOS congelado), **POLICY.md §13/§14** (umbrales y ramp-up)
 - **ADR-062** (hedge en investigación), `docs/hedge_short_criterio_preregistrado.md`
+- `docs/dashboard.md` — monitor y demo web (MVP interfaz F1; **no** es este gate de capital)

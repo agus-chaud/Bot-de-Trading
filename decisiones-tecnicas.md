@@ -2,7 +2,7 @@
 
 Este documento registra las decisiones técnicas relevantes del proyecto, su contexto, el porqué, consecuencias y alternativas evaluadas.
 
-**Última actualización**: 2026-06-13 — **59 ADRs** aceptadas (001–060). Las complicaciones técnicas vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`; el overview de arquitectura y estado operativo está en `docs/project-overview.md`.
+**Última actualización**: 2026-06-18 — **65 ADRs** documentadas (001–065). Las complicaciones técnicas vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`; el overview de arquitectura y estado operativo está en `docs/project-overview.md`.
 
 ## Cómo usar este archivo
 
@@ -11,7 +11,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 - Cuando una decisión cambie, no borrar el historial: marcar la anterior como `reemplazada` y enlazar la nueva.
 - Ante conflicto numérico entre `POLICY.md` y `config/policy.v1.yaml`, actualizar ambos en el mismo cambio y anotar el motivo aquí o en el ADR afectado.
 
-## Índice por tema (59 ADRs)
+## Índice por tema (65 ADRs)
 
 | Tema | ADRs |
 |------|------|
@@ -21,8 +21,9 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 | Data layer y calidad | 021, 037, 047, 049, 052, 053, 056 |
 | Simulación y ledger | 008–010, 018–019, 025, 039, 051 |
 | KPI, validación y gates | 027–035, 041 |
-| Investigación walk-forward y perfil de riesgo | 058, 059, 060 |
+| Investigación walk-forward y perfil de riesgo | 058, 059, 060, 061–064 |
 | Paper-live y operación | 040, 044, 048, 050, 054, 055 |
+| **Dashboard / demo web (MVP interfaz)** | **065** (+ `docs/dashboard.md`, `web/`) |
 | Señal y medición offline | 042, 052, 053 (+ `reporting/signal_ic.py`, `reporting/scenario.py`; ver ADR-052) |
 | Connector AR / IOL | 049, 056 |
 | Testing y convenciones | 057 |
@@ -1570,6 +1571,37 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Dejar C en investigación** (postura ADR-062): reemplazada por esta decisión.
 - **Archivos**: `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `core_sim/short_hedge_runner.py`, `scripts/run_paper_live.py`, `scripts/run_wf_research_sim.py`, `scripts/fetch_daily.py`, `tests/test_short_hedge_runner.py`
 - **Ver también**: **ADR-062** (no-promoción, override de esta), **ADR-061** (canasta GLD/WMT + connector), **ADR-063** (cartera diversificada + gate MVP), **ADR-059** (factor)
+
+---
+
+## ADR-065 — Arquitectura Vercel del dashboard MVP: JSON estático (no SQLite lite)
+
+- **Fecha**: 2026-06-18
+- **Estado**: aceptada
+- **Contexto**: Fase 1 del MVP interfaz (demo web para cátedra). **F1-01** exporta `dashboard_payload.json` vía `DashboardService`; **F1-02** lo sube como artifact `dashboard-payload` en GitHub Actions; **F1-04** implementa la app Next.js en `web/` que consume ese contrato. Antes del deploy (**F1-05**) hacía falta cerrar **cómo** la web en Vercel obtiene los datos sin acoplar el deploy a Python ni a `market.db` completa.
+- **Decisión**:
+  - **Opción A — artifact JSON estático** (elegida). La web en Vercel lee el mismo contrato que `GET /api/dashboard` / `export_dashboard_payload.py` (`export_version: "1"`).
+  - **Pipeline de sincronización** (artifact → Vercel):
+    1. `paper_live_daily.yml` exporta `dashboard_payload.json` tras cada corrida exitosa (ya implementado en F1-02).
+    2. El mismo workflow **commitea** `data/dashboard_payload.json` en la rama **`paper-live-data`** junto con `market.db` (`git add -f`; el archivo está gitignored en `main` pero trackeable en la rama operativa, igual que la DB).
+    3. Proyecto Vercel (**F1-05**, pendiente): rama de producción **`paper-live-data`**, root `web/`. Cada push diario dispara **rebuild**; `prebuild` copia `data/dashboard_payload.json` → `web/public/dashboard_payload.json` (**F1-04**, implementado).
+    4. El artifact `dashboard-payload` en Actions se mantiene como **backup/auditoría** (90 días) y para descarga manual; no es la fuente primaria en runtime.
+  - **Auth** (**F1-06**): middleware Next.js (password/env) protege la **página**; el JSON en `public/` queda detrás del mismo origen — no se expone URL pública separada sin auth en la demo.
+  - **Descartado para MVP**: SQLite lite (Turso/libSQL), `market.db` en Vercel Blob, API route con Python/sql.js, fetch runtime desde GitHub raw sin rebuild.
+- **Por qué**:
+  - Payload actual ~5 KB (crece lineal con snapshots; años de paper-live siguen siendo <1 MB). `market.db` ~1,4 MB+ con LFS, binario, y tablas que la demo no necesita.
+  - `DashboardService` ya agrega equity, posiciones, riesgo, KPIs y alertas — no hay consultas ad-hoc en el MVP.
+  - Vercel serverless no es hosting natural para SQLite escribible; Blob + WASM/sql.js añade cold start, CORS y complejidad operativa sin beneficio para solo lectura.
+  - Reutiliza el modelo de ramas **ADR-040** (`paper-live-data` = datos del día) sin segundo canal de sync.
+- **Consecuencias**:
+  - **Positivas**: deploy predecible, sin secretos extra para datos, mismo contrato local/CI/prod, costo cero en storage, rollback = redeploy de commit anterior.
+  - **Negativas**: la web se actualiza en el **próximo deploy** tras el push (latencia ~minutos, aceptable para demo diaria); historial de fills limitado al export (`recent_fills`, hoy 25); drill-down profundo requiere ampliar el JSON o revisar arquitectura en Fase 2+.
+- **Alternativas consideradas**:
+  - **Opción B — `market.db` en Vercel Blob + API route**: descartada — duplica LFS, tamaño, y obliga a correr agregación en edge/serverless o embeber sql.js en el cliente; más fiel al monitor local pero sobredimensionado para la demo.
+  - **Opción C — Turso/libSQL replica**: descartada para MVP — otro servicio, sync job, y credenciales; solo tiene sentido si la UI necesita SQL arbitrario o multi-tenant.
+  - **Opción D — fetch client-side desde GitHub raw**: descartada — repo puede ser privado; además expone URL del JSON fuera del control de auth de Vercel.
+- **Archivos**: `docs/dashboard.md`, `.github/workflows/paper_live_daily.yml`, `web/` (**F1-04**), `scripts/export_dashboard_payload.py`, `tests/test_dashboard_export.py`, `tests/test_web_dashboard.py`
+- **Ver también**: **ADR-040** (ramas paper-live), **ADR-063** (gate MVP / demo), F1-01, F1-02, F1-04, F1-05, F1-06
 
 ---
 

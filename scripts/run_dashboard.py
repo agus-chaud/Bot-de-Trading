@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Launch the paper-live monitoring dashboard."""
+"""Launch the paper-live monitoring dashboard (FastAPI, :8765).
+
+Documentación: ``docs/dashboard.md``. Export estático del mismo payload:
+``scripts/export_dashboard_payload.py``.
+"""
 
 import sys
 from pathlib import Path

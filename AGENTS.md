@@ -17,6 +17,7 @@ Plan maestro: `.cursor/plans/bot_trading_paper-first_155d6f04.plan.md`.
 | Contrato parseable (YAML) | `config/policy.v1.yaml` |
 | Validación estructural CI | `config/policy.v1.schema.json` + `tests/test_policy_schema.py` |
 | Listas de símbolos | `config/symbols/whitelist_us.yaml`, `whitelist_ar.yaml`, `whitelist_cedear.yaml` (largo AR / CEDEAR; ver **ADR-048**) |
+| Dashboard / demo web (solo lectura) | `docs/dashboard.md`, `web/`, **ADR-065**; contrato JSON `export_version: "1"` |
 
 Ante conflicto numérico entre `POLICY.md` y YAML, **actualizar ambos en el mismo cambio** y anotar el motivo en el commit.
 
@@ -38,7 +39,8 @@ Usar roles para **acotar** qué toca cada subagente o PR. Solapamiento mínimo.
 | **Data** | Snapshot OHLCV + historial, whitelist, calendario en `MarketOpen`, corporate actions v1 | `core_sim/short_term_day_runner.py`, `core_sim/long_term_engine.py` (input contract), `core_sim/calendar_store.py` |
 | **Engines** | Señales → intents; integración diaria corta; motor largo semanal/mensual por bandas (calendario **AR** `ar_business_days` o **US** `us_sessions`); pre-gate walk-forward OOS; orquestación paper-live short→long (con **overlay XBUE** de precios para líneas del largo AR cuando el merge corto etiqueta CEDEAR como US) | `core_sim/short_term_engine.py`, `core_sim/short_term_day_runner.py`, `core_sim/long_term_engine.py`, `core_sim/long_term_monthly_runner.py`, `core_sim/short_term_pre_gate.py`, `scripts/run_short_term_pre_gate.py`, `scripts/run_paper_live.py` |
 | **Risk** | Guardrails centralizados en `risk_guardrails.py`: fail-fast data quality, ventanas no-trade, kill switch mensual corto, pérdida diaria bucket corto, stop loss ATR por ticker; allocator 30/70 + 20/80 en sizing; gestión de riesgo motor largo (-1.5% diario) | `core_sim/risk_guardrails.py`, `core_sim/short_term_day_runner.py` (handlers `propose_orders` / `risk_check`), `core_sim/long_term_monthly_runner.py`, `config/policy.v1.yaml` → `risk`, `weights`, `geo`, `stop_loss` |
-| **QA / CI** | Tests por **comportamiento** (ver *Smart testing*), schema policy, cobertura `core_sim` en CI; regresión largo AR: `tests/test_long_term_engine.py`, `test_long_term_monthly_runner.py`, `test_validation_long_engine.py`, `test_policy_yaml.py` (rebalance primer hábil AR, stage sin depender de XNYS, SPY CEDEAR con `market: AR`) | `tests/`, `.github/workflows/ci.yml` |
+| **Dashboard / UI** | Monitor local, export JSON, demo Next.js (MVP interfaz F1); **no** ejecuta trades | `dashboard/`, `scripts/export_dashboard_payload.py`, `scripts/run_dashboard.py`, `web/`, `docs/dashboard.md` |
+| **QA / CI** | Tests por **comportamiento** (ver *Smart testing*), schema policy, cobertura `core_sim` en CI; regresión largo AR: `tests/test_long_term_engine.py`, `test_long_term_monthly_runner.py`, `test_validation_long_engine.py`, `test_policy_yaml.py`; export + web: `tests/test_dashboard_export.py`, `tests/test_web_dashboard.py` | `tests/`, `.github/workflows/ci.yml`, `web/` |
 
 Un agente en rol **Spec** no debería implementar broker simulado; uno en rol **Core sim** no debería reescribir listas blancas sin coordinación con **Spec**.
 
@@ -81,7 +83,13 @@ Alineado a la skill **smart-testing**: probamos **comportamiento observable**, n
 pip install -r requirements.txt
 python -m pytest tests/ -v
 python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
+python scripts/run_dashboard.py --fetch-remote --sync-db
+python scripts/export_dashboard_payload.py --pretty
+cd web && npm install && npm run dev
+cd web && npm run build
 ```
+
+Monitor local y demo web: `docs/dashboard.md`. App Next.js en `web/` (**F1-04**).
 
 ## Modelo de branches (paper-live)
 
@@ -90,7 +98,7 @@ El proyecto usa dos ramas con responsabilidades distintas:
 | Rama | Propósito | Qué se commitea |
 |------|-----------|-----------------|
 | `main` | Evolución de código, PRs, CI | Solo código y docs |
-| `paper-live-data` | Operación diaria automatizada | Código + `data/market.db` (via Git LFS) |
+| `paper-live-data` | Operación diaria automatizada | Código + `data/market.db` (LFS) + `data/dashboard_payload.json` |
 
 - El **workflow** (`paper_live_daily.yml`) vive en `main` (GitHub lee schedule/dispatch del default branch), pero hace `checkout` de `paper-live-data` para ejecutar.
 - **Secretos IOL en GitHub Actions**: `IOL_USER` y `IOL_PASS` deben existir como *repository secrets*. Variables de entorno locales del operador **no** aplican al runner. Sin ellos, fetch AR degrada y el catch-up puede fallar.
@@ -98,7 +106,8 @@ El proyecto usa dos ramas con responsabilidades distintas:
 - **Sincronización de código**: `git checkout paper-live-data; git merge main` trae cambios de código sin perder la DB.
 - **Git LFS**: `data/*.db` en `paper-live-data` se trackea con LFS (`.gitattributes`); en `main` la DB está gitignoreada. Conflictos de merge en `market.db`: resolver puntero con `git checkout --ours|--theirs`, nunca editar `<<<<<<<` en el puntero.
 - **Notificación de fallos**: el workflow crea un issue GitHub automáticamente si algún step falla (detección temprana, evita violar F3).
-- Decisiones: **ADR-040** (modelo branches + workflow), **ADR-050** (incidente may–jun 2026, runbook), **ADR-055** (auditoría persistencia + F3).
+- **Artifact dashboard (F1-02)**: tras paper-live exitoso, sube `dashboard-payload` (JSON) en Actions — ver `docs/dashboard.md`. **F1-03** (**ADR-065**): mismo JSON se commitea en `paper-live-data` para deploy Vercel. **F1-04**: app Next.js en `web/` consume ese archivo en build.
+- Decisiones: **ADR-040** (modelo branches + workflow), **ADR-050** (incidente may–jun 2026, runbook), **ADR-055** (auditoría persistencia + F3), **ADR-065** (dashboard Vercel JSON).
 
 ## Integración largo en paper-live (ADR-044)
 

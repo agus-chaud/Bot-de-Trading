@@ -56,6 +56,12 @@ data/*.db-shm
 
 # Reportes generados (run_validation_wf, run_long_engine_wf, etc.)
 validation_reports/*.json
+dashboard_payload.json
+data/dashboard_payload.json
+
+# Next.js demo (F1-04)
+web/node_modules/
+web/.next/
 
 # Alertas runtime (kill switch; ver README / risk_guardrails)
 alerts/kill_switch_*.json

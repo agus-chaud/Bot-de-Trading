@@ -139,9 +139,17 @@ La transición a real está planteada como gate, no como salto de fe:
   - `.github/workflows/paper_live_daily.yml` — cron Lun–Vie 10:00 UTC (post-cierre US) + `workflow_dispatch` (input opcional `date`); opera sobre branch `paper-live-data` y commitea la DB tras cada corrida. Incluye step de **fetch OHLCV** previo al pipeline (`fetch_daily.py --lookback 5`) y **notificación automática** (issue GitHub) ante fallos.
   - **Secretos GitHub (obligatorio para CI)**: `IOL_USER` y `IOL_PASS` en *Settings → Secrets and variables → Actions*. Variables locales de Windows **no** alimentan el runner. Diagnóstico: `python scripts/diagnose_iol_auth.py`.
   - **Política F3**: catch-up automático de hasta **3** días de mercado por corrida (unión US + AR según calendario; ver arriba); gap mayor → `exit(2)` y recuperación manual en tandas (`workflow_dispatch` con `date` o local + push). Días sin barras (feriados) se **saltan con warning** sin abortar todo el rango (**ADR-050**).
-  - **Branch `paper-live-data`**: rama dedicada para datos operativos diarios (DB + fills + snapshots); `main` se mantiene limpio para evolución de código. Git LFS para `data/*.db` evita inflación del repo por commits binarios diarios. Conflictos en `data/market.db` al hacer merge: resolver puntero LFS con `git checkout --ours` o `--theirs`, no editar marcadores `<<<<<<<` a mano.
+  - **Branch `paper-live-data`**: rama dedicada para datos operativos diarios (DB vía LFS + `data/dashboard_payload.json` + fills + snapshots); `main` se mantiene limpio para evolución de código. Conflictos en `data/market.db` al hacer merge: resolver puntero LFS con `git checkout --ours` o `--theirs`, no editar marcadores `<<<<<<<` a mano.
   - Tests en `tests/test_data_storage.py`, `tests/test_run_paper_live.py` (gap detection, F3 exit code, single/multi-day integration, idempotencia, **calendario obligatorio**, **feature flag long on/off**) y `tests/test_replay_golden.py` (golden fixture fills → ledger replay).
   - Decisiones registradas en `decisiones-tecnicas.md` (**ADR-040**, **ADR-044**, **ADR-048**, **ADR-050**, **ADR-054**, **ADR-055**).
+
+- **Monitor paper-live y export JSON (solo lectura)** — ver `docs/dashboard.md`:
+  - `scripts/run_dashboard.py` — tablero local en **http://127.0.0.1:8765** (equity, posiciones, riesgo, KPIs). Sincronizar DB: `--fetch-remote --sync-db`.
+  - `scripts/export_dashboard_payload.py` — **F1-01**: escribe `data/dashboard_payload.json` con el mismo contenido que `GET /api/dashboard`; **F1-03** (**ADR-065**): JSON estático commiteado en `paper-live-data` → rebuild Vercel (no SQLite en serverless).
+  - `.github/workflows/paper_live_daily.yml` — **F1-02**: tras cada corrida, exporta el JSON y lo publica como artifact `dashboard-payload` en Actions.
+  - Módulo `dashboard/` (`DashboardService` en `service.py` es la única fuente de agregación).
+  - **`web/`** — **F1-04**: app Next.js read-only que consume `dashboard_payload.json` (misma UX que el monitor local). Ver `web/README.md`.
+  - Tests: `tests/test_dashboard_export.py`, `tests/test_web_dashboard.py`.
 
 - **Simulación what-if de cartera** (research / análisis, no paper-live productivo):
   - `scripts/run_whatif_sim.py` — corre estrategia **30/70** (short + long) día a día sobre **copia aislada** de `market.db`; reporta equity, fills y posiciones. No aplica gate F3 (backtests multi-mes intencionales). Default fin **2026-06-02** (último día con OHLCV XBUE completo al jun 2026).
@@ -156,6 +164,7 @@ La transición a real está planteada como gate, no como salto de fe:
 
 ### Pendiente principal
 
+- **Deploy demo web (F1-05)**: conectar `web/` a Vercel (rama `paper-live-data`, root `web/`). Auth para cátedra en **F1-06**. Ver `docs/dashboard.md` y **ADR-065**.
 - **Acumular datos paper-live**: el gate KPI OOS requiere mínimo 312 días hábiles (~15 meses); hoy hay ~120 días históricos. El workflow diario está activo y acumulando.
 - **Re-medir señal con universo ampliado (ADR-053)**: tras corregir mezcla de monedas (**ADR-052**), la cross-section quedó demasiado fina (~1 símbolo/día mediana); falta re-correr IC/hit rate con el universo expandido.
 - **Activar `--enable-long-engine` en producción**: el largo está cableado, testeado y con guardrail efectivo, pero el flag está apagado por defecto en `run_paper_live.py` y en el workflow CI. Activar tras validar en paper que el snapshot final refleja ambos sleeves correctamente.
