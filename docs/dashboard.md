@@ -248,19 +248,48 @@ Detalle operativo de la app: **`web/README.md`**.
 No duplicar lógica de agregación en el front: si falta un bloque en la UI, primero agregarlo a
 `DashboardService` y al export; después reflejarlo en `web/`.
 
-### Deploy (F1-05 — pendiente)
+### Deploy (F1-05 — hecho)
 
-Checklist para cuando se conecte Vercel:
+Proyecto Vercel **`bot-de-trading`** conectado a `agus-chaud/Bot-de-Trading` (GitHub).
 
 | Setting | Valor |
 |---------|--------|
-| Production Branch | `paper-live-data` |
+| Production Branch | **`paper-live-data`** |
 | Root Directory | `web` |
-| Build Command | `npm run build` (default; incluye `prebuild`) |
+| Framework | Next.js |
+| Build Command | `npm run build` (incluye `prebuild` → `copy-payload.mjs`) |
 | Install Command | `npm install` |
+| Ignored Build Step | `web/vercel.json` → `ignoreCommand`: **siempre build** en `paper-live-data` |
 
-Cada push exitoso de paper-live en `paper-live-data` debe disparar un rebuild con el JSON del día.
-Ver **ADR-065** y sección F1-03 arriba.
+**URLs (jun 2026):**
+
+| Entorno | URL |
+|---------|-----|
+| **Production** | https://web-pearl-theta-64.vercel.app |
+| **Preview** (por deploy/PR) | `https://bot-de-trading-<hash>-aguschaud-4044s-projects.vercel.app` |
+
+**Env en Vercel** (`web/.env.example`):
+
+| Variable | Production | Preview | Development |
+|----------|------------|---------|-------------|
+| `NEXT_PUBLIC_APP_URL` | URL production arriba | misma base | `http://localhost:3000` |
+
+Auth demo: **F1-06** (`DASHBOARD_DEMO_PASSWORD` + middleware).
+
+**Deploy manual** (desde la raíz del repo — no desde `web/`, porque `rootDirectory` ya apunta ahí):
+
+```text
+npx vercel deploy          # preview
+npx vercel deploy --prod   # production
+```
+
+Cada push exitoso de paper-live en `paper-live-data` dispara **rebuild de production** por tres vías (redundantes a propósito):
+
+1. **Git push** → Vercel (rama prod = `paper-live-data`)
+2. **Commit en `web/public/dashboard_payload.json`** → cambio bajo `web/` (Vercel no salta el build por root directory)
+3. **Deploy hook** → `paper_live_daily.yml` hace `POST` a `secrets.VERCEL_DEPLOY_HOOK` tras push con cambios
+
+Ver **ADR-065**.
 
 ### Implicaciones futuras
 
@@ -293,7 +322,7 @@ cd web && npm run build
 | **F1-02** | Hecho | CI sube `dashboard-payload` como artifact tras cada paper-live |
 | **F1-03** | Hecho | Arquitectura Vercel: JSON estático + commit en `paper-live-data` + rebuild (**ADR-065**) |
 | **F1-04** | Hecho | App Next.js en `web/` — equity, posiciones, KPIs, alertas (fixture local) |
-| **F1-05** | Pendiente | Deploy Vercel (rama `paper-live-data`, root `web/`) |
+| **F1-05** | Hecho | Deploy Vercel (`bot-de-trading`, root `web/`, preview + production) |
 | **F1-06** | Pendiente | Auth demo (password / env) |
 
 Detalle del plan: canvas `mvp-interfaz-plan` y `docs/mvp_gate.md` (gate de capital, aparte de la UI).

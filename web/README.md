@@ -77,11 +77,24 @@ Verifica fixture, `package.json` scripts y presencia de archivos clave.
 
 | Setting | Valor |
 |---------|--------|
+| Proyecto | `bot-de-trading` |
 | Production Branch | `paper-live-data` |
 | Root Directory | `web` |
+| Production URL | https://web-pearl-theta-64.vercel.app |
 
-El JSON del día llega commiteado por `paper_live_daily.yml` en `data/dashboard_payload.json`.
-Cada push dispara rebuild; ver **ADR-065**.
+`web/vercel.json` fija framework Next.js, comandos de build e `ignoreCommand` (siempre build en
+`paper-live-data`). El JSON del día llega commiteado por `paper_live_daily.yml` en
+`data/dashboard_payload.json` y copia a `web/public/`; `prebuild` también lee `../data/` si existe.
+Tras push, el workflow dispara el deploy hook `VERCEL_DEPLOY_HOOK` (secret en GitHub).
+
+**CLI** (desde la **raíz** del repo):
+
+```bash
+npx vercel deploy          # preview
+npx vercel deploy --prod   # production
+```
+
+Variables: ver `web/.env.example`. Auth cátedra en **F1-06**.
 
 ## Ver también
 

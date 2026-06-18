@@ -130,4 +130,6 @@ def test_paper_live_workflow_should_export_dashboard_artifact():
     assert "actions/upload-artifact@v4" in text
     assert "dashboard-payload" in text
     assert "data/dashboard_payload.json" in text
-    assert "git add -f data/market.db data/dashboard_payload.json" in text
+    assert "web/public/dashboard_payload.json" in text
+    assert "git add -f data/market.db data/dashboard_payload.json web/public/dashboard_payload.json" in text
+    assert "VERCEL_DEPLOY_HOOK" in text

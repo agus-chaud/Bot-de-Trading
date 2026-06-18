@@ -164,7 +164,7 @@ La transición a real está planteada como gate, no como salto de fe:
 
 ### Pendiente principal
 
-- **Deploy demo web (F1-05)**: conectar `web/` a Vercel (rama `paper-live-data`, root `web/`). Auth para cátedra en **F1-06**. Ver `docs/dashboard.md` y **ADR-065**.
+- **Deploy demo web (F1-05)**: https://web-pearl-theta-64.vercel.app — proyecto Vercel `bot-de-trading`, root `web/`, rama prod `paper-live-data`. Auth cátedra en **F1-06**. Ver `docs/dashboard.md` y **ADR-065**.
 - **Acumular datos paper-live**: el gate KPI OOS requiere mínimo 312 días hábiles (~15 meses); hoy hay ~120 días históricos. El workflow diario está activo y acumulando.
 - **Re-medir señal con universo ampliado (ADR-053)**: tras corregir mezcla de monedas (**ADR-052**), la cross-section quedó demasiado fina (~1 símbolo/día mediana); falta re-correr IC/hit rate con el universo expandido.
 - **Activar `--enable-long-engine` en producción**: el largo está cableado, testeado y con guardrail efectivo, pero el flag está apagado por defecto en `run_paper_live.py` y en el workflow CI. Activar tras validar en paper que el snapshot final refleja ambos sleeves correctamente.

@@ -1584,7 +1584,7 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Pipeline de sincronización** (artifact → Vercel):
     1. `paper_live_daily.yml` exporta `dashboard_payload.json` tras cada corrida exitosa (ya implementado en F1-02).
     2. El mismo workflow **commitea** `data/dashboard_payload.json` en la rama **`paper-live-data`** junto con `market.db` (`git add -f`; el archivo está gitignored en `main` pero trackeable en la rama operativa, igual que la DB).
-    3. Proyecto Vercel (**F1-05**, pendiente): rama de producción **`paper-live-data`**, root `web/`. Cada push diario dispara **rebuild**; `prebuild` copia `data/dashboard_payload.json` → `web/public/dashboard_payload.json` (**F1-04**, implementado).
+    3. Proyecto Vercel (**F1-05**, hecho): **`bot-de-trading`**, root `web/`, GitHub conectado. Production: https://web-pearl-theta-64.vercel.app. Rama prod objetivo **`paper-live-data`** (rebuild diario con JSON commiteado).
     4. El artifact `dashboard-payload` en Actions se mantiene como **backup/auditoría** (90 días) y para descarga manual; no es la fuente primaria en runtime.
   - **Auth** (**F1-06**): middleware Next.js (password/env) protege la **página**; el JSON en `public/` queda detrás del mismo origen — no se expone URL pública separada sin auth en la demo.
   - **Descartado para MVP**: SQLite lite (Turso/libSQL), `market.db` en Vercel Blob, API route con Python/sql.js, fetch runtime desde GitHub raw sin rebuild.
