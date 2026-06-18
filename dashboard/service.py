@@ -11,6 +11,7 @@ import yaml
 
 from core_sim.calendar_store import TradingCalendarStore
 from data.storage import MarketDB
+from dashboard.db_freshness import check_db_freshness
 from reporting.kpi_v0 import build_kpi_v0_report_from_tables
 
 _VENUE_MAP: dict[str, str] = {"US": "XNYS", "AR": "XBUE", "XNYS": "XNYS", "XBUE": "XBUE"}
@@ -69,15 +70,43 @@ class DashboardService:
         last_day = db.get_last_snapshot_day(mode)
         ks = db.get_kill_switch_state("short")
 
+        alerts = self._alerts(db, snapshots, last_day, ks, policy)
+        freshness = self._data_freshness_block()
+        if freshness["status"] != "ok":
+            alerts.insert(
+                0,
+                {
+                    "severity": "critical",
+                    "code": "stale_local_db",
+                    "title": "DB local desactualizada",
+                    "detail": (
+                        f"{freshness['message']} "
+                        f"Sincronizá con: {freshness['sync_hint']} "
+                        "o arrancá con: python scripts/run_dashboard.py --sync-db"
+                    ),
+                },
+            )
         return {
             "meta": self._meta_block(meta, last_day, snapshots),
+            "data_freshness": freshness,
             "equity_curve": self._equity_curve(snapshots),
             "positions": self._positions(db, meta, last_day),
             "recent_fills": self._recent_fills(db, limit=25),
             "risk": self._risk_block(snapshots, ks, policy),
             "kpis": self._kpis(snapshots, db),
-            "alerts": self._alerts(db, snapshots, last_day, ks, policy),
+            "alerts": alerts,
             "generated_at": datetime.now(tz=timezone.utc).isoformat(),
+        }
+
+    def _data_freshness_block(self) -> dict[str, Any]:
+        report = check_db_freshness(self.config.db_path, fetch=False)
+        return {
+            "status": report.status,
+            "message": report.message,
+            "commits_behind": report.commits_behind,
+            "worktree_dirty": report.worktree_dirty,
+            "remote_ref": report.remote_ref,
+            "sync_hint": report.sync_hint,
         }
 
     def _meta_block(

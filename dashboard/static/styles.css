@@ -204,6 +204,40 @@ body {
   margin-bottom: 1.5rem;
 }
 
+.freshness-banner {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid #ff4d4d;
+  border-left: 3px solid #ff4d4d;
+  background: rgba(255, 77, 77, 0.1);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.freshness-banner strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #ff8a8a;
+}
+
+.freshness-banner code {
+  display: block;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  background: rgba(26, 26, 26, 0.9);
+  border: 1px solid var(--cool-grey);
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.freshness-banner.hidden {
+  display: none;
+}
+
 .alert {
   display: flex;
   align-items: flex-start;

@@ -44,6 +44,22 @@
     return res.json();
   }
 
+  function renderFreshness(freshness) {
+    const banner = $("freshness-banner");
+    if (!banner) return;
+    if (!freshness || freshness.status === "ok") {
+      banner.className = "freshness-banner hidden";
+      banner.innerHTML = "";
+      return;
+    }
+    banner.className = "freshness-banner";
+    banner.innerHTML = `
+      <strong>DB local desactualizada</strong>
+      <span>${escapeHtml(freshness.message)}</span>
+      <code>${escapeHtml(freshness.sync_hint || "python scripts/run_dashboard.py --sync-db")}</code>
+    `;
+  }
+
   function renderAlerts(alerts) {
     const panel = $("alerts-panel");
     if (!alerts?.length) {
@@ -310,6 +326,7 @@
     try {
       const data = await fetchDashboard();
       const ccy = data.meta?.currency || "ARS";
+      renderFreshness(data.data_freshness);
       renderMeta(data.meta, data.kpis);
       renderAlerts(data.alerts);
       renderStatus(data.alerts, data.risk);
