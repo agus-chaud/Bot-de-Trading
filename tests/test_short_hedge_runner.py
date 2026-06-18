@@ -26,6 +26,26 @@ _DAY = date(2025, 6, 2)
 _WL = frozenset({"GLD", "WMT"})
 
 
+class _Pos:
+    def __init__(self, bucket: str):
+        self.bucket = bucket
+
+
+def test_bucket_conflict_flags_long_symbol_held_in_short():
+    """Freno ADR-064: símbolo que el largo quiere pero ya está en bucket short → conflicto."""
+    from scripts.run_paper_live import bucket_conflict_symbols
+    positions = {"KO": _Pos("short"), "GLD": _Pos("short"), "GGAL": _Pos("long")}
+    long_syms = {"GGAL", "PAMP", "TXAR", "SPY", "QQQ", "KO"}
+    assert bucket_conflict_symbols(positions, long_syms) == {"KO"}
+
+
+def test_bucket_conflict_empty_when_hedge_and_long_disjoint():
+    """Canasta hedge (GLD/WMT) no pisa el largo → sin conflicto."""
+    from scripts.run_paper_live import bucket_conflict_symbols
+    positions = {"GLD": _Pos("short"), "WMT": _Pos("short")}
+    assert bucket_conflict_symbols(positions, {"GGAL", "PAMP", "TXAR", "SPY", "QQQ", "KO"}) == set()
+
+
 def test_production_policy_promotes_hedge_with_gld_wmt():
     """Guard de la promoción (ADR-064): producción corre el corto como cobertura GLD/WMT."""
     import yaml

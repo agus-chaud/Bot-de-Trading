@@ -290,6 +290,21 @@ def _build_long_pipeline_context(
     return ctx
 
 
+def bucket_conflict_symbols(positions: dict[str, Any], long_symbols: set[str]) -> set[str]:
+    """Símbolos retenidos en el bucket SHORT que el sleeve largo también quiere comprar.
+
+    El ledger prohíbe el mismo símbolo en dos buckets: si el corto legacy (momentum) dejó
+    KO/SPY en el bucket short y el largo intenta comprarlos (bucket long), ``apply_fills``
+    lanza 'bucket mismatch' y tumba la corrida diaria. Este guard detecta el choque para
+    SALTAR el largo ese día en vez de crashear (freno defensivo, ADR-064)."""
+    held_short = {
+        str(sym).upper()
+        for sym, pos in (positions or {}).items()
+        if str(getattr(pos, "bucket", "")) == "short"
+    }
+    return held_short & {str(s).upper() for s in long_symbols}
+
+
 def run_catch_up(
     db: MarketDB,
     gap_days: list[date],
@@ -402,29 +417,44 @@ def run_catch_up(
 
         bars_for_long_and_mtm = daily_bars
         if enable_long_engine:
-            bars_for_long_and_mtm = dict(daily_bars)
-            _overlay_ar_long_sleeve_bars_from_db(db, day, policy_doc, bars_for_long_and_mtm)
+            _lt = policy_doc.get("long_term_engine", {})
+            _long_syms = {
+                str(it["symbol"]).strip().upper()
+                for it in (_lt.get("core_lines", []) + _lt.get("satellite_lines", []))
+            }
+            _conflict = bucket_conflict_symbols(ledger.positions, _long_syms)
+            if _conflict:
+                # Freno defensivo (ADR-064): el largo quiere símbolos que ya están en el
+                # bucket short (legacy momentum) → el ledger rechazaría. Saltar el largo
+                # este día en vez de tumbar la corrida. Limpiar las posiciones short legacy.
+                logger.error(
+                    '{"event": "long_skipped_bucket_conflict", "day": "%s", "symbols": %s}',
+                    day.isoformat(), sorted(_conflict),
+                )
+            else:
+                bars_for_long_and_mtm = dict(daily_bars)
+                _overlay_ar_long_sleeve_bars_from_db(db, day, policy_doc, bars_for_long_and_mtm)
 
-            snap_for_long = _resilient_snapshot(db, day, ledger)
-            long_ctx = _build_long_pipeline_context(ledger, snap_for_long, calendar_store)
+                snap_for_long = _resilient_snapshot(db, day, ledger)
+                long_ctx = _build_long_pipeline_context(ledger, snap_for_long, calendar_store)
 
-            long_backtester = create_long_term_monthly_backtester(
-                policy_doc=policy_doc,
-                repo_root=REPO_ROOT,
-                ledger=ledger,
-                broker=broker,
-                calendar_store=calendar_store,
-                db=db,
-            )
-            long_events = long_backtester.run_day(
-                trading_day=day,
-                daily_bars=bars_for_long_and_mtm,
-                pipeline_context=long_ctx,
-            )
-            long_fills = long_events[4].payload
-            if isinstance(long_fills, list) and long_fills:
-                all_fills.extend(long_fills)
-                long_fills_count = len(long_fills)
+                long_backtester = create_long_term_monthly_backtester(
+                    policy_doc=policy_doc,
+                    repo_root=REPO_ROOT,
+                    ledger=ledger,
+                    broker=broker,
+                    calendar_store=calendar_store,
+                    db=db,
+                )
+                long_events = long_backtester.run_day(
+                    trading_day=day,
+                    daily_bars=bars_for_long_and_mtm,
+                    pipeline_context=long_ctx,
+                )
+                long_fills = long_events[4].payload
+                if isinstance(long_fills, list) and long_fills:
+                    all_fills.extend(long_fills)
+                    long_fills_count = len(long_fills)
 
         snap = _resilient_snapshot(db, day, ledger)
         run_id = f"paper_live_{day.isoformat()}_{uuid.uuid4().hex[:8]}"
