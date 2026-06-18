@@ -193,11 +193,66 @@ class TestPriceOutlierDropped:
     def test_normal_close_within_threshold_is_kept(self):
         days = _workweek(MON, 7)
         rows = [_row(d, close=100.0) for d in days[:5]]
-        rows.append(_row(days[5], close=900.0))  # 9× median — just under limit
+        rows.append(_row(days[5], close=190.0))  # 1.9× prev — bajo ambos umbrales
 
         result = normalize(rows, set(days[:6]))
 
         assert days[5] in {r.ts for r in result}
+
+
+# ---------------------------------------------------------------------------
+# Suspect ratio jump (cambio de ratio CEDEAR / split no registrado)
+# ---------------------------------------------------------------------------
+
+class TestSuspectRatioJumpDropped:
+    def test_3x_drop_vs_previous_close_is_dropped(self, caplog):
+        # Caso origen: SPY XBUE 2026-05-29 — close 56000 → 18750 (ratio 1:3)
+        # pasaba el filtro de outliers ×10 y contaminaba la valuación.
+        days = _workweek(MON, 7)
+        rows = [_row(d, close=56000.0) for d in days[:5]]
+        rows.append(_row(days[5], close=18750.0))  # ÷3 vs prev
+        rows.append(_row(days[6], close=18880.0))
+
+        with caplog.at_level(logging.WARNING, logger="data.normalizer"):
+            result = normalize(rows, set(days))
+
+        assert days[5] not in {r.ts for r in result}
+        assert "suspect_ratio_jump" in caplog.text
+
+    def test_dropped_jump_day_is_not_forward_filled(self):
+        days = _workweek(MON, 7)
+        rows = [_row(d, close=100.0) for d in days[:5]]
+        rows.append(_row(days[5], close=300.0))  # 3× prev → dropped
+        rows.append(_row(days[6], close=100.0))
+
+        result = normalize(rows, set(days))
+
+        # El día descartado no debe reaparecer como imputed.
+        assert days[5] not in {r.ts for r in result}
+
+    def test_9x_day_over_day_move_is_now_dropped(self, caplog):
+        # Antes del guardrail, 9× pasaba (umbral outlier era ×10 sobre mediana).
+        days = _workweek(MON, 7)
+        rows = [_row(d, close=100.0) for d in days[:5]]
+        rows.append(_row(days[5], close=900.0))
+
+        with caplog.at_level(logging.WARNING, logger="data.normalizer"):
+            result = normalize(rows, set(days[:6]))
+
+        assert days[5] not in {r.ts for r in result}
+        assert "suspect_ratio_jump" in caplog.text
+
+    def test_move_just_under_2x_is_kept(self):
+        days = _workweek(MON, 7)
+        rows = [_row(d, close=100.0) for d in days[:5]]
+        rows.append(_row(days[5], close=199.0))
+        rows.append(_row(days[6], close=101.0))  # 199 → 101 = ÷1.97, también pasa
+
+        result = normalize(rows, set(days))
+
+        kept = {r.ts for r in result}
+        assert days[5] in kept
+        assert days[6] in kept
 
 
 # ---------------------------------------------------------------------------

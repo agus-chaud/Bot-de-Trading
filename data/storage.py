@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
@@ -10,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from data.schema import CorporateActionRow, OHLCVRow
+from data.schema import CorporateActionRow, OHLCVRow, PortfolioMeta, UniverseSnapshotRow
 
 if TYPE_CHECKING:
     from core_sim.ledger import PortfolioLedger
@@ -28,6 +29,11 @@ class KillSwitchState:
     auto_reset: bool
 
 logger = logging.getLogger(__name__)
+
+
+class PortfolioMetaConflictError(Exception):
+    """CLI starting_cash/currency does not match persisted portfolio_meta."""
+
 
 _CREATE_OHLCV = """
 CREATE TABLE IF NOT EXISTS ohlcv (
@@ -119,6 +125,16 @@ CREATE INDEX IF NOT EXISTS idx_pf_symbol_day  ON paper_fills(symbol, trading_day
 CREATE INDEX IF NOT EXISTS idx_pf_run         ON paper_fills(run_id);
 """
 
+_CREATE_PORTFOLIO_META = """
+CREATE TABLE IF NOT EXISTS portfolio_meta (
+    mode           TEXT PRIMARY KEY CHECK(mode IN ('paper_live', 'backtest')),
+    starting_cash  REAL NOT NULL,
+    currency       TEXT NOT NULL CHECK(currency IN ('ARS', 'USD')),
+    inception_date TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+);
+"""
+
 _CREATE_PAPER_SNAPSHOTS = """
 CREATE TABLE IF NOT EXISTS paper_snapshots (
     id                     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,6 +159,32 @@ CREATE TABLE IF NOT EXISTS paper_snapshots (
     realized_pnl_day       REAL,
     created_at             TEXT NOT NULL,
     UNIQUE(mode, trading_day)
+);
+"""
+
+_CREATE_UNIVERSE_SNAPSHOTS = """
+CREATE TABLE IF NOT EXISTS universe_snapshots (
+    selection_date TEXT NOT NULL,
+    bucket        TEXT NOT NULL,
+    symbol        TEXT NOT NULL,
+    rank          INTEGER NOT NULL,
+    metric_value  REAL,
+    source        TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    created_at    TEXT NOT NULL,
+    PRIMARY KEY (selection_date, bucket, symbol, source)
+);
+CREATE INDEX IF NOT EXISTS idx_universe_selection_date ON universe_snapshots(selection_date);
+"""
+
+_CREATE_IOL_API_USAGE = """
+CREATE TABLE IF NOT EXISTS iol_api_usage (
+    month_key               TEXT NOT NULL PRIMARY KEY,
+    token_count             INTEGER NOT NULL DEFAULT 0,
+    refresh_count           INTEGER NOT NULL DEFAULT 0,
+    history_count           INTEGER NOT NULL DEFAULT 0,
+    universe_volume_count   INTEGER NOT NULL DEFAULT 0,
+    updated_at              TEXT NOT NULL
 );
 """
 
@@ -181,7 +223,10 @@ class MarketDB:
                 + _CREATE_FETCH_LOG
                 + _CREATE_KILL_SWITCH_LOG
                 + _CREATE_PAPER_FILLS
+                + _CREATE_PORTFOLIO_META
                 + _CREATE_PAPER_SNAPSHOTS
+                + _CREATE_UNIVERSE_SNAPSHOTS
+                + _CREATE_IOL_API_USAGE
             )
 
     # ------------------------------------------------------------------
@@ -278,6 +323,128 @@ class MarketDB:
         return None
 
     # ------------------------------------------------------------------
+    # Universe snapshots (liquidity selection audit)
+    # ------------------------------------------------------------------
+
+    def replace_universe_snapshots(
+        self,
+        selection_date: date,
+        rows: list[UniverseSnapshotRow],
+    ) -> None:
+        """Replace all snapshot rows for *selection_date* (full re-write of that day)."""
+        created_at = datetime.now(tz=timezone.utc).isoformat()
+        d = selection_date.isoformat()
+        with self._conn:
+            self._conn.execute("DELETE FROM universe_snapshots WHERE selection_date = ?", (d,))
+            if not rows:
+                return
+            self._conn.executemany(
+                """
+                INSERT INTO universe_snapshots
+                    (selection_date, bucket, symbol, rank, metric_value, source, schema_version, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        r.selection_date.isoformat(),
+                        r.bucket,
+                        r.symbol,
+                        r.rank,
+                        r.metric_value,
+                        r.source,
+                        r.schema_version,
+                        created_at,
+                    )
+                    for r in rows
+                ],
+            )
+
+    def get_latest_universe_selection_date(self) -> date | None:
+        """Most recent selection_date present in universe_snapshots, or None."""
+        cursor = self._conn.execute("SELECT MAX(selection_date) AS d FROM universe_snapshots")
+        row = cursor.fetchone()
+        if row and row["d"]:
+            return date.fromisoformat(str(row["d"]))
+        return None
+
+    def get_universe_snapshots_for_date(self, selection_date: date) -> list[UniverseSnapshotRow]:
+        """Return persisted universe rows for *selection_date*, ordered by bucket and rank."""
+        cursor = self._conn.execute(
+            """
+            SELECT selection_date, bucket, symbol, rank, metric_value, source, schema_version
+            FROM universe_snapshots
+            WHERE selection_date = ?
+            ORDER BY bucket ASC, rank ASC, symbol ASC
+            """,
+            (selection_date.isoformat(),),
+        )
+        return [
+            UniverseSnapshotRow(
+                selection_date=date.fromisoformat(str(r["selection_date"])),
+                bucket=str(r["bucket"]),
+                symbol=str(r["symbol"]),
+                rank=int(r["rank"]),
+                metric_value=float(r["metric_value"]) if r["metric_value"] is not None else None,
+                source=str(r["source"]),
+                schema_version=int(r["schema_version"]),
+            )
+            for r in cursor.fetchall()
+        ]
+
+    def get_iol_api_usage_month(self, month_key: str) -> dict[str, int]:
+        """Return persisted IOL call counts for calendar month *month_key* (YYYY-MM)."""
+        cursor = self._conn.execute(
+            """
+            SELECT token_count, refresh_count, history_count, universe_volume_count
+            FROM iol_api_usage WHERE month_key = ?
+            """,
+            (month_key,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return {
+                "token_count": 0,
+                "refresh_count": 0,
+                "history_count": 0,
+                "universe_volume_count": 0,
+            }
+        return {
+            "token_count": int(row["token_count"]),
+            "refresh_count": int(row["refresh_count"]),
+            "history_count": int(row["history_count"]),
+            "universe_volume_count": int(row["universe_volume_count"]),
+        }
+
+    def increment_iol_api_usage(
+        self,
+        month_key: str,
+        *,
+        token: int = 0,
+        refresh: int = 0,
+        history: int = 0,
+        universe_volume: int = 0,
+    ) -> None:
+        """Atomically add successful IOL calls for *month_key* (creates row if missing)."""
+        if token == 0 and refresh == 0 and history == 0 and universe_volume == 0:
+            return
+        now = datetime.now(tz=timezone.utc).isoformat()
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO iol_api_usage
+                    (month_key, token_count, refresh_count, history_count, universe_volume_count, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(month_key) DO UPDATE SET
+                    token_count = token_count + excluded.token_count,
+                    refresh_count = refresh_count + excluded.refresh_count,
+                    history_count = history_count + excluded.history_count,
+                    universe_volume_count = universe_volume_count + excluded.universe_volume_count,
+                    updated_at = excluded.updated_at
+                """,
+                (month_key, token, refresh, history, universe_volume, now),
+            )
+
+    # ------------------------------------------------------------------
     # Corporate actions
     # ------------------------------------------------------------------
 
@@ -328,6 +495,9 @@ class MarketDB:
     def log_fetch(self, entry: dict[str, Any]) -> None:
         """Append a row to fetch_log with created_at set to UTC now."""
         created_at = datetime.now(tz=timezone.utc).isoformat()
+        extra = entry.get("extra")
+        if extra is not None and not isinstance(extra, str):
+            extra = json.dumps(extra, sort_keys=True)
         with self._conn:
             self._conn.execute(
                 """
@@ -341,9 +511,23 @@ class MarketDB:
                     entry["status"],
                     entry.get("source"),
                     entry.get("skip_reason"),
-                    entry.get("extra"),
+                    extra,
                 ),
             )
+
+    def get_recent_fetch_errors(self, limit: int = 8) -> list[dict[str, Any]]:
+        """Return recent fetch_log rows where status != 'ok'."""
+        cursor = self._conn.execute(
+            """
+            SELECT symbol, venue, status, skip_reason, created_at
+            FROM fetch_log
+            WHERE status != 'ok'
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
     # ------------------------------------------------------------------
     # Kill switch log
@@ -543,6 +727,133 @@ class MarketDB:
         if row and row["last_day"]:
             return date.fromisoformat(row["last_day"])
         return None
+
+    def get_paper_snapshots(
+        self,
+        mode: str,
+        *,
+        since: date | None = None,
+        until: date | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return EOD snapshots for *mode* ordered by trading_day ASC."""
+        clauses = ["mode = ?"]
+        params: list[Any] = [mode]
+        if since is not None:
+            clauses.append("trading_day >= ?")
+            params.append(since.isoformat())
+        if until is not None:
+            clauses.append("trading_day <= ?")
+            params.append(until.isoformat())
+        where = " AND ".join(clauses)
+        cursor = self._conn.execute(
+            f"""
+            SELECT trading_day, equity_total, equity_short, equity_long,
+                   short_cash, cash, realized_pnl_total, unrealized_pnl_total,
+                   costs_day, mv_us, mv_ar, short_monthly_peak,
+                   short_monthly_drawdown, short_daily_return,
+                   kill_switch_active, num_open_positions, num_fills_today,
+                   realized_pnl_day, created_at
+            FROM paper_snapshots
+            WHERE {where}
+            ORDER BY trading_day ASC
+            """,
+            params,
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_portfolio_meta(self, mode: str) -> PortfolioMeta | None:
+        """Return persisted inception capital for *mode*, or None if never initialized."""
+        cursor = self._conn.execute(
+            "SELECT mode, starting_cash, currency, inception_date FROM portfolio_meta WHERE mode = ?",
+            (mode,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return PortfolioMeta(
+            mode=str(row["mode"]),
+            starting_cash=float(row["starting_cash"]),
+            currency=str(row["currency"]),
+            inception_date=date.fromisoformat(row["inception_date"]),
+        )
+
+    def insert_portfolio_meta(self, meta: PortfolioMeta) -> None:
+        """Persist portfolio inception metadata (first run only)."""
+        created_at = datetime.now(tz=timezone.utc).isoformat()
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO portfolio_meta (mode, starting_cash, currency, inception_date, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    meta.mode,
+                    float(meta.starting_cash),
+                    meta.currency.upper(),
+                    meta.inception_date.isoformat(),
+                    created_at,
+                ),
+            )
+
+    def ensure_portfolio_meta(
+        self,
+        mode: str,
+        starting_cash: float,
+        currency: str,
+        inception_date: date,
+        *,
+        allow_legacy_init: bool = False,
+    ) -> PortfolioMeta:
+        """Validate CLI capital against DB or initialize on first run."""
+        if starting_cash < 0:
+            raise ValueError("starting_cash must be >= 0")
+        currency_norm = currency.upper()
+        if currency_norm not in {"ARS", "USD"}:
+            raise ValueError(f"unsupported currency: {currency!r}")
+
+        existing = self.get_portfolio_meta(mode)
+        if existing is None:
+            if self.get_last_snapshot_day(mode) is not None and not allow_legacy_init:
+                raise PortfolioMetaConflictError(
+                    f"portfolio_meta missing for mode={mode} but snapshots exist; "
+                    "pass --init-portfolio-meta with --initial-cash and --currency "
+                    "matching historical inception (one-time legacy bootstrap)"
+                )
+            if self.get_last_snapshot_day(mode) is not None:
+                logger.warning(
+                    "Legacy bootstrap: initializing portfolio_meta on existing snapshots "
+                    "mode=%s starting_cash=%s %s",
+                    mode,
+                    starting_cash,
+                    currency_norm,
+                )
+            meta = PortfolioMeta(
+                mode=mode,
+                starting_cash=float(starting_cash),
+                currency=currency_norm,
+                inception_date=inception_date,
+            )
+            self.insert_portfolio_meta(meta)
+            logger.info(
+                "Initialized portfolio_meta mode=%s starting_cash=%s %s inception=%s",
+                mode,
+                meta.starting_cash,
+                meta.currency,
+                meta.inception_date.isoformat(),
+            )
+            return meta
+
+        if abs(existing.starting_cash - float(starting_cash)) > 1e-6:
+            raise PortfolioMetaConflictError(
+                f"starting_cash mismatch for mode={mode}: "
+                f"DB has {existing.starting_cash}, CLI passed {starting_cash}"
+            )
+        if existing.currency != currency_norm:
+            raise PortfolioMetaConflictError(
+                f"currency mismatch for mode={mode}: "
+                f"DB has {existing.currency}, CLI passed {currency_norm}"
+            )
+        return existing
 
     def get_paper_fills(
         self,

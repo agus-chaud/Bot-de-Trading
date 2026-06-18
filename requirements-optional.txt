@@ -1,0 +1,11 @@
+# Dependencias OPCIONALES — no requeridas para correr el bot ni los tests.
+#
+# data/storage.py importa `supabase` de forma perezosa (lazy): si la lib no
+# está instalada o faltan SUPABASE_URL/SUPABASE_KEY, el sync se desactiva y el
+# bot corre 100% offline contra SQLite. Esto hace EXPLÍCITA esa dependencia
+# (antes era un import fantasma: código que la usaba sin declararla).
+#
+# Instalar solo si vas a usar el sync remoto a Supabase:
+#   pip install -r requirements-optional.txt
+
+supabase>=2.0.0

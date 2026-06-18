@@ -1,12 +1,17 @@
-# Ejemplos BYMA-style — configurable; verificar contra proveedor de datos
+# Candidatos Merval (BYMA / panel local IOL bCBA). La selección dinámica toma top N por volumen.
 stocks:
   - GGAL
-  - YPF
+  - YPFD
   - PAMP
   - BMA
   - CEPU
-  - TGS
+  - TGSU2
   - TXAR
   - ALUA
   - SUPV
   - MELI
+  - CRES
+  - TECO2
+  - LOMA
+  - MIRG
+  - IRSA

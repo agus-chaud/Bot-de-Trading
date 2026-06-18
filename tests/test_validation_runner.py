@@ -43,7 +43,7 @@ def _make_policy(lookback: int = 90) -> dict:
         "long_term_engine": {
             "drift_rebalance_threshold_pp": 2.0,
             "drift_convention": "per_line",
-            "rebalance_rule": "first_us_trading_day_of_calendar_month",
+            "rebalance_rule": "first_us_trading_day_of_calendar_week",
             "max_long_rebalance_turnover_pct": None,
             "satellite_markets": ["US"],
             "core_lines": [
@@ -66,8 +66,21 @@ def _make_policy(lookback: int = 90) -> dict:
         "symbols": {
             "whitelist_us_file": "",
             "whitelist_ar_file": "",
+            "whitelist_cedear_file": "config/symbols/whitelist_cedear.yaml",
             "inline_us": [],
             "inline_ar": [],
+            "universe_selection": {
+                "enabled": False,
+                "rebalance_frequency": "weekly",
+                "targets": {"merval_top_n": 10, "cedears_top_n": 20},
+                "volume_window_trading_days": 20,
+                "tiebreakers": ["avg_notional_desc", "symbol_asc"],
+                "api_budget": {
+                    "monthly_limit": 25000,
+                    "soft_limit_pct": 0.8,
+                    "max_calls_per_job": 2000,
+                },
+            },
         },
     }
 
@@ -78,6 +91,10 @@ def _passed_stage(name: str) -> StageResult:
 
 def _failed_stage(name: str) -> StageResult:
     return StageResult(stage=name, passed=False, metrics={}, violations=["failed"])
+
+
+def _long_engine_return(stage: StageResult) -> tuple[StageResult, None]:
+    return stage, None
 
 
 def _make_db_mock(trading_days: list[date] | None = None) -> MagicMock:
@@ -109,7 +126,7 @@ class TestAllStagesPass:
     ):
         mock_dq.return_value = _passed_stage("data_quality")
         mock_spg.return_value = _passed_stage("short_pre_gate")
-        mock_le.return_value = _passed_stage("long_engine")
+        mock_le.return_value = _long_engine_return(_passed_stage("long_engine"))
         mock_ra.return_value = _passed_stage("risk_audit")
         mock_ksh.return_value = _passed_stage("kill_switch_history")
 
@@ -127,7 +144,7 @@ class TestAllStagesPass:
     ):
         mock_dq.return_value = _passed_stage("data_quality")
         mock_spg.return_value = _passed_stage("short_pre_gate")
-        mock_le.return_value = _passed_stage("long_engine")
+        mock_le.return_value = _long_engine_return(_passed_stage("long_engine"))
         mock_ra.return_value = _passed_stage("risk_audit")
         mock_ksh.return_value = _passed_stage("kill_switch_history")
 
@@ -158,7 +175,11 @@ class TestAllStagesPass:
             (mock_ra, "risk_audit"),
             (mock_ksh, "kill_switch_history"),
         ]:
-            m.return_value = _passed_stage(name)
+            m.return_value = (
+                _long_engine_return(_passed_stage(name))
+                if name == "long_engine"
+                else _passed_stage(name)
+            )
 
         report = run_validation_wf(_make_policy(), _make_db_mock(), 100_000.0)
 
@@ -181,7 +202,7 @@ class TestShortPreGateFails:
     ):
         mock_dq.return_value = _passed_stage("data_quality")
         mock_spg.return_value = _failed_stage("short_pre_gate")
-        mock_le.return_value = _passed_stage("long_engine")
+        mock_le.return_value = _long_engine_return(_passed_stage("long_engine"))
         mock_ra.return_value = _passed_stage("risk_audit")
         mock_ksh.return_value = _passed_stage("kill_switch_history")
 
@@ -199,7 +220,7 @@ class TestShortPreGateFails:
     ):
         mock_dq.return_value = _passed_stage("data_quality")
         mock_spg.return_value = _failed_stage("short_pre_gate")
-        mock_le.return_value = _passed_stage("long_engine")
+        mock_le.return_value = _long_engine_return(_passed_stage("long_engine"))
         mock_ra.return_value = _passed_stage("risk_audit")
         mock_ksh.return_value = _passed_stage("kill_switch_history")
 
@@ -225,7 +246,7 @@ class TestDataQualityDoesNotBlock:
         # data_quality fails but all blocking stages pass
         mock_dq.return_value = _failed_stage("data_quality")
         mock_spg.return_value = _passed_stage("short_pre_gate")
-        mock_le.return_value = _passed_stage("long_engine")
+        mock_le.return_value = _long_engine_return(_passed_stage("long_engine"))
         mock_ra.return_value = _passed_stage("risk_audit")
         mock_ksh.return_value = _passed_stage("kill_switch_history")
 
@@ -243,7 +264,7 @@ class TestDataQualityDoesNotBlock:
     ):
         mock_dq.return_value = _failed_stage("data_quality")
         mock_spg.return_value = _passed_stage("short_pre_gate")
-        mock_le.return_value = _passed_stage("long_engine")
+        mock_le.return_value = _long_engine_return(_passed_stage("long_engine"))
         mock_ra.return_value = _passed_stage("risk_audit")
         mock_ksh.return_value = _passed_stage("kill_switch_history")
 
@@ -274,7 +295,11 @@ class TestPeriodDates:
             (mock_ra, "risk_audit"),
             (mock_ksh, "kill_switch_history"),
         ]:
-            m.return_value = _passed_stage(name)
+            m.return_value = (
+                _long_engine_return(_passed_stage(name))
+                if name == "long_engine"
+                else _passed_stage(name)
+            )
 
         days = [date(2025, 10, 1) + timedelta(days=i) for i in range(90)]
         db = _make_db_mock(trading_days=days)
@@ -303,7 +328,11 @@ class TestPeriodDates:
             (mock_ra, "risk_audit"),
             (mock_ksh, "kill_switch_history"),
         ]:
-            m.return_value = _passed_stage(name)
+            m.return_value = (
+                _long_engine_return(_passed_stage(name))
+                if name == "long_engine"
+                else _passed_stage(name)
+            )
 
         days = [date(2025, 10, 1) + timedelta(days=i) for i in range(90)]
         db = _make_db_mock(trading_days=days)
@@ -333,7 +362,11 @@ class TestPeriodDates:
             (mock_ra, "risk_audit"),
             (mock_ksh, "kill_switch_history"),
         ]:
-            m.return_value = _passed_stage(name)
+            m.return_value = (
+                _long_engine_return(_passed_stage(name))
+                if name == "long_engine"
+                else _passed_stage(name)
+            )
 
         all_days = [date(2025, 6, 1) + timedelta(days=i) for i in range(200)]
         db = _make_db_mock(trading_days=all_days)
@@ -367,7 +400,11 @@ class TestPeriodDates:
             (mock_ra, "risk_audit"),
             (mock_ksh, "kill_switch_history"),
         ]:
-            m.return_value = _passed_stage(name)
+            m.return_value = (
+                _long_engine_return(_passed_stage(name))
+                if name == "long_engine"
+                else _passed_stage(name)
+            )
 
         days = [date(2025, 10, 1) + timedelta(days=i) for i in range(5)]
         db = _make_db_mock(trading_days=days)
@@ -407,10 +444,12 @@ class TestEachBlockingStageIndividually:
             "kill_switch_history": mock_ksh,
         }
         for name, m in mock_map.items():
-            if name == failing_stage:
-                m.return_value = _failed_stage(name)
-            else:
-                m.return_value = _passed_stage(name)
+            stage = (
+                _failed_stage(name) if name == failing_stage else _passed_stage(name)
+            )
+            m.return_value = (
+                _long_engine_return(stage) if name == "long_engine" else stage
+            )
 
         report = run_validation_wf(_make_policy(), _make_db_mock(), 100_000.0)
 
@@ -437,7 +476,11 @@ class TestReportMetadata:
             (mock_ra, "risk_audit"),
             (mock_ksh, "kill_switch_history"),
         ]:
-            m.return_value = _passed_stage(name)
+            m.return_value = (
+                _long_engine_return(_passed_stage(name))
+                if name == "long_engine"
+                else _passed_stage(name)
+            )
 
         policy = _make_policy()
         policy["schema_version"] = 42
@@ -461,7 +504,11 @@ class TestReportMetadata:
             (mock_ra, "risk_audit"),
             (mock_ksh, "kill_switch_history"),
         ]:
-            m.return_value = _passed_stage(name)
+            m.return_value = (
+                _long_engine_return(_passed_stage(name))
+                if name == "long_engine"
+                else _passed_stage(name)
+            )
 
         report = run_validation_wf(_make_policy(lookback=45), _make_db_mock(), 100_000.0)
 
@@ -482,7 +529,11 @@ class TestReportMetadata:
             (mock_ra, "risk_audit"),
             (mock_ksh, "kill_switch_history"),
         ]:
-            m.return_value = _passed_stage(name)
+            m.return_value = (
+                _long_engine_return(_passed_stage(name))
+                if name == "long_engine"
+                else _passed_stage(name)
+            )
 
         report = run_validation_wf(_make_policy(), _make_db_mock(), 100_000.0)
 

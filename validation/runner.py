@@ -77,7 +77,7 @@ def run_validation_wf(
     # Ejecutar etapas en orden
     stage_dq = run_data_quality_stage(db, trading_days, policy_doc)
     stage_spg = run_short_pre_gate_stage(db, trading_days, policy_doc, _REPO_ROOT, starting_cash)
-    stage_le = run_long_engine_stage(db, trading_days, policy_doc, _REPO_ROOT, starting_cash)
+    stage_le, _ = run_long_engine_stage(db, trading_days, policy_doc, _REPO_ROOT, starting_cash)
     stage_ra = run_risk_audit_stage(db, trading_days, policy_doc, _REPO_ROOT)
     stage_ksh = run_kill_switch_history_stage(db, trading_days, policy_doc, _REPO_ROOT, starting_cash)
 

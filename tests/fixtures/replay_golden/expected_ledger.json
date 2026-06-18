@@ -1,0 +1,15 @@
+{
+  "starting_cash": 100000.0,
+  "mode": "paper_live",
+  "cash": 99837.1,
+  "short_cash": -162.89999999999998,
+  "realized_pnl_total": -13.940000000000003,
+  "positions": {
+    "XOM": {
+      "qty": 1.0,
+      "avg_cost": 148.81,
+      "market": "US",
+      "bucket": "short"
+    }
+  }
+}

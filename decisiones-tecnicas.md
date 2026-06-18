@@ -2,11 +2,32 @@
 
 Este documento registra las decisiones técnicas relevantes del proyecto, su contexto, el porqué, consecuencias y alternativas evaluadas.
 
+**Última actualización**: 2026-06-18 — **65 ADRs** documentadas (001–065). Las complicaciones técnicas vividas (encadenadas) se narran en `docs/complicaciones-tecnicas.md`; el overview de arquitectura y estado operativo está en `docs/project-overview.md`.
+
 ## Cómo usar este archivo
 
 - Crear una nueva entrada por cada decisión importante.
 - Mantener un estado claro: `propuesta`, `aceptada`, `reemplazada`, `descartada`.
 - Cuando una decisión cambie, no borrar el historial: marcar la anterior como `reemplazada` y enlazar la nueva.
+- Ante conflicto numérico entre `POLICY.md` y `config/policy.v1.yaml`, actualizar ambos en el mismo cambio y anotar el motivo aquí o en el ADR afectado.
+
+## Índice por tema (65 ADRs)
+
+| Tema | ADRs |
+|------|------|
+| Filosofía y arquitectura | 001–004, 014 |
+| Riesgo y guardrails | 002, 005, 015, 020, 022, 026, 036, 041, 042, 044, 051 |
+| Motores corto / largo | 011–013, 016–017, 042, 043, 045–048 |
+| Data layer y calidad | 021, 037, 047, 049, 052, 053, 056 |
+| Simulación y ledger | 008–010, 018–019, 025, 039, 051 |
+| KPI, validación y gates | 027–035, 041 |
+| Investigación walk-forward y perfil de riesgo | 058, 059, 060, 061–064 |
+| Paper-live y operación | 040, 044, 048, 050, 054, 055 |
+| **Dashboard / demo web (MVP interfaz)** | **065** (+ `docs/dashboard.md`, `web/`) |
+| Señal y medición offline | 042, 052, 053 (+ `reporting/signal_ic.py`, `reporting/scenario.py`; ver ADR-052) |
+| Connector AR / IOL | 049, 056 |
+| Testing y convenciones | 057 |
+| Tooling / fixes menores | 023–024, 038 |
 
 ---
 
@@ -337,6 +358,8 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 - **Alternativas consideradas**:
   - **Rebalance parcial si falta un ticker**: descartada por riesgo de cartera inconsistente vs objetivos.
   - **Drift agregado solo sobre el bloque core**: descartada en v1 para evitar doble conteo y ambigüedad con satélite; se deja `per_line` como única convención schema.
+
+- **Nota (2026-05-15)**: el diseño original describe largo **solo US** y día de rebalance con sesiones US; la extensión **BYMA en pesos**, reglas `first_ar_*`, `satellite_markets: [AR]` y resolución whitelist CEDEAR frente al merge global quedan registradas en **ADR-048**.
 
 ---
 
@@ -842,6 +865,743 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
   - **Callback hook en `DailyEventBacktester`**: descartada — overkill para un solo consumer; agrega complejidad sin beneficio inmediato.
 - **Archivos**: `data/storage.py`, `core_sim/long_term_monthly_runner.py`, `tests/test_data_storage.py`
 - **Change**: SDD #2 `paper-persistence` (propuesta, spec, diseño y tasks en Engram)
+
+---
+
+## ADR-040 — Activación paper-live: branch dedicada, Git LFS y workflow robusto
+
+- **Fecha**: 2026-05-11
+- **Estado**: aceptada
+- **Contexto**: El orquestador paper-live (`scripts/run_paper_live.py`, ADR-039) ya existía pero no podía funcionar en producción real por tres gaps: (1) el workflow no descargaba OHLCV antes de ejecutar el pipeline; (2) `git add data/market.db` era ignorado por `.gitignore`; (3) no había notificación ante fallos, lo que dejaba ventana para violar la política F3 (gap > 3 días hábiles) sin detección.
+- **Decisión**:
+  - **Branch `paper-live-data`** separada de `main`: código operativo + DB persistida. `main` evoluciona limpio (solo código); `paper-live-data` acumula artefactos operativos diarios. Sincronización de código vía `git merge main` desde `paper-live-data`.
+  - **Git LFS** para `data/*.db` en `paper-live-data` (`.gitattributes` con filtro LFS): evita que commits diarios de binario SQLite inflen el repo (~250 commits/año × tamaño creciente de DB).
+  - **`.gitignore` con negación** `!data/market.db` solo en `paper-live-data`: permite tracking de la DB sin afectar `main`.
+  - **Workflow** (`.github/workflows/paper_live_daily.yml` en `main`):
+    - Step `Fetch latest OHLCV` (`fetch_daily.py --lookback 5`) antes de `run_paper_live.py`, con env opcionales `IOL_USER`/`IOL_PASS` desde secrets.
+    - `git add -f data/market.db` en lugar de `git add` para robustez ante gitignore.
+    - Step `Notify on failure` (`actions/github-script@v7`): crea issue GitHub automático al fallar, con link a logs del run.
+  - **Seed inicial local**: `fetch_daily.py --lookback 120` para poblar historial mínimo antes del primer cron.
+- **Por qué**:
+  - Sin fetch en el workflow, la DB no tiene barras del día y `run_paper_live.py` falla con "No OHLCV bars found".
+  - Sin LFS, el repo crece ~1 GB/año en commits binarios — impacta clones, CI y mantenimiento.
+  - Sin notificación, un fallo silencioso de 3+ días activa F3 y requiere intervención manual sin aviso previo.
+  - Separar branches evita contaminar `main` con ~250 commits/año de DB binaria y preserva historial limpio para PRs y revisiones de código.
+- **Consecuencias**:
+  - GitHub LFS tiene 1 GB storage + 1 GB bandwidth gratis; suficiente para paper trading.
+  - Para usar IOL directo (AR), configurar `IOL_USER`/`IOL_PASS` en **GitHub Actions secrets** (obligatorio para CI; variables locales de Windows no aplican al runner). Sin ellos, fallback Byma/yfinance puede operar pero el fetch AR queda degradado. Runbook ampliado en **ADR-050**.
+  - Cambios de código en `main` deben mergearse a `paper-live-data` para que el cron los use.
+  - El workflow YAML vive en `main` (GitHub lee schedule/dispatch del default branch); el checkout ejecuta contra `paper-live-data`.
+- **Alternativas consideradas**:
+  - **Todo en `main`**: descartada por ruido de commits diarios de DB en historial de código.
+  - **Artifact storage externo (S3/GCS)**: descartada por complejidad adicional sin beneficio claro para paper trading.
+  - **`git add -f` sin LFS**: descartada por inflación de repo a mediano plazo.
+- **Archivos**: `.github/workflows/paper_live_daily.yml`, `.gitattributes` (nuevo en `paper-live-data`), `.gitignore` (modificado en `paper-live-data`)
+- **Commits**: `9546f2b` (workflow en `main`)
+
+---
+
+## ADR-041 — Gate KPI OOS con umbrales pre-registrados y protocolo ramp-up
+
+- **Fecha**: 2026-05-11
+- **Estado**: aceptada
+- **Contexto**: El plan maestro quedó con 12/12 todos completados en código, pero faltaba el último entregable de Fase 5: umbrales numéricos congelados **antes** del primer resultado OOS agregado, y el protocolo de transición paper → capital real. Sin esto, el gate es una infraestructura vacía (thresholds en `null`, `enabled: false`).
+- **Decisión**:
+  - **Activar `kpi_oos_gate.enabled: true`** en `config/policy.v1.yaml` y rellenar 7 umbrales bloqueantes + 2 informativos:
+    - `min_sharpe_annualized_total: 0.30` — piso modesto; no destruir valor ajustado por riesgo vs ETFs pasivos (Sharpe histórico SPY ~0.4–0.5).
+    - `min_sortino_annualized_total: 0.40` — con kill switch y límites diarios, downside debería estar más acotado que upside.
+    - `max_drawdown_total_floor: -0.18` — peor caso razonable: largo 70% × -25% + corto 30% × -8% ≈ -20%.
+    - `max_drawdown_short_floor: -0.10` — kill switch se auto-resetea por mes; en ventana OOS de ~3 meses puede acumular dos activaciones.
+    - `max_drawdown_long_floor: -0.25` — tolerar bear market normal sin culpar al bot; detectar errores de rebalanceo.
+    - `max_turnover_long_monthly_last: 0.08` — con bandas drift 2pp, turnover esperado 1–5%; techo de 8% detecta bugs de churn.
+    - `min_alpha_simple_return_total: -0.02` — tolerar hasta -2% anuales vs benchmark pasivo como costo del bloque corto activo.
+    - `min_calmar_12m_long: null` + `max_mdd_12m_rolling_long_floor: null` — informativas, no bloqueantes (dependen del mercado, no del bot).
+  - **Agregar `ramp_stage: paper`** al YAML con enum validado en schema (`paper`, `ramp_10`, `ramp_25`, `ramp_50`, `live_100`).
+  - **Anexo fechado §13** en `POLICY.md` (`gate.v1`, 2026-05-11): tabla de umbrales con justificación, regla de agregación (`all`), parámetros walk-forward (burn-in 252, OOS 60, step 30), y gobernanza de versiones.
+  - **Protocolo ramp-up §14** en `POLICY.md`: 5 escalones (paper → 10% → 25% → 50% → 100%) con criterio de entrada, duración mínima por escalón (30–60 días), criterios de rollback (DD real > 1.5× peor OOS), y regla de rollback a paper (DD > 2× peor OOS). Subir de escalón es decisión humana; bajar puede ser automático.
+- **Por qué**:
+  - Pre-registrar umbrales evita "tirar hasta acertar" — si los fijás después de ver resultados, no tenés gate, tenés confirmation bias.
+  - Separar métricas de mercado (Calmar/MDD largo) de métricas del bot (Sharpe/alpha/turnover) da señal limpia.
+  - El ramp gradual con checkpoints reduce riesgo de overshoot si el paper sobreestima calidad de ejecución real (slippage real > simulado, etc.).
+- **Consecuencias**:
+  - Datos mínimos para la primera evaluación: 312 días hábiles (~15 meses de paper-live). Hoy hay ~120 días históricos; el gate no puede correrse hasta acumular suficiente serie.
+  - Cambiar cualquier umbral requiere `gate.v2` con fecha y motivo en POLICY.md y YAML simultáneamente.
+  - El `ramp_stage` es trazabilidad pura; no tiene lógica automática en el código hoy (el runner no cambia comportamiento por escalón).
+- **Alternativas consideradas**:
+  - **Umbrales más agresivos (Sharpe >= 1.0, alpha >= 0)**: descartadas — un bot v1 moderado con 70% pasivo no debería aspirar a Sharpe > 1; un piso agresivo invalida el gate ante cualquier régimen normal.
+  - **Calmar/MDD como bloqueantes**: descartadas para el largo pasivo — detectan mercado, no bot; activarlos generaría falsos positivos en bear markets.
+  - **Ramp sin escalones intermedios (paper → 100%)**: descartada por riesgo operativo; los escalones permiten detectar discrepancias paper vs real a escala menor.
+- **Archivos**: `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `POLICY.md` (§13, §14)
+
+---
+
+## ADR-042 — RSI(14) como filtro de entrada y señal de salida del motor corto
+
+- **Fecha**: 2026-05-12
+- **Estado**: aceptada
+- **Contexto**: El walk-forward OOS de 180 días mostraba 9/13 ventanas fallando por `monthly_short_drawdown` debajo del floor (-0.25). El motor corto entraba en tickers sobrecomprados (momentum positivo pero RSI alto) y solo salía por stop-loss ATR, acumulando drawdowns innecesarios.
+- **Decisión**: Agregar RSI(14) al motor corto con dos roles:
+  1. **Filtro de entrada**: descartar candidatos con RSI > `rsi_overbought_entry` (default **70** en el ADR original; ver actualización abajo). Reason: `rsi_overbought`.
+  2. **Señal de salida por crossover descendente**: vender posiciones del bucket short cuando `rsi_yesterday >= rsi_exit_threshold` y `rsi_today < rsi_exit_threshold` (default 45). Reason: `rsi_momentum_exhausted`. El crossover evita salidas falsas cuando RSI simplemente está bajo y estable.
+  3. **Contadores de auditoría**: cada ventana OOS reporta `entries_blocked_by_rsi`, `exits_by_rsi`, `exits_by_stop_loss` para explicar por qué cambió el resultado.
+- **Por qué**:
+  - RSI es complementario al momentum (no redundante): momentum dice "sube", RSI dice "se pasó de rosca".
+  - Solo 2 umbrales tunables reales (`rsi_overbought_entry`, `rsi_exit_threshold`); `rsi_lookback=14` es estándar fijo.
+  - Fórmula determinística y auditable; sin ventanas adaptativas ni ML.
+  - Alternativas con más parámetros (MACD: 3, cruces de medias: 2 lookbacks) excedían la complejidad mínima pedida.
+- **Consecuencias**:
+  - Walk-forward 180d con RSI: `avg_max_dd` mejoró de -0.134% a -0.098%; turnover bajó de 1.69 a 1.26; RSI bloqueó 130 entradas y disparó 5 salidas anticipadas.
+  - `windows_passed` se mantuvo en 4/13 — el drawdown mensual del bucket corto sigue siendo el cuello de botella, pero la mejora en DD total indica dirección correcta.
+  - Si `rsi_overbought_entry=70` resulta muy restrictivo en tendencias fuertes, se puede subir a 75–80 sin cambiar arquitectura.
+  - Deduplicación implementada: si RSI ya generó SELL, stop-loss no duplica la orden para el mismo símbolo.
+- **Actualización 2026-06**: `rsi_overbought_entry` en `config/policy.v1.yaml` quedó en **80.0** (menos restrictivo en tendencias fuertes; sin cambio de arquitectura ni de la lógica de crossover de salida).
+- **Alternativas consideradas**:
+  - **MACD**: 3 parámetros nuevos (fast, slow, signal) — más complejidad de la pedida.
+  - **Bollinger Bands**: resuelve solo entradas, no salidas.
+  - **RSI con umbral fijo para salida** (sin crossover): genera salidas falsas cuando RSI está bajo pero estable (pullback sano en tendencia alcista).
+- **Archivos**: `core_sim/short_term_engine.py`, `core_sim/short_term_day_runner.py`, `core_sim/short_term_pre_gate.py`, `scripts/run_short_term_pre_gate.py`, `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `core_sim/__init__.py`
+
+---
+
+## ADR-043 — ADRs argentinos en whitelist US con precedencia de market tag
+
+- **Fecha**: 2026-05-13
+- **Estado**: aceptada
+- **Contexto**: Los tickers MELI, YPF, TGS y GGAL estaban solo en `whitelist_ar.yaml` como acciones BYMA. Sin embargo, son ADRs listados en NYSE/NASDAQ y el sistema debería poder operarlos como instrumentos US (sesión NYSE, costos US, horario US). Además, `fetch_daily.py` solo leía las claves `etfs` y `stocks` del YAML US, por lo que una nueva categoría sería ignorada sin fix.
+- **Decisión**:
+  - Agregar sección **`adrs`** en `config/symbols/whitelist_us.yaml` con MELI, YPF, TGS y GGAL.
+  - Extender la tupla de buckets en `load_merged_whitelist` (`short_term_day_runner.py`) y en `_load_symbols_from_policy` (`fetch_daily.py`) de `("etfs", "stocks")` a `("etfs", "stocks", "adrs")`.
+  - **Invertir el orden de carga** en `load_merged_whitelist`: AR se carga primero, US después. Esto asegura que para tickers presentes en ambas listas, el tag US (ADR) tiene precedencia (last-write-wins).
+  - No se modificó `whitelist_ar.yaml`: los mismos tickers siguen presentes como acciones BYMA para el caso en que se quieran operar localmente en el futuro con tickers diferenciados (e.g. `GGAL.BA`).
+- **Por qué**:
+  - Los ADRs operan en horario US, con costos US y sesión NYSE — tagearlos como "AR" haría que el sistema les aplique sesión AR, costos AR y horario AR, lo cual es incorrecto.
+  - El orden anterior de carga (US primero, AR después) hacía que AR sobrescribiera el tag US para tickers duplicados, anulando silenciosamente el efecto de agregar ADRs al whitelist US.
+  - Separar la categoría `adrs` del `stocks` hace explícita la naturaleza del instrumento y facilita filtrados futuros (e.g. reportes por tipo de instrumento).
+- **Consecuencias**:
+  - Los 4 tickers quedan como `"US"` en el dict `merged`. El motor corto les aplica sesión US, el risk los evalúa con fallback stop-loss US, y el allocator los cuenta dentro del headroom geo US.
+  - Si en el futuro se quieren operar las versiones locales BYMA en paralelo, se necesitarán tickers diferenciados en `whitelist_ar.yaml` (e.g. `GGAL.BA` vs `GGAL`).
+  - `long_term_monthly_runner.py` no requirió cambio porque reutiliza `load_merged_whitelist` del day runner.
+- **Alternativas consideradas**:
+  - **Agregar los ADRs directamente en `stocks` del US whitelist**: descartada — mezcla la categoría y pierde la distinción semántica entre acciones US nativas y ADRs argentinos.
+  - **Eliminar los tickers de `whitelist_ar.yaml`**: descartada — preservarlos permite operar versiones BYMA en el futuro con tickers diferenciados sin perder la configuración.
+  - **Mantener el orden original de carga (US antes que AR)**: descartada — hacía que los ADRs fueran sobrescritos como "AR", anulando el propósito del cambio.
+- **Archivos**: `config/symbols/whitelist_us.yaml`, `core_sim/short_term_day_runner.py`, `scripts/fetch_daily.py`, `tests/test_short_term_day_runner.py`
+
+---
+
+## ADR-044 — Integración largo en paper-live, guardrail largo efectivo, dedup riesgo corto
+
+- **Fecha**: 2026-05-13
+- **Estado**: aceptada
+- **Contexto**: Tres brechas operativas: (1) el motor largo no estaba integrado en el loop diario paper-live, (2) `check_long_risk` era no-op porque el runner pasaba el snapshot completo como scoreboard (key `long_daily_return` ausente, default 0.0), y (3) `_check_risk_with_optional_db` duplicaba los 4 pasos de `check_short_risk` manualmente.
+- **Decisión**:
+  1. **Ledger**: agregar `_long_eod_by_trading_date` y `_attach_long_daily_return()` para computar el daily return del sleeve largo, incluyendo `long_bucket` en el return de `mark_to_market`.
+  2. **long_term_monthly_runner**: `propose_orders` y `risk_check` extraen `snap["long_bucket"]` y pasan ese dict a `check_long_risk` (no el snapshot completo).
+  3. **run_paper_live**: cablear `create_long_term_monthly_backtester` con feature flag `--enable-long-engine` (default false). Orden fijo: short → long. Fills combinados. Snapshot final post-ambos sleeves. DB y calendar_store inyectados al short backtester.
+  4. **Dedup riesgo corto**: `_check_risk_with_optional_db` refactorizado a orquestador liviano: reutiliza `check_short_risk` con config override para data_quality+no_trade, luego `check_and_persist_kill_switch`, luego `check_short_risk` para daily_loss.
+- **Por qué**:
+  - Sin `long_daily_return` el guardrail largo nunca disparaba — riesgo silencioso.
+  - La duplicación de la cadena de 4 pasos hacía que cualquier cambio en `check_short_risk` requiriera sincronización manual en `_check_risk_with_optional_db`.
+  - El flag `enable_long_engine=false` permite rollback inmediato a short-only sin cambios de código.
+- **Consecuencias**:
+  - `mark_to_market` ahora retorna `long_bucket` con `long_daily_return` y `long_equity`.
+  - Orden de ejecución short→long fijo; el largo consume la caja que quedó después del corto.
+  - El flag es CLI (`--enable-long-engine`); desactivación inmediata sin deploy.
+- **Alternativas consideradas**:
+  - **Exponer long_daily_return desde un snap genérico**: descartada — el snapshot no tenía esa key, forzaba al caller a calcular manualmente.
+  - **Feature flag en YAML de policy**: descartada por ahora — un flag CLI es más simple para paper-live y evita tocar el schema de policy.
+  - **No deduplicar el riesgo corto (mantener copia)**: descartada — violaría la regla de single source of truth para la cadena de riesgo.
+- **Archivos**: `core_sim/ledger.py`, `core_sim/long_term_monthly_runner.py`, `core_sim/short_term_day_runner.py`, `scripts/run_paper_live.py`, tests correspondientes.
+
+---
+
+## ADR-045 — Rebalanceo del motor largo: de mensual a semanal
+
+- **Fecha**: 2026-05-13
+- **Estado**: aceptada (actualiza ADR-017 en lo referente a `rebalance_rule`)
+- **Contexto**: El motor largo usaba `rebalance_rule: first_us_trading_day_of_calendar_month`, evaluando drift y ejecutando rebalanceos solo una vez al mes. En mercados volátiles (ej. crash arancelario Feb–Abr 2026, SPY -6.3%), un mes de latencia puede acumular desvíos significativos antes de corregir. Además, el guardrail `check_long_risk()` (-1.5% diario) solo se evaluaba cuando el motor largo corría, es decir, una vez al mes.
+- **Decisión**:
+  - Cambiar `rebalance_rule` a `first_us_trading_day_of_calendar_week` en `config/policy.v1.yaml`.
+  - Cambiar `cadence.long` de `monthly` a `weekly`.
+  - Implementar `is_first_us_trading_day_of_week()` y `is_rebalance_day_by_rule()` en `core_sim/long_term_engine.py` como funciones puras que resuelven el día de rebalanceo según regla configurada.
+  - Actualizar `validate_long_term_engine_config()` para aceptar ambas reglas (`week` y `month`).
+  - Actualizar `config/policy.v1.schema.json`: `cadence.long` acepta `["weekly", "monthly"]`; `rebalance_rule` pasa a enum explícito.
+  - Actualizar `validation/stages/long_engine.py` para evaluar suficiencia temporal según la regla (semanas para weekly, meses para monthly).
+  - Actualizar `POLICY.md` §10.3 y tabla §10.6 para reflejar rebalanceo semanal.
+- **Por qué**:
+  - Semanal reduce la latencia de corrección de drift de ~22 días hábiles a ~5, atrapando desvíos grandes antes de que se acumulen.
+  - El guardrail `check_long_risk()` pasa de evaluarse ~1x/mes a ~4x/mes, mejorando la protección real del sleeve largo.
+  - Con ETFs pasivos y bandas de drift de 2pp, la mayoría de las semanas seguirá siendo un no-op (drift dentro de banda); el costo operativo extra es marginal.
+- **Consecuencias**:
+  - El turnover mensual del largo puede subir levemente respecto de mensual puro; el techo de 8% en `kpi_oos_gate` sigue como guardrail.
+  - La función `is_first_us_trading_day_of_month()` se mantiene para backward-compat y métricas legacy, pero ya no controla el gate de rebalanceo.
+  - Tests y fixtures de `test_long_term_engine.py`, `test_validation_runner.py` y `test_kpi_walk_forward.py` actualizados a la nueva regla.
+- **Alternativas consideradas**:
+  - **Mantener mensual**: descartada — demasiada latencia en mercados volátiles; el guardrail largo se evaluaba muy poco.
+  - **Diario**: descartada — genera ruido operativo (29/30 días no-op) y logs innecesarios sin beneficio real para ETFs pasivos.
+  - **Bandas de drift más estrechas con cadencia mensual**: descartada — no resuelve la baja frecuencia de evaluación del guardrail.
+- **Archivos**: `core_sim/long_term_engine.py`, `core_sim/__init__.py`, `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `POLICY.md`, `validation/stages/long_engine.py`, `AGENTS.md`, `README.md`, `docs/project-overview.md`, tests correspondientes.
+- **Validación empírica**: comparación semanal vs mensual vs SPY en walk-forward → **ADR-046** (`notebooks/wf_long_comparison.ipynb`; pasos 3–4 implementados; corrida continua 12m pendiente).
+
+---
+
+## ADR-046 — Notebook walk-forward comparativo del motor largo (evidencia ADR-045)
+
+- **Fecha**: 2026-05-15
+- **Estado**: aceptada (plan del notebook completo: pasos 1–5)
+- **Contexto**: **ADR-045** pasó el rebalanceo largo de mensual a semanal por argumentos de latencia de drift y frecuencia del guardrail diario, pero sin una corrida controlada que compare ambas reglas y un benchmark en las mismas ventanas, costos y datos. El pipeline WF del largo (**ADR-027**, `run_long_engine_wf.py`) agrega métricas por ventana (`max_drift_observed_pp`, costos, etc.) pero no exporta la **curva diaria de equity del sleeve largo**, necesaria para superponer estrategias y normalizar a base 100.
+- **Decisión**:
+  - Extender `validation/stages/long_engine.run_long_engine_stage` con parámetro opcional `return_details: bool = False` y dataclass `StageDetails`:
+    - `daily_equity`: lista de `{"date", "equity"}` por día hábil con barras (MTM del sleeve largo vía `_compute_long_bucket_mtm`);
+    - `fills`: fills acumulados de rebalanceos en el período;
+    - `final_positions`: cantidades finales por símbolo en bucket `long`.
+  - Retorno **siempre** tupla `(StageResult, StageDetails | None)`; si `return_details=False`, el segundo elemento es `None`. Callers existentes adaptados: `validation/runner.py` desempaqueta; `validation/wf_runner.py` usa solo `[0]` por ventana (comportamiento del CLI sin cambios).
+  - Notebook `notebooks/wf_long_comparison.ipynb`:
+    - Helper `spy_buy_and_hold_equity(bars, initial_cash)` → `equity_t = initial_cash × (close_t / close_0)`.
+    - **Orquestador (paso 3)**: calendario US abr-2025 → may-2026; `generate_wf_windows(3, 1)`; por ventana corre `run_long_engine_stage(..., return_details=True)` con `policy_with_rebalance_rule` (semanal vs mensual) + SPY; acumula `equity_df` y `windows_df`.
+    - **Visualizaciones (paso 4)**: grid de curvas base 100 por ventana; tabla pivote retorno % / Sharpe (252d) / MDD %; barra de retorno promedio cross-ventanas; barras agrupadas de MDD ventana a ventana.
+    - **Gráfico continuo (paso 5)**: una corrida sobre todo `trading_days` (sin reset entre ventanas WF); `continuous_equity_df` + panel dual (USD nominal y base 100).
+  - Costos reales del `cost_model` en policy (vía stage); equity solo del sleeve largo.
+- **Por qué**:
+  - Reutilizar el mismo stage que validation-wf y WF CLI evita duplicar simulación, broker y costos en un script ad hoc del notebook.
+  - Separar **métricas agregadas** (JSON `validation_reports/`, ADR-027) de **series temporales** (notebook) mantiene reportes livianos y trazables.
+  - La tupla obliga opt-in explícito al detalle sin romper el contrato `StageResult` usado por GO/NO-GO.
+  - Buy-and-hold SPY en la misma ventana y cash inicial es el piso de referencia mínimo para preguntar “¿valió la pena rebalancear?”.
+- **Consecuencias**:
+  - Paso 5 no sustituye paso 4: ventanas independientes miden estabilidad OOS; la corrida continua muestra compounding y costos acumulados en un solo capital.
+  - Sharpe en el notebook es **exploratorio** (retornos diarios simples × √252); no reemplaza `rpt_kpi.v1` ni el gate OOS.
+  - Para comparar `rebalance_rule` distintas, el notebook inyecta la regla en **copia** del `policy_doc` (no muta el YAML commiteado).
+  - `daily_equity` refleja sleeve largo, no equity total del portfolio (coherente con el scope del motor largo).
+- **Alternativas consideradas**:
+  - **Re-simular solo en el notebook**: descartada — riesgo de drift respecto al stage y de costos distintos.
+  - **Incluir `daily_equity` en `long_engine_wf_*.json`**: descartada en v1 por tamaño de artefacto y mezcla de responsabilidades con ADR-027.
+  - **Función separada `run_long_engine_stage_with_details`**: descartada — duplicaría firma y lógica; un flag es suficiente.
+- **Archivos**: `validation/stages/long_engine.py`, `validation/runner.py`, `validation/wf_runner.py`, `notebooks/wf_long_comparison.ipynb`, `tests/test_validation_long_engine.py`, `tests/test_validation_runner.py`, `tests/test_wf_runner.py`, `README.md`, `docs/project-overview.md`
+
+---
+
+## ADR-047 — Universo AR dinámico (Merval + CEDEAR), overlay de holdings y presupuesto IOL
+
+- **Fecha**: 2026-05-15
+- **Estado**: aceptada
+- **Contexto**: El sleeve corto AR necesita liquidez realista sin inflar llamadas a IOL ni divergir entre “lo que se descarga” y “lo que el ledger sigue marcando”. Un whitelist estático no replica rotación de volumen; ignorar posiciones abiertas fuera del top rompe datos para stops y MTM.
+- **Decisión**:
+  - **Modelo híbrido**: candidatos en YAML (`whitelist_ar.yaml`, `whitelist_cedear.yaml`) + selección dinámica por volumen en ventana `volume_window_trading_days`, con targets `merval_top_n` / `cedears_top_n`.
+  - **Fórmula de ranking (determinística)**: para cada candidato, sumar volumen en los últimos *N* días de barras disponibles (cola temporal ordenada); orden global `(−sum_volume, −avg(close×volume), symbol)` para empates por liquidez y ticker.
+  - **Fallback**: si no corresponde refrescar (cadencia semanal/mensual según policy), si el **tope mensual hard** bloquea dinámica, o si el **job** agota `max_calls_per_job`, no se recalcula el ranking en esa corrida y se usa **último snapshot** en `universe_snapshots`; si no hay snapshot, **whitelist estática** legacy (`inline_ar` ∪ stocks AR).
+  - **Overlay de holdings**: la lista efectiva de símbolos AR para ingesta OHLCV es `merge_fetch_universe(top_merval, top_cedear, open_ar_positions)` (orden lexicográfico, dedup). Las posiciones AR abiertas se obtienen de replay de fills en `MarketDB` en fetch diario y del ledger en el runner corto.
+  - **Barras vs señales**: misma resolución base (`symbols_ar_bars`) para whitelist operativa; en modo dinámico `ar_signal_symbols` restringe el universo pasado a `compute_signal_candidates` al top de liquidez persistido, sin perder barras de holdings fuera del top.
+  - **Metering / guardrails**: cada llamada IOL exitosa contabiliza `token`, `refresh`, `history` o `universe_volume` (`data/iol_api_meter.py` + `increment_iol_api_usage`). El total mensual incluye los cuatro contadores; por encima del umbral soft se degrada cadencia (rebalanceo efectivo mensual dentro del mes); por encima del hard no se ejecuta selección dinámica hasta el siguiente mes contable.
+- **Por qué**: una sola fuente de verdad para fetch y corto reduce drift operativo; el overlay de holdings acota sorpresas de datos en posiciones reales; presupuesto explícito evita incidentes de rate/costo y fuerza degradación auditable.
+- **Consecuencias**:
+  - Mayor complejidad en `scripts/fetch_daily.py` y dependencia de tablas `universe_snapshots` / `iol_api_usage`.
+  - Tests de comportamiento en `tests/test_universe_selector.py`, `tests/test_fetch_daily_universe_resolution.py` (cadencia, `monthly_hard_cap`, `aborted_job_budget`), `tests/test_iol_api_meter.py`, `tests/test_short_term_day_runner.py`; trazabilidad de fetch en **ADR-049**.
+- **Alternativas consideradas**:
+  - **Solo whitelist estática**: descartada — no captura liquidez cambiante en BYMA/CEDEARs.
+  - **Ranking con fallback Byma/yfinance**: descartada para selección — distorsiona métricas respecto del venue operativo IOL.
+  - **Incluir holdings en pool de señales**: descartada — ensancha entradas tácticas; se prefiere mantener datos sin ampliar candidatos de entrada.
+- **Archivos**: `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `data/universe_selector.py`, `data/iol_api_meter.py`, `data/connectors/ar_connector.py`, `data/storage.py`, `scripts/fetch_daily.py`, `core_sim/short_term_day_runner.py`, tests citados, `README.md`, `docs/project-overview.md`.
+
+---
+
+## ADR-048 — Motor largo multi-mercado: calendario AR, BYMA pesos y whitelist CEDEAR (colisión SPY)
+
+- **Fecha**: 2026-05-15
+- **Estado**: aceptada (extiende **ADR-017** en calendario/universo del largo; **ADR-045** sigue vigente en la intención semanal del rebalanceo — el default del repo pasa a régimen **AR semanal**)
+- **Contexto**: El sleeve largo estaba modelado como core US + satélite US con `us_sessions` y `rebalance_rule` solo `first_us_trading_day_of_*`. Para operar el **70 % largo en pesos (BYMA)** con **CEDEAR** como satélite — p. ej. `SPY` como proxy de índice — hacía falta: (1) reglas de rebalanceo sobre **días hábiles AR**, (2) intents con `market: AR`, (3) OHLCV/`calendars` en **XBUE**, y (4) resolver la **colisión de ticker**: `SPY` aparece como ETF en `whitelist_us.yaml` (merge global → `US`) y como CEDEAR en `whitelist_cedear.yaml` (operación local).
+- **Decisión**:
+  1. **Policy + schema**: `rebalance_rule` admite `first_ar_business_day_of_calendar_week` y `first_ar_business_day_of_calendar_month`; `satellite_markets` admite `"US"` o `"AR"` (lista de un elemento). `config/policy.v1.yaml` de ejemplo: largo AR semanal, `satellite_markets: [AR]`, líneas **GGAL / PAMP / SPY** con pesos que suman 1.0 en el sleeve. `whitelist_cedear.yaml` incluye explícitamente **SPY** para alinear con la línea satélite.
+  2. **Engine (`core_sim/long_term_engine.py`)**: firma basada en `calendar_sessions` (US o AR según regla); `long_sleeve_trade_market(config)` → `US`/`AR`; validación cruzada `rebalance_rule` ↔ `satellite_markets` (reglas US exigen `[US]`; AR exigen `[AR]`).
+  3. **Runner largo (`core_sim/long_term_monthly_runner.py`)**: el contexto espera `ar_business_days` o `us_sessions` según política (o derivación desde `TradingCalendarStore`). **Whitelist operativa del largo AR**: intersección de los símbolos declarados en `long_term_engine` con la unión de listas **`whitelist_ar_file` ∪ `whitelist_cedear_file`**, sin usar solo `load_merged_whitelist` para AR — así **SPY CEDEAR** puede operarse en el largo aunque el merge corto etiquete `SPY` como US.
+  4. **Paper-live (`scripts/run_paper_live.py`)**: `_build_long_pipeline_context` inyecta `ar_business_days` además de `us_sessions` cuando existe `calendar_store`. Tras el pipeline **corto**, si el largo está activo y el calendario del largo es AR, **`_overlay_ar_long_sleeve_bars_from_db`** escribe sobre una **copia** de `daily_bars` los OHLCV **XBUE** de cada símbolo de `long_term_engine` (MTM final y ejecución del largo usan esa copia).
+  5. **Stage validación (`validation/stages/long_engine.py`)**: si la regla es AR, proyecto de fechas efectivas vía tabla `calendars` **XBUE** y barras `_load_daily_bars_for_day(..., venue=XBUE)`. **No** se requiere calendario **XNYS** en la DB para que el stage corra en política AR. El **`PaperBrokerSim`** del stage usa `CostModel` con **una sola clave** de mercado (`AR` o `US`) según `long_sleeve_trade_market`, leyendo `policy["markets"]` con defaults alineados a paper-live (`min_spread_bps` 0.5 si no viene en YAML). Opcionalmente se pasa **`TradingCalendarStore.from_yaml`** a `create_long_term_monthly_backtester` si existe `config/calendars/trading_days.v1.yaml`.
+  6. **Documentación**: `POLICY.md` §10 y tablas relacionadas sincronizadas con YAML (sleeve en pesos, calendario AR, variante US documentada como alternativa soportada en schema/código).
+  7. **Regresión (audit fase 1, tests)**: cobertura en `tests/test_long_term_engine.py` (rebalance mensual AR), `test_long_term_monthly_runner.py` (métrica `is_long_rebalance_day`, intents SPY con `market: AR`), `test_validation_long_engine.py` (stage con DB **solo XBUE**, fills SPY con `market: AR`), `test_policy_yaml.py` (`satellite_markets: [AR]`, SPY en `whitelist_cedear`).
+- **Por qué**:
+  - Un solo mapa `symbol → market` no puede representar bien el mismo ticker en NYSE vs panel bCBA sin romper corto US o largo AR.
+  - El largo debe auditar contra listas reguladas de liquidación/local y CEDEAR, no contra el etiquetado del merge destinado al pipeline corto.
+- **Consecuencias**:
+  - Nueva dependencia para el stage informative: debe existir calendario **XBUE** en DB cuando se valida política AR; sin filas AR, el stage puede omitirse por `insufficient_calendar_days`.
+  - Quien cambie símbolos en `long_term_engine` debe asegurarlos en **`whitelist_ar` o `whitelist_cedear`**; si no, el motor aborta con `symbol_not_whitelisted`.
+  - Tests y fixtures actualizados: `tests/test_long_term_engine.py`, `tests/test_long_term_monthly_runner.py`, `tests/test_validation_long_engine.py` (XBUE + `upsert_calendars`; DB sin XNYS; overlay y costos cubiertos en la misma suite), `tests/test_policy_yaml.py`, `tests/test_run_paper_live.py` (overlay XBUE sobre merge-US para líneas del largo).
+- **Alternativas consideradas**:
+  - **Forzar SPY exclusivamente US o exclusivamente AR en el merge global**: descartada — rompe corto largo combinado en paper-live con el mismo ticker en dos venues conceptuales.
+  - **Ticker distinto para CEDEAR vs ETF** (p. ej. `SPYD`): descartada por ahora — fricción operativa en IOL y en datos; el diseño por archivos separados evita renombrar.
+  - **Solo mensual AR**: descartada en el default repo — se mantiene cadencia semanal (**ADR-045**) para latencia de drift y guardrail diario largo.
+
+---
+
+## ADR-049 — Trazabilidad de ingesta OHLCV en `fetch_log` y atribución de fuente (IOL / Byma / yfinance)
+
+- **Fecha**: 2026-05-16
+- **Estado**: aceptada (Fase 2 auditoría IOL; complementa **ADR-021** y **ADR-047**)
+- **Contexto**: El pre-gate y el paper-live dependen de OHLCV reales, pero no había registro persistido por símbolo/rango de **qué proveedor** respondió, si hubo **fallback** IOL→Byma, ni conteos auditables. Sin eso, el notebook de diagnóstico y la revisión de calidad IOL quedaban acoplados a listas hardcodeadas y logs efímeros.
+- **Decisión**:
+  1. **Tabla existente `fetch_log`** (`data/storage.py`): una fila por intento de fetch por símbolo en el job diario, con `symbol`, `venue` (`XNYS` / `XBUE`), `status`, `source`, `skip_reason`, `extra` (JSON).
+  2. **Taxonomía única** en `data/fetch_trace.py`: `status` ∈ `ok` | `skip` | `error`; `skip_reason` estandarizado (`empty_data`, `connector_returned_none`, `fallback_used`, `max_retries_exceeded`, `credentials_missing`, `budget_exhausted`, `data_error`, `unexpected_error`); fuentes `iol`, `byma`, `yfinance`, `mixed`.
+  3. **Puerta única de persistencia**: `persist_fetch_trace()` → `MarketDB.log_fetch()`; instrumentados `data/fetcher.py` (US + AR), `data/connectors/ar_connector.py` (`fetch_ar_ohlcv_with_trace`) y `scripts/fetch_daily.py` (pasa `iol_only` desde env `FETCH_IOL_ONLY`).
+  4. **Atribución en `extra`**: `provider`, `iol_only`, `attempts`, `start_date`, `end_date`, `rows`, `rows_by_source` (conteo de barras por proveedor), `partial_fallback`, `effective_source`.
+  5. **Fallback parcial AR (MVP)**: si IOL devuelve barras pero faltan sesiones respecto del calendario **XBUE** explícito (`expected_dates` desde `fetch_and_store`), se consulta Byma y se hace **merge por fecha** (IOL gana en colisión). Solo se activa cuando el fetcher pasa calendario; sin `expected_dates` (p. ej. ranking en `universe_selector`) se mantiene el comportamiento previo (éxito IOL = retorno inmediato).
+  6. **Fuera de alcance v1 (fase 2.1 opcional)**: metadato de origen **por barra** en tabla `ohlcv` y migración asociada — no implementado; la auditoría diaria queda a nivel job en `fetch_log`.
+- **Por qué**: observabilidad reproducible en SQLite (misma DB que paper-live), sin rediseñar `ohlcv`; el notebook de pre-gate puede medir tasa de éxito/fallback y símbolos problemáticos sin depender de `WHITELIST_SYMBOLS` fijo.
+- **Consecuencias**:
+  - Cada corrida de `fetch_daily.py` appendea filas en `fetch_log` (crecimiento acotado por símbolos × corridas; no reemplaza OHLCV).
+  - Métricas de calidad IOL deben leer `fetch_log`, no inferir solo desde barras almacenadas.
+  - **Regresión de trazabilidad (paso 4, Fase 2)** — tests por comportamiento observable (sin red):
+    - `tests/test_fetch_trace.py`: atribución `mixed` / `rows_by_source` en helpers puros.
+    - `tests/test_data_ar_connector.py`: éxito IOL (`provider`/`source`/`status=ok`); `iol_only` sin credenciales → `credentials_missing` y sin yfinance; fallback Byma tras agotar IOL; merge parcial IOL+Byma; budget job (`IolJobBudgetExhausted`) → `budget_detail` en `extra` + fallback Byma, o re-raise si `iol_only`.
+    - `tests/test_data_fetcher.py` (`TestFetchLogPersistence`): cada símbolo US/AR llama `log_fetch` con `source`, `skip_reason`, `provider` e `iol_only` en `extra` (éxito IOL, fallback `mixed`, skip US `max_retries_exceeded`).
+    - `tests/test_data_storage.py`: round-trip SQLite de columnas `fetch_log` + JSON `extra` (`provider`, `iol_only`, `rows_by_source`, `effective_source`).
+    - `tests/test_fetch_daily_universe_resolution.py`: `monthly_hard_cap` y `aborted_job_budget` en `universe_report` (sin fetch de red; presupuesto IOL a nivel universo, complementa el budget por símbolo del conector).
+  - **Matiz `budget_exhausted`**: la constante `SKIP_BUDGET_EXHAUSTED` está en la taxonomía; hoy el conector ante `IolJobBudgetExhausted` registra `budget_detail` en `extra` y, si no es `iol_only`, continúa con Byma (`skip_reason=fallback_used` si hay datos). Con `iol_only=True` propaga la excepción (el fetcher puede persistir `unexpected_error`). Unificar `skip_reason=budget_exhausted` queda como mejora opcional si el notebook lo exige.
+- **Alternativas consideradas**:
+  - **Columna `source` en `ohlcv` por barra**: descartada en v1 — migración y backfill más costosos; reservada como fase 2.1.
+  - **Solo logs estructurados sin DB**: descartada — no alimenta notebook ni SQL en `market.db` de paper-live.
+  - **Merge parcial siempre por días hábiles inferidos (lun–vie)**: descartada como default — falsos huecos en feriados AR; se usa calendario XBUE del fetcher cuando aplica.
+- **Archivos**: `data/fetch_trace.py`, `data/fetcher.py`, `data/connectors/ar_connector.py`, `data/storage.py`, `scripts/fetch_daily.py`, `tests/test_fetch_trace.py`, `tests/test_data_fetcher.py`, `tests/test_data_ar_connector.py`, `tests/test_data_storage.py`, `tests/test_fetch_daily_universe_resolution.py`, `tests/test_data_integration.py` (mocks `fetch_ar_ohlcv_with_trace`).
+
+---
+
+## ADR-050 — Incidente paper-live CI (may–jun 2026): secretos GitHub, F3, feriados y conflictos LFS
+
+- **Fecha**: 2026-06-02
+- **Estado**: aceptada
+- **Contexto**: El workflow `paper_live_daily.yml` falló de forma continua desde 2026-05-26 tras el último run verde (2026-05-25). Cadena observada en logs de Actions:
+  1. `IOL_USER` / `IOL_PASS` **vacíos en GitHub** (credenciales solo en variables de entorno locales de Windows) → `iol_credentials_missing` o fetch AR degradado.
+  2. Sin barras del día → `No OHLCV bars found for YYYY-MM-DD` y abort del catch-up.
+  3. Varios días sin snapshot → **F3** (`gap > 3` días hábiles, `exit 2` en `run_paper_live.py`).
+  4. Día **2026-05-25** (feriado AR) sin barras hacía fallar el bloque aunque el resto del rango fuera recuperable.
+  5. Al hacer `git pull` en `paper-live-data`, conflicto en **puntero LFS** de `data/market.db` (`<<<<<<<` dentro del archivo puntero, no mergeable como texto).
+  6. Tras configurar secrets en GitHub: login IOL OK (`POST /token` 200) pero **serie histórica HTTP 401** (`iol_unauthorized`); el job sigue con fallback Byma/yfinance.
+- **Decisión**:
+  1. **Secretos obligatorios en CI**: `IOL_USER` y `IOL_PASS` deben existir en **Settings → Secrets and variables → Actions** del repo. Variables locales (`setx`, panel de Windows) **no** alimentan GitHub Actions. Validación: `python scripts/diagnose_iol_auth.py` en local; en CI, revisar que el step Fetch muestre `IOL_USER: ***` (no vacío).
+  2. **Política F3** (sin cambio de umbral): máximo **3** días hábiles de catch-up por corrida; si `len(gap_days) > 3` → `exit 2` e intervención manual. Recuperación: varios `workflow_dispatch` con input `date` apuntando al **último día de cada bloque** de ≤3 días (p. ej. `2026-05-19`, `2026-05-22`, `2026-05-27`, `2026-06-01`), o el equivalente local + `git push` a `paper-live-data`.
+  3. **Feriados / sin barras**: en `run_catch_up`, si un día del gap no tiene ninguna barra en whitelist, **registrar warning y continuar** con el siguiente día (no `raise RuntimeError` que aborta todo el rango). El snapshot de ese día no se crea; el siguiente run puede reintentar si llegan datos.
+  4. **Conflictos LFS en `data/market.db`**: resolver el puntero con `git checkout --ours data/market.db` (mantener DB local reconstruida) o `--theirs` (mantener remoto), luego `git add data/market.db` y commit de merge. **No** editar a mano marcadores `<<<<<<<` dentro del puntero LFS.
+  5. **Backfill de OHLCV previo al catch-up**: si la DB quedó vieja, correr `python scripts/fetch_daily.py --lookback 120 --db data/market.db` antes de `run_paper_live.py` en bloques F3-safe.
+  6. **IOL 401 en histórico**: documentado como incidente conocido; operación diaria puede seguir en verde vía fallback. Seguimiento: permisos de cuenta IOL / soporte API; no bloquear CI mientras `fetch_log` y fallback sean aceptables para paper.
+- **Por qué**: separar causas (secretos vs F3 vs feriado vs LFS) evita “arreglar” solo el síntoma; F3 protege contra catch-up masivo no auditado; saltar feriados evita un solo día no operable que tumbe una semana de recuperación.
+- **Consecuencias**:
+  - Run de verificación 2026-06-02 (`workflow_dispatch` #26826413712): **success**, mensaje `No gap — target day 2026-06-01 already processed`, commit LFS `be72f1a` en `paper-live-data`.
+  - Operadores deben **mergear `main` → `paper-live-data`** para que el cron use el fix de feriados en `run_paper_live.py`.
+  - Rotar contraseña IOL si estuvo expuesta en logs locales de diagnóstico.
+- **Alternativas consideradas**:
+  - **Subir F3 a 10 días en CI**: descartada — debilita control operativo; mejor dispatch manual en tandas.
+  - **Forzar `FETCH_IOL_ONLY` en workflow**: descartada mientras histórico devuelva 401 — tumbaría el job entero.
+  - **Resolver conflicto LFS fusionando binarios a mano**: descartada — Git LFS no mergea SQLite; elegir `--ours` o `--theirs` explícitamente.
+- **Archivos**: `.github/workflows/paper_live_daily.yml`, `scripts/run_paper_live.py`, `scripts/diagnose_iol_auth.py`, `docs/project-overview.md`, `docs/complicaciones-tecnicas.md`, `README.md`, `AGENTS.md`, `POLICY.md` §15, `CHANGELOG.md`
+- **Ver también**: **ADR-040** (modelo branches + workflow), **ADR-049** (`fetch_log` / fallback), `docs/complicaciones-tecnicas.md` (§1, §4, runbook operativo)
+
+---
+
+## ADR-051 — Valuación resiliente a huecos de datos en `mark_to_market` (carry-forward)
+
+- **Fecha**: 2026-06-02
+- **Estado**: aceptada
+- **Contexto**: `PortfolioLedger.mark_to_market` valúa **todas** las posiciones abiertas llamando, por símbolo, a `_extract_close`, que lanzaba `ValueError: missing close price for symbol {sym}` cuando faltaba la barra del día. Un único hueco de datos (ej. `TXAR` en pre-gate corto) abortaba **toda** la corrida de `run_validation_wf`, impidiendo medir la calidad de los motores. El crash venía de la valuación (MTM de cartera), no del broker: las órdenes solo se generan para símbolos presentes en `daily_bars`.
+- **Decisión**: Reemplazar `_extract_close` por `_resolve_mark_price(symbol, position, daily_bars) -> (precio, is_stale)` con prioridad: (1) close válido `>0` del día → fresco, actualiza `self._last_mark[symbol]`; (2) último mark conocido (carry-forward) → `stale`; (3) `avg_cost` de la posición → `stale` (nunca se vio precio de mercado). Nunca valúa a `0` ni crashea. El snapshot de `mark_to_market` ahora incluye `stale_marks: list[str]` y un flag `stale: bool` por posición.
+- **Por qué**: Un dato faltante **no es un dato cero**. Crashear tira abajo la medición; valuar a cero corrompe equity, drawdown y retornos (la posición “desaparece”). El carry-forward es el comportamiento estándar de sistemas de cartera (stale price). El flag `stale` mantiene el evento **observable** para la capa de calidad de datos sin esconderlo.
+- **Consecuencias**:
+  - `mark_to_market`/`update_day` ya no lanzan por barras faltantes; la validación sobrevive a huecos.
+  - Nuevo contrato de snapshot: `stale_marks` + `positions[sym]["stale"]`. Consumidores existentes (paper_broker, day_runner, pre_gate, walk-forward, validation_runner) verificados sin cambios de contrato.
+  - `stale_marks` queda disponible pero **no** cableado a `halt_on_data_quality` (decisión de política pendiente: cuándo un MTM stale debe frenar operación).
+- **Alternativas consideradas**:
+  - **Valuar a 0 si falta barra**: descartada — corrompe equity/DD/retornos; la peor opción.
+  - **Mantener el crash**: descartada — un hueco en un símbolo no debe invalidar toda la corrida de evaluación.
+  - **Cablear `stale_marks` a halt inmediato**: pospuesta — requiere política (¿1 stale frena? ¿umbral?); por ahora solo observable.
+- **Archivos**: `core_sim/ledger.py`, `tests/test_ledger.py`
+- **Ver también**: **ADR-018/019** (ledger paper-first, `mark_to_market`), **ADR-050** (incidente CI: feriados sin barras, IOL 401)
+
+---
+
+## ADR-052 — Señal sin mezcla de monedas: lectores de `ohlcv` honran el venue del market tag (`data/venue_policy.py`)
+
+- **Fecha**: 2026-06-03
+- **Estado**: aceptada
+- **Contexto**: Los lectores de `ohlcv` que reconstruyen series por símbolo (medición de señal y pre-gate corto) hacían `SELECT ... WHERE symbol = ? AND ts BETWEEN ...` **sin filtrar venue**. Para los símbolos *dual-listed* —presentes en `ohlcv` tanto en **XNYS/US** (USD) como en **XBUE** (ARS)— eso colapsaba dos monedas distintas en una misma serie con semántica *last-write-wins* por timestamp. El retorno entre un cierre USD y un cierre ARS del mismo ticker es físicamente imposible: el caso testigo fue **KO** con "+30000%" (22519 ARS / 74 USD − 1). El bug afectaba a **13 símbolos** de la whitelist activa (AAPL, GGAL, IWM, JNJ, JPM, KO, MELI, MSFT, PG, QQQ, SPY, WMT, XOM), por lo que contaminaba **dos capas a la vez**: el sim/KPIs **pre-gate** y la **capa de medición de señal** (`reporting/signal_ic.py`). El salto artificial USD↔ARS inflaba el edge aparente sin que ningún test lo detectara (los unit tests usaban un único venue por símbolo).
+- **Decisión**:
+  - Crear `data/venue_policy.py` como **fuente única de verdad** de qué venue corresponde a cada market tag:
+    - `venues_for_market("US") -> ("XNYS", "US")`: ambos en USD; `"US"` es legacy de la migración **ADR-030/037** y queda como fallback con menor precedencia que `XNYS`.
+    - `venues_for_market("AR") -> ("XBUE",)`: ARS, serie única.
+    - `pick_venue_bar(market, bars_by_venue)`: colapsa los venues de un símbolo-día a la barra correcta del market tag, o `None` si no existe (omite el día; **nunca** sustituye con otra moneda).
+  - Los **tres** lectores filtran ahora por el venue que matchea el `market` tag que ya asigna `load_merged_whitelist` (precedencia US definida en **ADR-043**), sin hardcodear venues: todos pasan por el helper.
+    - `reporting/signal_ic.py` (`bars_by_date_from_db`)
+    - `scripts/run_short_term_pre_gate.py` (`_bars_from_db`)
+    - `validation/stages/short_pre_gate.py` (`_bars_from_db`)
+  - **Regla dura**: el venue se fija **por SERIE, no día por día**. Si falta la barra del venue correcto un día, ese día se **OMITE**; nunca se rellena con la barra del otro venue (un fallback día-a-día recrearía exactamente el bug).
+  - **Decisión de arquitectura asociada**: la señal/análisis de los dual-listed se computa en **USD (XNYS)** para que el CCL / tipo de cambio no contamine el momentum; los **AR-nativos** (Merval) usan **ARS (XBUE)**, única serie. **No** se re-etiquetó nada: los tags US existentes ya son correctos para la señal.
+- **Por qué**:
+  - Un dato en otra moneda **no es el mismo dato**: mezclar USD y ARS en una serie produce retornos imposibles que corrompen la medición de edge y el backtest, no un ruido tolerable.
+  - Centralizar en `data/venue_policy.py` evita que cada lector reinvente (y desincronice) la regla venue↔moneda; es el mismo argumento de fuente única de los conectores en **ADR-037**.
+  - Computar la señal en USD aísla el momentum del ruido cambiario: el CCL puede moverse fuerte sin que el instrumento subyacente lo haga, y no queremos que ese movimiento se cuele como "señal".
+- **Consecuencias**:
+  - Contaminación por moneda **eliminada** en ambas capas (sim/KPIs y medición de señal).
+  - Al limpiar, el **IC de señal a h=1 cayó de 0.146 (sucio) a 0.087 (limpio)**: ~40 % del edge aparente era el salto artificial USD↔ARS, no momentum real.
+  - La limpieza reveló que la **cross-section es muy fina** (mediana ~1 símbolo/día; solo 89/278 días con ≥5 nombres): la medición de señal queda **inconclusa por falta de breadth**, problema separado a resolver ampliando universo (no es un defecto de este fix).
+  - La **ejecución en pesos sobre el CEDEAR** queda como **paso POSTERIOR, no implementado**: requerirá mapeo US→cedear + ratio de conversión + precio ARS + valuación en pesos. Este ADR cubre solo la señal/medición.
+  - Tests nuevos: `tests/test_venue_policy.py`, `tests/test_signal_ic_venue_filter.py`, `tests/test_validation_short_pre_gate_venue.py`.
+  - Capa de medición offline ampliada (sin ADR separado): `reporting/signal_ic.py` (IC, hit rate@K, quantile spread), `reporting/scenario.py` + `scripts/run_scenario.py` (what-if paramétrico), `reporting/data_quality_envelope.py`, `scripts/run_signal_ic_now.py`.
+  - Suite completa del repo: **601** tests recolectados (`pytest --collect-only`, jun 2026).
+- **Alternativas consideradas**:
+  - **ARS-first: re-etiquetar todo a XBUE y operar en pesos**: descartada — genera ripple innecesario en allocator y calendario (geo 20/80, sesiones), cuando para la **señal** los tags US ya son correctos; la ejecución en pesos es un paso futuro acotado, no un re-tag global.
+  - **Fallback venue día-a-día (usar el otro venue si falta la barra del correcto)**: descartada — recrea exactamente el bug de mezcla de monedas que estamos eliminando.
+  - **Purgar ahora el venue legacy `"US"` de la DB**: descartada — es higiene de datos aparte; `venues_for_market` ya lo tolera como fallback de menor precedencia sin mezclar moneda.
+- **Archivos**: `data/venue_policy.py` (nuevo), `reporting/signal_ic.py`, `scripts/run_short_term_pre_gate.py`, `validation/stages/short_pre_gate.py`, `tests/test_venue_policy.py` (nuevo), `tests/test_signal_ic_venue_filter.py` (nuevo), `tests/test_validation_short_pre_gate_venue.py` (nuevo), `docs/complicaciones-tecnicas.md` (§6–7)
+- **Ver también**: **ADR-030/037** (US→XNYS, código MIC), **ADR-043** (precedencia del market tag US en `load_merged_whitelist`), **ADR-051** (carry-forward en ledger: hueco ≠ cero, misma filosofía de no inventar datos), **ADR-053** (breadth insuficiente revelado tras este fix)
+
+---
+
+## ADR-053 — Ampliación del universo (+10 símbolos diversificados por industria) para destrabar la medición de señal
+
+- **Fecha**: 2026-06-03
+- **Estado**: aceptada
+- **Contexto**: La medición de señal limpia (**ADR-052**) reveló **breadth insuficiente** para evaluar un ranking cross-seccional: la cross-section mediana es de **~1 símbolo/día** y solo **89 de 278 días** alcanzan ≥5 nombres, lo que dejó el veredicto de la señal **inconcluso** (no es un defecto del fix de venue, es falta de amplitud). Además, las whitelists estaban **concentradas por sector**: el Merval pesaba en bancos (GGAL/BMA/SUPV) y energía (YPFD/PAMP/CEPU/TGSU2), y los CEDEARs pesaban en tech, con salud flaca (solo PFE) e industriales (solo BA). Con tan pocos nombres por día y sectores correlacionados, no hay cross-section sobre la cual rankear.
+- **Decisión**: Ampliar el universo en **+10 símbolos**, diversificando deliberadamente por industria para ensanchar la cross-section:
+  - **Merval (+5, market `AR`, venue XBUE/ARS)**: `CRES` (agro), `TECO2` (telecom), `LOMA` (construcción/cemento), `MIRG` (electrónica/industrial), `IRSA` (real estate).
+  - **CEDEARs (+5, tag `US` para que la señal se compute en USD vía XNYS, registrados también en `whitelist_cedear` para ejecución futura en pesos)**: `V` (pagos), `UNH` (salud), `CAT` (industrial), `PEP` (consumo masivo), `NFLX` (streaming).
+- **Por qué**:
+  - No se puede rankear una lista de un elemento: la **amplitud del universo es prerequisito** de cualquier medición cross-seccional de señal. Ampliar es la palanca de menor riesgo para conseguir breadth.
+  - Diversificar por industria (no agregar más bancos/energía) **descorrelaciona** la cross-section, que es justo lo que un ranking necesita para discriminar.
+  - Etiquetar los CEDEARs como `US` mantiene coherencia con la decisión **#401 / ADR-052**: la señal de los dual-listed se computa en **USD (XNYS)** para que el CCL no contamine el momentum; el registro paralelo en `whitelist_cedear` deja lista la pata de ejecución en pesos sin forzarla ahora.
+- **Consecuencias**:
+  - Datos cargados para los 10 nuevos símbolos en el rango **2025-03-20 → 2026-06-02** (~297 filas AR, ~302 US), con **warmup antes del día 1** de la ventana de medición para que los indicadores arranquen calientes.
+  - Coherente con **ADR-052** (señal dual-listed en USD); **no** se re-etiquetó nada existente.
+  - **Pendiente (U2)**: re-correr la medición de señal sobre la cross-section completa con `scripts/run_signal_ic_now.py` y/o `scripts/run_scenario.py` para ver si la breadth mejora y el veredicto deja de estar inconcluso. Narrativa de la cadena de complicaciones #6→#8 en `docs/complicaciones-tecnicas.md`.
+- **Alternativas consideradas**:
+  - **Relajar los filtros del motor (p. ej. `p_min`, liquidez) en vez de ampliar el universo**: descartada como **primer paso** — tocar los filtros afecta el riesgo real de trading; es mejor medir primero sobre la cross-section completa U2 con un universo más ancho, y solo después considerar ajustes de motor con evidencia.
+  - **Cargar ya la pata ARS de los CEDEARs**: descartada — la señal va en USD y la ejecución en pesos (mapeo US→cedear + ratio + precio ARS + valuación) es un **paso futuro acotado**, no un prerequisito de la medición.
+- **Archivos**: `config/symbols/whitelist_ar.yaml`, `config/symbols/whitelist_us.yaml`, `config/symbols/whitelist_cedear.yaml`, `data/market.db`, `docs/complicaciones-tecnicas.md` (§8), `README.md`, `docs/project-overview.md`
+- **Ver también**: **ADR-052** (señal sin mezcla de monedas; breadth insuficiente como problema separado), **ADR-043** (precedencia del market tag US en `load_merged_whitelist`), señal dual-listed en USD (decisión asociada en ADR-052)
+
+---
+
+## ADR-054 — Calendario paper-live obligatorio, YAML completo y separación del stub de tests
+
+- **Fecha**: 2026-06-10
+- **Estado**: aceptada
+- **Contexto**: Auditoría técnica (jun 2026) identificó **C2**: `config/calendars/trading_days.v1.yaml` contenía solo **4 días** (fixture de unit tests en ruta de producción). Además, `run_paper_live.py` hacía `if cal_path.exists()` → si faltaba el archivo, `calendar_store=None` y `event_engine` asumía `is_us_session=True` siempre — guardrails de sesión/no-trade operaban en modo permisivo sin avisar. Simulaciones de defensa oral renombraron el YAML a `.defensa-bak` para evitar el stub, exponiendo ambos modos de fallo.
+- **Decisión**:
+  1. **YAML de producción completo**: `scripts/build_trading_days_yaml.py` genera `config/calendars/trading_days.v1.yaml` desde `pandas_market_calendars` (NYSE → XNYS, XBUE → BYMA), rango configurable (default 2024-01-01..2027-12-31).
+  2. **Stub aislado**: fixture mínimo en `tests/fixtures/calendars/trading_days_stub.v1.yaml` para tests que fijan fechas (p. ej. 2026-04-15).
+  3. **Fail-fast en paper-live**: `load_required_calendar_store()` lee `policy.calendar.source_of_truth`; ausencia o calendario vacío → `exit 1`. Flag explícito `--no-calendar` solo para tests/diagnóstico (con warning).
+  4. **Golden replay (T0.2)**: `tests/fixtures/replay_golden/` + `tests/test_replay_golden.py` caracterizan `replay_ledger_from_fills` antes de cambios en persistencia de capital.
+- **Por qué**: Un calendario incorrecto o ausente corrompe riesgo operativo en silencio; es preferible abortar que operar con flags de sesión inventados. Separar stub de `config/` evita repetir el incidente.
+- **Consecuencias**:
+  - CI paper-live y corridas manuales requieren el YAML commiteado; regenerar al extender horizonte.
+  - Stages de validación offline (`long_engine`) siguen pudiendo omitir YAML si no existe — paper-live no.
+  - Tests de integración usan calendario real o `--no-calendar` / stub explícito.
+- **Alternativas consideradas**:
+  - **Cargar calendario solo desde SQLite (`calendars` table)**: descartada como única fuente — el YAML versionado es el contrato ADR-007 alineado a policy.
+  - **Mantener degradación silenciosa con default permisivo**: descartada — origen del hallazgo C2.
+- **Archivos**: `scripts/build_trading_days_yaml.py`, `config/calendars/trading_days.v1.yaml`, `tests/fixtures/calendars/trading_days_stub.v1.yaml`, `scripts/run_paper_live.py`, `tests/test_run_paper_live.py`, `tests/test_replay_golden.py`, `config/README.md`, `README.md`, `AGENTS.md`, `docs/project-overview.md`, `docs/complicaciones-tecnicas.md`
+- **Ver también**: **ADR-007** (fuente única calendario), **ADR-050** (feriados sin barras), **ADR-055** (auditoría T1.1–T1.4 persistencia + F3)
+
+---
+
+## ADR-055 — Auditoría paper-live T1.1–T1.4: persistencia de capital y gap F3 con calendario real
+
+- **Fecha**: 2026-06-10
+- **Estado**: aceptada
+- **Contexto**: Auditoría técnica (jun 2026) sobre persistencia y catch-up de `run_paper_live.py` identificó tres hallazgos operativos además de **C2** (calendario stub, resuelto en **ADR-054**):
+  - **C1 / T1.1**: replay podía reescribir capital silenciosamente — sin `portfolio_meta` bloqueando `starting_cash`/`currency`.
+  - **C3 / T1.3**: `paper_snapshots.short_cash` se persistía como `cash × weights.short` en lugar de `ledger.short_cash`, incoherente con kill switch y bucket equity (**ADR-039**).
+  - **H3 / T1.4**: el gate **F3** contaba lun–vie genérico; feriados US (p. ej. Memorial Day) generaban falsos `exit 2` y días AR-only (US cerrado, AR abierto) no contaban para catch-up.
+- **Decisión**:
+  1. **T1.1 `portfolio_meta`**: tabla SQLite + `ensure_portfolio_meta()` — primera corrida persiste CLI; siguientes validan; mismatch → `exit 1`. Default **3_000_000 ARS**.
+  2. **T1.3 `short_cash`**: `persist_snapshot(..., short_cash=float(ledger.short_cash))` — attr directo del ledger, no proxy por peso.
+  3. **T1.4 gap F3**: `compute_trading_days_gap()` con `TradingCalendarStore` cuenta días donde `is_us_session(d) OR is_ar_business_day(d)`. Calendario cargado **antes** del check F3. Fallback lun–vie solo con `--no-calendar`.
+  4. **What-if cartera**: `scripts/run_whatif_sim.py` — sim 30/70 sobre copia aislada de DB; bypass F3 intencional para backtests multi-mes; no escribe en `paper_live` productivo.
+- **Por qué**: Coherencia entre ledger, snapshots históricos y política operativa; F3 debe reflejar días en que **cualquier** sleeve puede operar (US/CEDEAR vía XNYS, panel AR vía XBUE).
+- **Consecuencias**:
+  - `POLICY.md` §15.1 y docs de runbook actualizados (ya no “solo lun–vie”).
+  - Simulaciones históricas deben respetar cobertura XBUE (al jun 2026 termina 2026-06-02) y corporate actions CEDEAR pendientes.
+- **Alternativas consideradas**:
+  - **Solo sesiones US para F3**: descartada — omite días AR-only con operación local.
+  - **Solo lun–vie**: descartada — origen del hallazgo H3.
+- **Archivos**: `data/storage.py`, `scripts/run_paper_live.py`, `scripts/run_whatif_sim.py`, `tests/test_run_paper_live.py`, `tests/test_data_storage.py`, `POLICY.md`, `README.md`, `AGENTS.md`, `docs/project-overview.md`, `CHANGELOG.md`
+- **Ver también**: **ADR-039** (persistencia fills/snapshots), **ADR-050** (runbook F3), **ADR-054** (calendario obligatorio)
+
+---
+
+## ADR-056 — Robustez del connector IOL: alias de campos + fallback Byma ante respuesta vacía
+
+- **Fecha**: 2026-06-11
+- **Estado**: aceptada
+- **Contexto**: El workflow paper-live (run #27, 2026-06-11) traía data AR **solo por Byma**: IOL no aportaba una sola fila. Dos bugs encadenados en `data/connectors/ar_connector.py`:
+  - **B1 — mapeo de campos**: `_normalize_iol` exigía las keys `fecha` y `volumen`, pero el endpoint `seriehistorica` real de IOL devuelve `fechaHora` y `volumenNominal`. Cada barra lanzaba `DataError "Missing keys"` → IOL devolvía `[]` para **todos** los símbolos AR.
+  - **B2 — fallback solo ante error de red**: `fetch_ar_ohlcv_with_trace` caía a Byma únicamente cuando IOL fallaba por red (`result is None`). Si IOL respondía `200` con **lista vacía** (o `data_error` → `result == []`), retornaba `[]` **sin** consultar Byma. IOL no sirve varios CEDEARs (y algunos Merval como BMA/LOMA) en ese endpoint y devuelve `[]`; el connector aceptaba ese vacío y nunca probaba Byma, que **sí** tiene la serie.
+- **Decisión**:
+  1. **Alias por campo** en `_normalize_iol` (`_IOL_*_KEYS`, primer nombre presente gana): `fechaHora|fecha`, `volumenNominal|volumen`, `ultimoPrecio|cierre`, `apertura`/`maximo`/`minimo`. El volumen usa **solo** `volumenNominal|volumen` (cantidad de nominales), **nunca** `montoOperado` ($), para no corromper el notional `close × volume` del ranking de universo (**ADR-047**). El `DataError` ahora **lista las keys recibidas** → desajuste futuro autodiagnosticable.
+  2. **Fallback ante vacío**: IOL `[]` (sin datos o `data_error`) ya no retorna temprano; cae al fallback Byma (salvo `iol_only`, que respeta su contrato). La atribución de fuente en `fetch_log` mantiene el fallback **visible** (**ADR-049**), evitando el enmascaramiento de la complicación #4.
+- **Por qué**: IOL es **selectivo** sobre qué símbolos sirve en `seriehistorica`; el corte no es "CEDEAR vs Merval" (BMA y LOMA también caen vacíos). Un fallback robusto por símbolo es la solución correcta, no una lista de excepciones. Aceptar el vacío de la fuente primaria como respuesta final ocultaba datos que la secundaria tenía.
+- **Consecuencias**:
+  - Tras el fix (verificado en run_dispatch 2026-06-11): **40/41** símbolos AR con `source=iol`; AR-nativos (GGAL, YPFD, PAMP, ALUA, TXAR…) frescos hasta 2026-06-10 (`rows_by_source={byma:0, iol:3}`). El "corte XBUE 2026-06-02" era consecuencia de B1, no una limitación real.
+  - Los CEDEARs (IOL vacío) ahora se rellenan por Byma; histórico ARS de CEDEAR disponible vía fallback.
+  - Costo: una llamada Byma extra cuando IOL viene vacío. Aceptable frente a la pérdida de datos.
+- **Alternativas consideradas**:
+  - **Renombrar la key fija `fecha`→`fechaHora`**: descartada — frágil; si IOL cambia de nuevo, vuelve a romper. Los alias toleran ambos contratos.
+  - **Whitelist de símbolos "IOL-no-sirve"**: descartada — IOL es selectivo y cambiante; mantener la lista a mano es deuda. El fallback por vacío lo cubre genéricamente.
+  - **`montoOperado` como volumen**: descartada — corrompe el notional (es $, no nominales).
+- **Archivos**: `data/connectors/ar_connector.py`, `tests/test_data_ar_connector.py`
+- **Ver también**: **ADR-049** (fetch_log / atribución de fuente), **ADR-057** (lección de testing), complicaciones #3 y #12
+
+---
+
+## ADR-057 — Convención de testing: el test afirma el comportamiento deseado, no la suposición del código
+
+- **Fecha**: 2026-06-11
+- **Estado**: aceptada
+- **Contexto**: Tres bugs de producción **pasaron CI en verde** porque el test fue escrito desde la **misma suposición equivocada** que el código:
+  - **Mezcla de monedas (#6/ADR-052)**: los unit tests usaban un único venue por símbolo, así que la mezcla USD/ARS nunca aparecía en pruebas; el IC inflado (0.146) se veía sano.
+  - **Mapeo de keys IOL (#3/ADR-056)**: el fixture `_IOL_PAYLOAD` usaba `fecha`/`volumen` — las keys que el código asumía, no las que devuelve la API (`fechaHora`/`volumenNominal`). Test verde, producción sin una fila de IOL.
+  - **Fallback ante vacío (#12/ADR-056)**: dos tests **afirmaban `result == []`** ante IOL `data_error` — es decir, afirmaban el bug como si fuera el contrato deseado.
+- **Decisión**: Convención obligatoria para tests nuevos y al tocar tests existentes:
+  1. El test afirma el **comportamiento de negocio deseado** (qué debería pasar), no replica lo que el código hace hoy.
+  2. Los **fixtures reflejan la realidad de la fuente externa** (contrato real de la API/feed), no la conveniencia del parser. Si no se conoce el contrato real, el test debe documentarlo como supuesto explícito y el error de runtime debe ser autodiagnosticable (volcar lo recibido).
+  3. Ante un caso límite (vacío, error, dato faltante), el test afirma la **acción de recuperación esperada** (p. ej. "cae al fallback"), no el síntoma del bug (p. ej. "retorna vacío").
+- **Por qué**: un test verde **no garantiza nada** si valida la suposición y no la realidad; da una falsa sensación de seguridad y deja pasar exactamente la clase de bug más cara (datos silenciosamente equivocados). Es deuda peor que la falta de test, porque **parece** cubierto.
+- **Consecuencias**:
+  - Al arreglar #3 y #12 se **reescribieron** los tests que codificaban el bug (de "afirma `[]`" a "afirma fallback Byma"); fixture `_IOL_PAYLOAD` corregido al contrato real.
+  - Refuerza el criterio *smart-testing* (testear comportamiento, no implementación) ya usado en el repo.
+- **Alternativas consideradas**:
+  - **Solo subir cobertura**: descartada — cobertura sobre suposiciones equivocadas es ruido; el problema es la *intención* del assert, no la cantidad.
+- **Archivos**: convención transversal; ejemplos en `tests/test_data_ar_connector.py`, `tests/test_signal_ic_venue_filter.py`
+- **Ver también**: **ADR-052** (#6), **ADR-056** (#3, #12), `docs/complicaciones-tecnicas.md`
+
+---
+
+## ADR-058 — Simulador walk-forward de investigación: aportes mensuales + TWR (separado del gate)
+
+- **Fecha**: 2026-06-13
+- **Estado**: aceptada
+- **Contexto**: Para entender la estrategia hacía falta (a) un modelo de capital más realista que "monto inicial y nunca más" — el usuario aporta plata todos los meses (DCA) — y (b) poder explorar ventanas walk-forward libres (p. ej. 120+60) sin tocar el gate congelado. Dos riesgos: los **aportes rompen las métricas** si se miden ingenuamente (un depósito se lee como ganancia gigante — misma familia de artefacto que #3/#6/#11), y aflojar el gate por conveniencia sería **p-hacking** (lo que el gate congelado previene, POLICY.md §13).
+- **Decisión**: Separar **dos modos** explícitamente:
+  1. **Modo investigación** (este ADR): `scripts/run_wf_research_sim.py` + `reporting/twr_walk_forward.py`. Corre el pipeline 30/70 día a día sobre una **copia aislada** (por defecto la backfilleada), con **aportes mensuales** (primer día hábil de cada mes el `starting_cash` crece y los motores despliegan la plata nueva). Métricas con **TWR** (time-weighted): cada aporte se **excluye de la base** antes de medir (`r_t = V_t/(V_{t-1}+C_t)-1`). Drawdown sobre el **índice TWR** (no sobre el equity, que los aportes esconden). MWR/TIR como secundario (experiencia real en pesos). Ventanas walk-forward **configurables** (default 120/60/30).
+  2. **Modo compromiso** (gate, **ADR-041**): sigue **congelado** (252+60, pre-registrado). El simulador imprime y marca `mode: research` en todos sus outputs para que nadie confunda una corrida exploratoria con el gate.
+- **Por qué**: el TWR es el estándar para medir habilidad de la estrategia con flujos de caja externos; sin él, los aportes inflan Sharpe y esconden drawdown. La separación research/gate permite explorar libremente **sin** erosionar la integridad anti-overfitting del gate. Si alguna vez se quiere un gate 120+60, el camino legítimo es `gate.v2` pre-registrado + ADR — no bajar el congelado tras ver resultados.
+- **Consecuencias**:
+  - Módulo `reporting/twr_walk_forward.py` puro y testeado (la corrección del TWR ante aportes se prueba sin correr el bot: un día de puro aporte con mercado plano da retorno 0, no un spike).
+  - Reusa la valuación resiliente por venue nativo (`_resilient_snapshot`, fix de feriados AR) — el simulador no colapsa en feriados.
+  - Vive en rama `research/wf-sim` (worktree); no se mezcla con el pipeline productivo.
+- **Alternativas consideradas**:
+  - **Bajar el gate a 120+60**: descartada — p-hacking; el gate se cambia con pre-registro, no por conveniencia.
+  - **Medir con retorno crudo del equity**: descartada — los aportes lo envenenan (artefacto demostrado en tests).
+  - **`montoOperado`/equity con aportes para drawdown**: descartada — esconde las pérdidas reales.
+- **Archivos**: `reporting/twr_walk_forward.py`, `scripts/run_wf_research_sim.py`, `tests/test_twr_walk_forward.py`
+- **Ver también**: **ADR-041** (gate OOS congelado), **ADR-051** (valuación resiliente), **ADR-057** (lección de testing)
+
+---
+
+## ADR-059 — Hallazgo: la estrategia es una apuesta concentrada a un solo factor (equity AR)
+
+- **Fecha**: 2026-06-13
+- **Estado**: aceptada (hallazgo + decisiones derivadas)
+- **Contexto**: El simulador walk-forward de investigación (**ADR-058**) corrido sobre 360 días backfilleados (2025-01 → 2026-06, aportes 500k/mes, 120+60 paso 30) dio TWR acumulado **+24,75%** pero **NO pasa el agregado**: 3 de 7 ventanas OOS pasan, 4 fallan. El análisis del régimen mostró la causa raíz, no un detalle de implementación.
+- **Hallazgo**:
+  - El destino de la estrategia está **pegado a GGAL y PAMP** (las dos acciones AR del sleeve largo). Ventanas que fallan = selloffs de equity argentino (GGAL **-20,5%** ago-2025, **-19,0%** feb-2026); ventana que más rinde (+56% TWR, Sharpe 3,87) = rally de octubre-2025 (GGAL **+111%** en el mes).
+  - **Concentración**: el largo es 70% del capital; core GGAL 42% + PAMP 43% = **85% del largo ≈ 60% del total** en dos nombres.
+  - **Factor único**: GGAL (banco) y PAMP (energía) parecen diversificadas pero **caen juntas** en los selloffs (mismo factor: riesgo-país AR). La correlación destruye la diversificación aparente.
+  - **Diversificadores insuficientes**: SPY (satélite, 15% del largo) fue el único que aguantó en meses malos (ago +2,6%, abr +10,4% mientras GGAL caía), pero su peso es muy chico para compensar. El sleeve corto US (30%) termina casi flat — no aporta retorno descorrelacionado.
+  - Conclusión: **no es un sistema diversificado, es una apuesta direccional apalancada-en-criterio a equity argentino, con adornos.** El walk-forward lo expuso: -25% de drawdown en regímenes bajistas locales.
+- **Decisiones derivadas**:
+  1. **Mantener en paper**: el resultado **refuerza** el valor del gate congelado (**ADR-041**). Aflojarlo para "pasar" habría sido autoengaño; el gate dijo la verdad incómoda.
+  2. **Antes de cualquier capital real**, trabajar tres frentes (ver backlog): bajar concentración del largo, diversificar el factor (más peso a riesgo global vía CEDEARs), y que el corto genere cobertura real o se reduzca su asignación.
+- **Por qué (registrarlo)**: es el hallazgo de riesgo más importante del proyecto. Para defensa oral, demuestra criterio: entender *de qué depende* el retorno (y el drawdown) vale más que el número.
+- **Alternativas consideradas**:
+  - **Reportar solo el +24,75%**: descartada — esconde el perfil de riesgo; deshonesto.
+  - **Aflojar el gate para que pase**: descartada — p-hacking (**ADR-057**, **ADR-041**).
+- **Archivos**: análisis sobre `data/market_backfill.db` + `data/_sim/wf_research_report.json`; narrativa en `docs/project-overview.md` y `docs/complicaciones-tecnicas.md` (#13).
+- **Ver también**: **ADR-058** (simulador), **ADR-041** (gate), **ADR-053** (ampliación de universo — primer paso de diversificación)
+
+---
+
+## ADR-060 — Sleeve largo diversificado 50% AR + 50% global (variante en evaluación)
+
+- **Fecha**: 2026-06-13
+- **Estado**: propuesta — **evaluación positiva** (drawdown -25,7%→-11,5%, retorno +24,75%→+39,46%); NO promovida al default todavía (sigue 5/7, falta cubrir el régimen global con el corto).
+- **Contexto**: **ADR-059** mostró que el sleeve largo concentraba ~60% del capital en GGAL+PAMP, mismo factor (riesgo-país AR), con drawdowns de -25% en selloffs locales. Decisión de rediseño para romper la concentración mono-factor.
+- **Decisión** (variante de investigación, `config/policy.research_diversified.v1.yaml`):
+  1. **50% AR + 50% global**, mínimo **3 títulos por lado**, sectores distintos:
+     - AR (riesgo-país): **GGAL** (banco) 0,167, **PAMP** (energía) 0,167, **TXAR** (acero/materiales) 0,166.
+     - Global (riesgo mundial vía CEDEAR en ARS): **SPY** (broad) 0,167, **QQQ** (tech) 0,167, **KO** (consumo defensivo) 0,166.
+  2. Las 6 líneas van en `core_lines` (satélites vacío). Se amplió el tope del motor de **3 a 8 core lines** (`validate_long_term_engine_config`, mínimo se mantiene en 2 para no romper el default).
+  3. **Medir, no asumir** la diversificación: `scripts/measure_correlation.py` calcula la matriz de correlación de retornos (XBUE/ARS).
+- **Evidencia de correlación** (2025-01 → 2026-06, 347 días):
+  - GGAL–PAMP **0,77** (confirmado: mismo factor).
+  - **AR ↔ global: 0,02** (prácticamente nulo → el bloque global SÍ diversifica el factor).
+  - KO–GGAL **-0,31** (KO se mueve a contramano de GGAL: cobertura real).
+  - Observación: SPY–QQQ **0,96** (casi idénticos; QQQ aporta poco sobre SPY — candidato a revisar).
+- **Por qué (metodología)**: la variante se evalúa con el walk-forward de investigación (**ADR-058**) **antes** de promoverla al default. Cambiar el default rompería ~8 tests que asumen la cartera de 3 nombres; promover sólo si el drawdown de las ventanas malas baja de forma material. El gate congelado (**ADR-041**) no se toca.
+- **Resultado del walk-forward** (concentrada vs diversificada, mismo período/aportes):
+  | Métrica | Concentrada (baseline) | Diversificada |
+  |---------|------------------------|---------------|
+  | TWR acumulado | +24,75% | **+39,46%** |
+  | Ventanas OOS que pasan | 3/7 | **5/7** |
+  | Peor drawdown OOS | -25,7% | **-11,5%** |
+  | Ventanas 0/1 (selloff AR mid-2025) | -25,7% DD | **+8,2% / +3,1%** (positivas) |
+  - **Veredicto**: la diversificación **cumplió** — cortó el peor drawdown a la mitad (-25,7% → -11,5%) y subió el retorno. Las ventanas que antes morían en el selloff argentino ahora aguantan (el bloque global descorrelacionado, corr 0,02, cubrió).
+  - **Matiz honesto**: sigue sin pasar el agregado (5/7). Las ventanas **4 y 5** (dic-2025 → abr-2026) todavía fallan (-10,7% / -2,1% TWR, DD ~-11,5%): fue un período donde cayeron **AR y global a la vez** (riesgo global, no solo país), que la diversificación AR/global no cubre. Para esos regímenes haría falta el tercer frente: que el **sleeve corto cubra de verdad** (hoy no aporta retorno descorrelacionado).
+  - **Bug encontrado y corregido en el camino**: QQQ no estaba en `whitelist_cedear.yaml` → el motor largo abortaba el ciclo (`symbol_not_whitelisted`) y no invertía. Agregado a la whitelist.
+- **Consecuencias**:
+  - Producción (`policy.v1.yaml`) **intacta** mientras se evalúa. Promoción futura = ADR de seguimiento + actualizar tests dependientes + (opcional) subir el mínimo de core lines a 3.
+  - Requiere QQQ en XBUE (backfilleado en la DB de investigación).
+- **Alternativas consideradas**:
+  - **Cambiar el default directo**: descartada — romper tests + promover sin medir es el anti-patrón que venimos evitando.
+  - **Diversificar por sector dentro de AR solamente**: descartada — sectores AR comparten factor país (corr alta); hace falta el eje AR/global.
+- **Archivos**: `config/policy.research_diversified.v1.yaml`, `core_sim/long_term_engine.py` (tope core 3→8), `scripts/run_wf_research_sim.py` (`--policy`), `scripts/measure_correlation.py`
+- **Ver también**: **ADR-059** (hallazgo), **ADR-058** (simulador), **ADR-041** (gate)
+
+---
+
+## ADR-061 — Connector IOL trae títulos públicos (bonos) vía `sinAjustar`; bonos AR descartados como hedge
+
+- **Fecha**: 2026-06-15
+- **Estado**: aceptada (fix de connector); hallazgo de research que descarta los bonos como cobertura.
+- **Contexto**: ejecutando las Fases 0–1 del plan de cobertura anti-factor (`docs/plan_hedge_short.md`, tercer frente de **ADR-059/060**), se asumía que los bonos AL30/GD30 "no estaban en el pipeline / requerían un connector distinto". Cuestionada esa suposición, se verificó contra la API real de IOL en vez de darla por buena.
+- **Hallazgo de disponibilidad (causa raíz)**: los bonos **sí** existen en bCBA vía IOL. El connector hardcodeaba el segmento `/ajustada` de la URL de `seriehistorica`; las acciones/CEDEARs responden en `ajustada`, pero los **títulos públicos sólo entregan serie en `sinAjustar`** (en `ajustada` devuelven `200 []`). No era un connector distinto: era un segmento de URL.
+- **Decisión (fix de connector)** — `data/connectors/ar_connector.py`:
+  1. URL parametrizada por modo de ajuste (`_IOL_ADJUST_PRIMARY="ajustada"`, `_IOL_ADJUST_FALLBACK="sinAjustar"`); helper `_iol_history_get` para una GET por modo.
+  2. `_iol_fetch_once` prueba `ajustada` y, **sólo si viene vacío**, reintenta en `sinAjustar`. El camino de acciones/CEDEARs (payload no vacío) queda idéntico → cero regresión.
+  3. **Dedup por fecha** en `_normalize_iol`: los bonos devuelven varias filas por día (plazos CI/48hs); se conserva la de **mayor volumen** por fecha. Para acciones/CEDEARs (una fila por día) es no-op. Verificado: AL30 1917 filas crudas → 352 limpias, 0 duplicados.
+- **Hallazgo de research (los bonos NO sirven como hedge)**: medida la correlación **condicional a crisis** (ventanas selloff ago-sep 2025 y feb 2026) de cada candidato vs el factor GGAL/PAMP:
+  | Candidato | corr TOTAL | corr CRISIS | Veredicto |
+  |-----------|:---:|:---:|:---:|
+  | KO (defensivo) | -0,24 | **-0,41** | ✅ sirve |
+  | GLD (oro) | -0,18 | **-0,28** | ✅ sirve |
+  | AL30 (bono) | +0,31 | **+0,46** | ❌ no cubre |
+  | GD30 (bono) | +0,26 | **+0,44** | ❌ no cubre |
+  - Los bonos soberanos AR tienen correlación **positiva** con el equity AR y **sube en la crisis** (AL30–GGAL 0,31→0,53): comparten el mismo factor riesgo-país. Poder traerlos (ingeniería) no los hace útiles como cobertura (finanzas).
+- **Por qué (metodología)**: confirma la mejora #2 del plan — medir la correlación **en crisis**, no en promedio, y verificar supuestos contra la realidad antes de diseñar la canasta. Igual disciplina que **ADR-052/056/057** (verificar contra la API real, no contra la suposición del código).
+- **Consecuencias**:
+  - El connector ahora cubre acciones, CEDEARs y bonos sin lista hardcodeada; los bonos quedan disponibles en el pipeline para usos futuros (p. ej. valuación de tenencias), aunque **descartados como hedge**.
+  - **Canasta de cobertura viable (Fase 0/1): GLD + KO.** Insumo para la Fase 2.
+  - Nota de calidad: AL30 disparó ~9 warnings `ohlc_inconsistency` (close apenas fuera del high/low del plazo elegido); filas almacenadas como limpias. A revisar si los bonos se usaran para valuar, no sólo para correlación.
+  - `measure_correlation.py` extendido con modo `--hedge` (ventanas de crisis); no altera el modo matriz existente (**ADR-060**).
+- **Alternativas consideradas**:
+  - **Lista hardcodeada de bonos → `sinAjustar`**: descartada — frágil; el fallback por respuesta vacía es genérico y autodescubre el modo correcto.
+  - **Mantener los bonos en la canasta de hedge**: descartada por la evidencia — correlación positiva que empeora en crisis.
+- **Archivos**: `data/connectors/ar_connector.py`, `tests/test_data_ar_connector.py` (test del fallback bono), `scripts/measure_correlation.py`, `docs/plan_hedge_short.md`
+- **Ver también**: **ADR-056** (robustez connector IOL), **ADR-052** (venue/moneda), **ADR-059/060** (factor y diversificación), `docs/plan_hedge_short.md`
+
+---
+
+## ADR-062 — Sleeve corto como cobertura (GLD+WMT): pasa el Calmar pre-registrado, pero el win es direccional al oro → NO se promueve
+
+- **Fecha**: 2026-06-15
+- **Estado**: propuesta — **criterio pre-registrado CUMPLIDO**, pero **NO promovida**: el resultado está confundido por un rally del oro in-sample y la protección real es modesta. Mantener en investigación; falta robustez out-of-sample. El gate congelado (**ADR-041**) no se toca.
+- **Contexto**: tercer frente de **ADR-059/060**. El sleeve corto (30%) hacía momentum-long en otro mercado y terminaba flat: no cubría. El plan (`docs/plan_hedge_short.md`) lo rediseñó como cobertura anti-factor explícita y pre-registró el criterio de éxito **antes** de medir (`docs/hedge_short_criterio_preregistrado.md`, Fase 3) para evitar p-hacking.
+- **Qué se construyó** (Fases 0–4):
+  - Disponibilidad + correlación **en crisis** (no promedio): canasta **GLD** (oro, corr en crisis -0,28) + **WMT** (defensivo, -0,38). KO medía mejor (-0,41) pero ya está en el largo diversificado y el ledger prohíbe el mismo símbolo en dos buckets (`ledger.py:234`) → se usó el mejor defensivo sin solape (WMT > MCD > PEP > PFE). Bonos AL30/GD30 descartados: correlación positiva que **empeora** en crisis (**ADR-061**).
+  - Motor `core_sim/short_hedge_engine.py` (modo `hedge_static`: rebalanceo por bandas hacia la canasta) + **regla de des-riesgo a cash** (vende la canasta cuando el factor AR **y** el global están ambos en drawdown bajo -10%). Cableado en `run_wf_research_sim.py` (el hedge reemplaza al momentum; budget = equity_total × weights.short).
+- **Métrica primaria pre-registrada**: Calmar = annualized_twr ÷ |max_drawdown| del walk-forward agregado (2025-01-01 → 2026-06-12, 500k/mes, ventanas 120/60/30).
+
+  | Cartera | TWR acum | MaxDD agreg | **Calmar** | Ventanas OOS |
+  |---------|----------|-------------|------------|--------------|
+  | A — concentrada | +24,8% | -26,8% | 0,607 | 3/7 |
+  | B — diversificada (ADR-060) | +29,4% | -13,0% | 1,476 | 4/7 |
+  | C — diversificada + hedge | +50,3% | -13,8% | **2,311** | 5/7 |
+
+- **Veredicto contra el criterio** (binario, pre-registrado):
+  - Primaria: Calmar(C) 2,311 ≥ 1,05 × Calmar(B) = 1,55 → **PASA** (+56% relativo).
+  - Guardrail anti-degenerado: TWR(C) +50,3% ≥ 0,85 × TWR(B) = +25,0% → **PASA** (el retorno subió, no se mató).
+  - **Conclusión literal**: C cumple el criterio congelado.
+- **Por qué NO se promueve (el matiz honesto, lo importante)**:
+  1. **El win es por retorno, no por protección.** El drawdown agregado **empeoró** levemente (-13,0% → -13,8%). El Calmar subió porque el retorno se disparó, no porque cubriera mejor.
+  2. **Es una apuesta direccional al oro que pagó in-sample.** En el período, **GLD +100%** y **WMT +71%** en ARS, contra GGAL +2% / PAMP +21%. El sleeve "cobertura" fue la parte que más rindió. El oro no rallea +100% todos los períodos: gran parte de la mejora de Calmar es suerte de régimen, no protección estructural. Es exactamente el riesgo de **ADR-059** (un retorno lindo esconde de qué depende).
+  3. **La protección real existe pero es modesta**: en la ventana **V4** (lo peor del crash global dic-2025 → mar-2026, objetivo del hedge) C mejoró de -9,9% a -4,7% (DD -10,5% → -7,5%); **V5** quedó ~igual. El anti-factor + la regla de cash ayudaron donde apuntaban, pero poco.
+- **Decisión**: mantener la variante en investigación. **Antes de cualquier promoción** hace falta: (a) robustez en un régimen donde el oro **no** rallee (sub-período / out-of-sample); (b) aislar la contribución protectora de la beta al oro (¿cuánto del Calmar es hedge real vs exposición direccional?); (c) evaluar el turnover/costos del rebalanceo por bandas diario.
+- **Consecuencias**:
+  - Producción (`policy.v1.yaml`) y el gate (**ADR-041**) intactos. El connector IOL ahora trae bonos (**ADR-061**), subproducto reutilizable.
+  - El walk-forward volvió a cumplir su función: **expuso** que la "cobertura" es en parte una apuesta al oro, igual que antes expuso la concentración GGAL/PAMP. La disciplina (pre-registro + medir en crisis + escepticismo ante el número lindo) evitó promover sobre una ilusión.
+- **Alternativas consideradas**:
+  - **Promover C al default por pasar el criterio**: descartada — pasar el bar no basta si el mecanismo del éxito (rally del oro) no es robusto; promover sería el autoengaño que el proyecto evita.
+  - **Declarar el hedge un fracaso**: descartada — la evidencia protectora en V4 es real; el approach merece el test de robustez, no el descarte.
+- **Archivos**: `core_sim/short_hedge_engine.py`, `tests/test_short_hedge_engine.py`, `scripts/run_wf_research_sim.py`, `scripts/measure_correlation.py`, `config/symbols/whitelist_hedge.yaml`, `config/policy.research_hedge_short.v1.yaml`, `docs/hedge_short_criterio_preregistrado.md`, `docs/plan_hedge_short.md`
+- **Ver también**: **ADR-061** (connector bonos + canasta), **ADR-059** (factor concentrado), **ADR-060** (diversificación), **ADR-058** (simulador WF), **ADR-041** (gate congelado), **ADR-057** (test verde)
+
+---
+
+## ADR-063 — Promoción de la cartera diversificada a producción + gate MVP (paso 10%)
+
+- **Fecha**: 2026-06-16
+- **Estado**: aceptada — la cartera diversificada (**ADR-060**) pasa a ser el **default de producción** (`policy.v1.yaml`). El sleeve de cobertura (**ADR-062**) queda en investigación. Se define un **gate MVP** liviano y explícito para habilitar el primer escalón de capital.
+- **Contexto**: el walk-forward de investigación expuso que la cartera concentrada (GGAL 42% + PAMP 43% + SPY 15%) dependía de un solo factor (riesgo-país AR) con drawdowns de -25% (**ADR-059**). La variante diversificada redujo el peor drawdown a -11% **por una razón estructural y medida** (correlaciones), no por suerte de régimen. A diferencia del hedge (**ADR-062**, confundido con el rally del oro), la diversificación es una mejora robusta y lista para promover.
+- **Decisión 1 — Promoción de la cartera**:
+  - `config/policy.v1.yaml` → `long_term_engine.core_lines` pasa de 3 líneas (GGAL/PAMP + satélite SPY) a **6 líneas**: AR (GGAL 0,167 / PAMP 0,167 / TXAR 0,166) + global vía CEDEAR (SPY 0,167 / QQQ 0,167 / KO 0,166); `satellite_lines: []`.
+  - `config/policy.v1.schema.json` → `core_lines.maxItems` de **3 a 8** (alineado con la validación de código de **ADR-060**).
+  - Tests actualizados para afirmar la cartera diversificada, **derivando los datos del config** (precios/qty/whitelist desde `target_weights`) para no volver a romperse ante un cambio de cartera: `test_long_term_engine.py`, `test_long_term_monthly_runner.py`, `test_validation_long_engine.py`. Suite completa en verde (672).
+  - **No se promueve** el sleeve de cobertura: el corto sigue siendo el momentum táctico (la cartera C queda en `policy.research_hedge_short.v1.yaml`).
+- **Decisión 2 — Gate MVP** (`docs/mvp_gate.md`):
+  - Barrera **anterior y más liviana** que el gate pleno (**ADR-041**), para habilitar solo el **paso 10%** del ramp-up sin esperar ~15 meses.
+  - Clave metodológica: como el sistema es **determinístico** (no ajusta a datos), el **burn-in puede ser histórico** sin contaminar; solo el tramo **OOS (examen) debe ser forward post-congelamiento**. Así basta **~1 ventana OOS forward (~60 días hábiles ≈ 2-3 meses)** en vez de 312 días nuevos.
+  - **Los umbrales de calidad NO se aflojan** (los 7 de ADR-041). La única relajación es cuántas ventanas forward se exigen (1) y el techo de capital (10%).
+- **Por qué (metodología)**: promover la diversificación es evidencia-driven y de bajo riesgo (mejora estructural, código del motor ya probado, cambio chico vs producción). El gate MVP baja el **listón de evidencia de forma explícita y documentada** —no oculta—, distinguiendo "opero con capital chico" de "autorizo capital pleno".
+- **Consecuencias**:
+  - El largo de producción ahora es diversificado; el flag `--enable-long-engine` sigue **off** por defecto (la activación en paper-live es paso aparte, ver project-overview §13).
+  - El gate pleno (**ADR-041**) y sus umbrales quedan intactos. El gate MVP está **definido pero no cableado** (pendiente: bloque `mvp_gate` en policy + runner; hoy se evalúa manual con `report_kpis_walk_forward.py`).
+  - Requiere que el universo de ingesta cubra TXAR/QQQ/KO en XBUE (ya en whitelists).
+- **Alternativas consideradas**:
+  - **Promover también el hedge (C)**: descartada — su ventaja está confundida con el rally del oro (**ADR-062**); falta robustez.
+  - **Esperar el gate pleno (~15 meses) antes de cualquier capital real**: descartada — bloquea el MVP sin necesidad; el burn-in histórico + OOS forward da una barrera honesta mucho antes.
+  - **Aflojar los umbrales para un MVP**: descartada — bajar la exigencia por trade es el autoengaño que el proyecto evita; se baja la cantidad de evidencia y el capital, no la calidad.
+- **Archivos**: `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `docs/mvp_gate.md`, `tests/test_long_term_engine.py`, `tests/test_long_term_monthly_runner.py`, `tests/test_validation_long_engine.py`
+- **Ver también**: **ADR-060** (diversificación en investigación), **ADR-059** (hallazgo de factor), **ADR-062** (hedge no promovido), **ADR-041** (gate congelado), **POLICY.md §14** (ramp-up)
+
+---
+
+## ADR-064 — Promoción de la cobertura (cartera C) a producción — OVERRIDE explícito de ADR-062
+
+- **Fecha**: 2026-06-16
+- **Estado**: aceptada — **override explícito** de la postura de no-promoción de **ADR-062**. El sleeve corto pasa de momentum a **cobertura (hedge_static GLD/WMT + regla de des-riesgo a cash)** en producción (`policy.v1.yaml`).
+- **Contexto**: **ADR-062** dejó la cartera C en investigación porque su mejora de Calmar (1,48→2,31) estaba **confundida con el rally del oro** (GLD +100% in-sample) y el drawdown agregado no mejoró (-13,0%→-13,8%). El **Check 1** (descomposición rally/crisis) dio **mixto**: hay protección real en los selloffs argentinos (V0/V1/V4: C le ganó a B +8,6 / +6,8 / +5,2pp), pero el viento de cola del oro contamina la magnitud en todas las ventanas. El **Check 2** (re-correr C sin oro) **no se corrió**. Decisión del usuario: promover igual, asumiendo el riesgo con los ojos abiertos.
+- **Decisión**:
+  - `policy.v1.yaml` → bloque **`short_hedge`** `enabled: true` (hedge_static, canasta GLD/WMT 50/50, `drift_rebalance_threshold_pp` 2,0, regla de des-riesgo a cash con pisos -10%/-10%). v1 corre el hedge sobre el 30% completo (táctico diferido).
+  - **Runner compartido** `core_sim/short_hedge_runner.py` (`run_hedge_sleeve_day` + `compute_derisk_to_cash` + `load_hedge_whitelist`): única fuente de verdad del cableado, usada por **producción** (`run_paper_live.py`) y **research** (`run_wf_research_sim.py`) — bifurcan short→hedge cuando `short_hedge.enabled`. DRY (se eliminó la duplicación previa del sim).
+  - `policy.v1.schema.json` → propiedad `short_hedge` agregada (el `additionalProperties:false` la requería).
+  - `fetch_daily.py` → cuando el hedge está activo, agrega GLD/WMT al fetch AR/XBUE (sin esto el runner no tendría barras en producción).
+  - **Tests** (`tests/test_short_hedge_runner.py`, 7 casos, smart-testing — DB/ledger/broker reales): compra de la canasta, sizing desde equity total, sin fills sin barras, regla de cash dispara/ vende a cash, y guard de que producción tiene el hedge activo. Suite **679 verde**.
+- **Riesgo asumido (honesto, NO se oculta)**: la ventaja de C depende en parte de un rally del oro que **no es estructural ni se garantiza repetir**; el max drawdown agregado **no mejoró**; el Check 2 (aislar la beta al oro) quedó **pendiente**. Esto se promueve **por decisión explícita, NO porque la evidencia de robustez esté completa**. La advertencia de **ADR-062** sigue vigente.
+- **Mitigaciones**:
+  - Es **paper-first**: esto cambia lo que opera el bot en paper, no autoriza capital real. El **gate MVP** (**ADR-063**) y el gate pleno (**ADR-041**) siguen gobernando el capital real.
+  - La **regla de des-riesgo a cash** está activa (sube cash si AR y global caen juntos).
+  - El flag `--enable-long-engine` sigue **off** por defecto.
+- **Pendiente (recomendado antes de cualquier capital real con C)**: correr el **Check 2** (C sin oro) para validar o revertir esta decisión. Si la protección no sobrevive sin el oro, revertir el `short_hedge.enabled` a `false` (rollback de una línea).
+- **Alternativas consideradas**:
+  - **Correr el Check 2 primero** (recomendado por el análisis): no elegida — el usuario optó por promover ya.
+  - **Dejar C en investigación** (postura ADR-062): reemplazada por esta decisión.
+- **Archivos**: `config/policy.v1.yaml`, `config/policy.v1.schema.json`, `core_sim/short_hedge_runner.py`, `scripts/run_paper_live.py`, `scripts/run_wf_research_sim.py`, `scripts/fetch_daily.py`, `tests/test_short_hedge_runner.py`
+- **Ver también**: **ADR-062** (no-promoción, override de esta), **ADR-061** (canasta GLD/WMT + connector), **ADR-063** (cartera diversificada + gate MVP), **ADR-059** (factor)
+
+---
+
+## ADR-065 — Arquitectura Vercel del dashboard MVP: JSON estático (no SQLite lite)
+
+- **Fecha**: 2026-06-18
+- **Estado**: aceptada
+- **Contexto**: Fase 1 del MVP interfaz (demo web para cátedra). **F1-01** exporta `dashboard_payload.json` vía `DashboardService`; **F1-02** lo sube como artifact `dashboard-payload` en GitHub Actions; **F1-04** implementa la app Next.js en `web/` que consume ese contrato. Antes del deploy (**F1-05**) hacía falta cerrar **cómo** la web en Vercel obtiene los datos sin acoplar el deploy a Python ni a `market.db` completa.
+- **Decisión**:
+  - **Opción A — artifact JSON estático** (elegida). La web en Vercel lee el mismo contrato que `GET /api/dashboard` / `export_dashboard_payload.py` (`export_version: "1"`).
+  - **Pipeline de sincronización** (artifact → Vercel):
+    1. `paper_live_daily.yml` exporta `dashboard_payload.json` tras cada corrida exitosa (ya implementado en F1-02).
+    2. El mismo workflow **commitea** `data/dashboard_payload.json` en la rama **`paper-live-data`** junto con `market.db` (`git add -f`; el archivo está gitignored en `main` pero trackeable en la rama operativa, igual que la DB).
+    3. Proyecto Vercel (**F1-05**, hecho): **`bot-de-trading`**, root `web/`, GitHub conectado. Production: https://web-pearl-theta-64.vercel.app. Rama prod objetivo **`paper-live-data`** (rebuild diario con JSON commiteado).
+    4. El artifact `dashboard-payload` en Actions se mantiene como **backup/auditoría** (90 días) y para descarga manual; no es la fuente primaria en runtime.
+  - **Auth** (**F1-06**): middleware Next.js (password/env) protege la **página**; el JSON en `public/` queda detrás del mismo origen — no se expone URL pública separada sin auth en la demo.
+  - **Descartado para MVP**: SQLite lite (Turso/libSQL), `market.db` en Vercel Blob, API route con Python/sql.js, fetch runtime desde GitHub raw sin rebuild.
+- **Por qué**:
+  - Payload actual ~5 KB (crece lineal con snapshots; años de paper-live siguen siendo <1 MB). `market.db` ~1,4 MB+ con LFS, binario, y tablas que la demo no necesita.
+  - `DashboardService` ya agrega equity, posiciones, riesgo, KPIs y alertas — no hay consultas ad-hoc en el MVP.
+  - Vercel serverless no es hosting natural para SQLite escribible; Blob + WASM/sql.js añade cold start, CORS y complejidad operativa sin beneficio para solo lectura.
+  - Reutiliza el modelo de ramas **ADR-040** (`paper-live-data` = datos del día) sin segundo canal de sync.
+- **Consecuencias**:
+  - **Positivas**: deploy predecible, sin secretos extra para datos, mismo contrato local/CI/prod, costo cero en storage, rollback = redeploy de commit anterior.
+  - **Negativas**: la web se actualiza en el **próximo deploy** tras el push (latencia ~minutos, aceptable para demo diaria); historial de fills limitado al export (`recent_fills`, hoy 25); drill-down profundo requiere ampliar el JSON o revisar arquitectura en Fase 2+.
+- **Alternativas consideradas**:
+  - **Opción B — `market.db` en Vercel Blob + API route**: descartada — duplica LFS, tamaño, y obliga a correr agregación en edge/serverless o embeber sql.js en el cliente; más fiel al monitor local pero sobredimensionado para la demo.
+  - **Opción C — Turso/libSQL replica**: descartada para MVP — otro servicio, sync job, y credenciales; solo tiene sentido si la UI necesita SQL arbitrario o multi-tenant.
+  - **Opción D — fetch client-side desde GitHub raw**: descartada — repo puede ser privado; además expone URL del JSON fuera del control de auth de Vercel.
+- **Archivos**: `docs/dashboard.md`, `.github/workflows/paper_live_daily.yml`, `web/` (**F1-04**), `scripts/export_dashboard_payload.py`, `tests/test_dashboard_export.py`, `tests/test_web_dashboard.py`
+- **Ver también**: **ADR-040** (ramas paper-live), **ADR-063** (gate MVP / demo), F1-01, F1-02, F1-04, F1-05, F1-06
 
 ---
 

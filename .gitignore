@@ -46,11 +46,22 @@ secrets/
 
 # Local market DB + SQLite sidecars (regenerable con fetch / pipeline)
 data/*.db
+data/_sim/
+!data/market.db
+data/market_defensa*.db
+data/defensa_sim.log
+config/calendars/*.defensa-bak
 data/*.db-wal
 data/*.db-shm
 
 # Reportes generados (run_validation_wf, run_long_engine_wf, etc.)
 validation_reports/*.json
+dashboard_payload.json
+data/dashboard_payload.json
+
+# Next.js demo (F1-04)
+web/node_modules/
+web/.next/
 
 # Alertas runtime (kill switch; ver README / risk_guardrails)
 alerts/kill_switch_*.json
@@ -58,3 +69,17 @@ alerts/kill_switch_*.json
 # Cursor/local agent state
 .cursor/sessions/
 .cursor/logs/
+.engram/manifest.json
+data/_sim/sim_1M_equity.csv
+data/_sim/sim_1M_trades.csv
+data/_sim/sim_1M_fills.csv
+data/_sim/sim_500k_fills.csv
+data/market.db.bak-20260611-154911
+data/market_backfill_log.txt
+.engram/chunks/6e26dae9.jsonl.gz
+defensa_bot_trading.pptx
+.agents/
+.agents/skills/cavecrew/README.md
+skills-lock.json
+scripts/build_defensa_pptx.py
+.vercel

@@ -60,3 +60,32 @@ class TestValidationWfSchema:
         doc.pop("validation_wf", None)
         with pytest.raises(ValidationError):
             Draft202012Validator(schema).validate(doc)
+
+
+class TestDataQualityConfidenceSchema:
+    """T3.2 — Umbrales de confianza versionados en policy."""
+
+    def test_policy_includes_data_quality_confidence(self, policy_doc):
+        dq = policy_doc["data_quality_confidence"]
+        assert dq["high"]["min_n_observations"] > dq["medium"]["min_n_observations"]
+        assert dq["high"]["max_imputed_pct"] < dq["medium"]["max_imputed_pct"]
+
+    def test_high_tier_stricter_than_medium_passes(self, policy_doc, schema):
+        doc = copy.deepcopy(policy_doc)
+        doc["data_quality_confidence"] = {
+            "high": {"min_n_observations": 100, "max_imputed_pct": 1.0},
+            "medium": {"min_n_observations": 30, "max_imputed_pct": 5.0},
+        }
+        Draft202012Validator(schema).validate(doc)
+
+    def test_negative_min_n_observations_fails(self, policy_doc, schema):
+        doc = copy.deepcopy(policy_doc)
+        doc["data_quality_confidence"]["high"]["min_n_observations"] = -1
+        with pytest.raises(ValidationError):
+            Draft202012Validator(schema).validate(doc)
+
+    def test_imputed_pct_above_100_fails(self, policy_doc, schema):
+        doc = copy.deepcopy(policy_doc)
+        doc["data_quality_confidence"]["medium"]["max_imputed_pct"] = 101.0
+        with pytest.raises(ValidationError):
+            Draft202012Validator(schema).validate(doc)

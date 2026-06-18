@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
+import sqlite3
 
 from core_sim.ledger import PortfolioLedger
-from data.schema import CorporateActionRow, OHLCVRow
-from data.storage import KillSwitchState, MarketDB
+from data.schema import CorporateActionRow, OHLCVRow, PortfolioMeta
+from data.storage import KillSwitchState, MarketDB, PortfolioMetaConflictError
 
 
 @pytest.fixture
@@ -107,6 +109,13 @@ class TestCorporateActionsUpsert:
         db.upsert_actions([_action(type="split", factor=2.0)])  # idempotent
 
 
+def _fetch_log_rows(db: MarketDB) -> list[dict]:
+    cursor = db._conn.execute(
+        "SELECT symbol, venue, status, source, skip_reason, extra FROM fetch_log ORDER BY id"
+    )
+    return [dict(row) for row in cursor.fetchall()]
+
+
 class TestFetchLog:
     def test_should_log_successful_fetch(self, db):
         db.log_fetch({"symbol": "SPY", "venue": "XNYS", "status": "ok", "source": "yfinance"})
@@ -116,6 +125,65 @@ class TestFetchLog:
             "symbol": "GGAL", "venue": "XBUE",
             "status": "skip", "skip_reason": "outlier_price",
         })
+
+    def test_should_roundtrip_provider_iol_only_and_rows_in_extra(self, db):
+        extra_payload = {
+            "provider": "iol",
+            "iol_only": True,
+            "attempts": 3,
+            "start_date": "2024-03-04",
+            "end_date": "2024-03-06",
+            "rows": 0,
+            "rows_by_source": {"iol": 0, "byma": 0},
+        }
+        db.log_fetch({
+            "symbol": "GGAL",
+            "venue": "XBUE",
+            "status": "skip",
+            "source": "iol",
+            "skip_reason": "credentials_missing",
+            "extra": json.dumps(extra_payload, sort_keys=True),
+        })
+
+        rows = _fetch_log_rows(db)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["symbol"] == "GGAL"
+        assert row["venue"] == "XBUE"
+        assert row["status"] == "skip"
+        assert row["source"] == "iol"
+        assert row["skip_reason"] == "credentials_missing"
+        stored_extra = json.loads(row["extra"])
+        assert stored_extra["provider"] == "iol"
+        assert stored_extra["iol_only"] is True
+        assert stored_extra["rows"] == 0
+
+    def test_should_persist_mixed_source_attribution_in_extra(self, db):
+        extra_payload = {
+            "provider": "iol",
+            "attempts": 5,
+            "start_date": "2024-03-04",
+            "end_date": "2024-03-06",
+            "rows": 3,
+            "effective_source": "mixed",
+            "partial_fallback": True,
+            "rows_by_source": {"iol": 1, "byma": 2},
+        }
+        db.log_fetch({
+            "symbol": "GGAL",
+            "venue": "XBUE",
+            "status": "ok",
+            "source": "mixed",
+            "skip_reason": "fallback_used",
+            "extra": json.dumps(extra_payload, sort_keys=True),
+        })
+
+        row = _fetch_log_rows(db)[0]
+        stored_extra = json.loads(row["extra"])
+        assert row["status"] == "ok"
+        assert row["skip_reason"] == "fallback_used"
+        assert stored_extra["effective_source"] == "mixed"
+        assert stored_extra["rows_by_source"] == {"iol": 1, "byma": 2}
 
 
 class TestCalendarsUpsert:
@@ -349,6 +417,95 @@ class TestGetPaperFills:
         rows = db.get_paper_fills(mode="paper_live")
         assert all(r["mode"] == "paper_live" for r in rows)
         assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# REQ-5b: portfolio_meta (T1.1)
+# ---------------------------------------------------------------------------
+
+class TestPortfolioMeta:
+    _MODE = "paper_live"
+    _DAY = date(2026, 3, 2)
+
+    def test_first_run_inserts_meta(self, db):
+        meta = db.ensure_portfolio_meta(
+            self._MODE, starting_cash=3_000_000.0, currency="ARS", inception_date=self._DAY
+        )
+        assert meta.starting_cash == pytest.approx(3_000_000.0)
+        assert meta.currency == "ARS"
+        assert meta.inception_date == self._DAY
+
+        loaded = db.get_portfolio_meta(self._MODE)
+        assert loaded == meta
+
+    def test_second_run_with_same_values_succeeds(self, db):
+        db.ensure_portfolio_meta(
+            self._MODE, starting_cash=1_000_000.0, currency="ARS", inception_date=self._DAY
+        )
+        again = db.ensure_portfolio_meta(
+            self._MODE, starting_cash=1_000_000.0, currency="ARS", inception_date=date(2026, 6, 1)
+        )
+        assert again.starting_cash == pytest.approx(1_000_000.0)
+        assert db.get_portfolio_meta(self._MODE).inception_date == self._DAY
+
+    def test_starting_cash_mismatch_raises(self, db):
+        db.ensure_portfolio_meta(
+            self._MODE, starting_cash=3_000_000.0, currency="ARS", inception_date=self._DAY
+        )
+        with pytest.raises(PortfolioMetaConflictError, match="starting_cash mismatch"):
+            db.ensure_portfolio_meta(
+                self._MODE, starting_cash=2_000_000.0, currency="ARS", inception_date=self._DAY
+            )
+
+    def test_currency_mismatch_raises(self, db):
+        db.ensure_portfolio_meta(
+            self._MODE, starting_cash=10_000.0, currency="USD", inception_date=self._DAY
+        )
+        with pytest.raises(PortfolioMetaConflictError, match="currency mismatch"):
+            db.ensure_portfolio_meta(
+                self._MODE, starting_cash=10_000.0, currency="ARS", inception_date=self._DAY
+            )
+
+    def test_existing_snapshots_without_meta_requires_legacy_flag(self, db):
+        snap = {
+            "equity_total": 1000.0,
+            "equity_short": 300.0,
+            "equity_long": 700.0,
+            "cash": 500.0,
+            "realized_pnl_total": 0.0,
+            "unrealized_pnl_total": 0.0,
+            "costs_day": 0.0,
+            "mv_us": 800.0,
+            "mv_ar": 200.0,
+        }
+        db.persist_snapshot(self._MODE, self._DAY, snap, short_cash=150.0)
+        with pytest.raises(PortfolioMetaConflictError, match="snapshots exist"):
+            db.ensure_portfolio_meta(
+                self._MODE, starting_cash=1000.0, currency="USD", inception_date=self._DAY
+            )
+        boot = db.ensure_portfolio_meta(
+            self._MODE,
+            starting_cash=1000.0,
+            currency="USD",
+            inception_date=self._DAY,
+            allow_legacy_init=True,
+        )
+        assert boot.starting_cash == pytest.approx(1000.0)
+        assert boot.currency == "USD"
+
+    def test_insert_is_idempotent_via_ensure_only(self, db):
+        db.ensure_portfolio_meta(
+            self._MODE, starting_cash=500_000.0, currency="ARS", inception_date=self._DAY
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            db.insert_portfolio_meta(
+                PortfolioMeta(
+                    mode=self._MODE,
+                    starting_cash=500_000.0,
+                    currency="ARS",
+                    inception_date=self._DAY,
+                )
+            )
 
 
 # ---------------------------------------------------------------------------

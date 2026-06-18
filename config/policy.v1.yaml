@@ -20,7 +20,7 @@ short_kill_switch_monthly_dd: -0.08
 # Cadencia de decisión por motor
 cadence:
   short: daily
-  long: monthly
+  long: weekly
 
 # semi_auto: órdenes pasan a cola pending hasta confirmación; auto: pipeline sin gate humano
 execution_mode: semi_auto
@@ -29,8 +29,25 @@ execution_mode: semi_auto
 symbols:
   whitelist_us_file: config/symbols/whitelist_us.yaml
   whitelist_ar_file: config/symbols/whitelist_ar.yaml
+  whitelist_cedear_file: config/symbols/whitelist_cedear.yaml
+  whitelist_hedge_file: config/symbols/whitelist_hedge.yaml   # canasta de cobertura (ADR-064)
   inline_us: []
   inline_ar: []
+  # Selección dinámica top volumen (IOL) — desactivada por defecto hasta cablear fetch/runner
+  universe_selection:
+    enabled: false
+    rebalance_frequency: weekly
+    targets:
+      merval_top_n: 10
+      cedears_top_n: 20
+    volume_window_trading_days: 20
+    tiebreakers:
+      - avg_notional_desc
+      - symbol_asc
+    api_budget:
+      monthly_limit: 25000
+      soft_limit_pct: 0.8
+      max_calls_per_job: 2000
 
 # Espejo operativo de POLICY.md (umbrales; el documento humano manda en ambigüedad)
 risk:
@@ -54,26 +71,57 @@ risk:
     fallback_pct_us: -0.05
     fallback_pct_ar: -0.08
 
-# Motor largo (sleeve 70%): core pasivo US + satélite acotado; pesos del bloque suman 1.0
+# Motor largo (sleeve 70%): BYMA en pesos (Merval + CEDEAR). SPY como CEDEAR benchmark. Pesos suman 1.0 en el sleeve.
 long_term_engine:
   drift_rebalance_threshold_pp: 2.0          # umbral por línea (pp) — convención per_line (POLICY §11)
   drift_convention: per_line
-  rebalance_rule: first_us_trading_day_of_calendar_month
+  rebalance_rule: first_ar_business_day_of_calendar_week
   max_long_rebalance_turnover_pct: null     # opcional: tope a sum(|Δw|) del sleeve; null = sin tope en engine v1
   satellite_markets:
-    - US
+    - AR
+  # ADR-063: cartera diversificada promovida desde investigación (ADR-060).
+  # 50% AR (GGAL/PAMP/TXAR) + 50% global vía CEDEAR (SPY/QQQ/KO). Rompe la
+  # concentración de factor GGAL+PAMP que el walk-forward expuso (ADR-059):
+  # la peor caída pasó de -25% a -11% en la sim de investigación.
   core_lines:
+    - symbol: GGAL
+      target_weight: 0.167
+    - symbol: PAMP
+      target_weight: 0.167
+    - symbol: TXAR
+      target_weight: 0.166
     - symbol: SPY
-      target_weight: 0.55
-    - symbol: IWM
-      target_weight: 0.30
-  satellite_lines:
+      target_weight: 0.167
     - symbol: QQQ
-      target_weight: 0.15
+      target_weight: 0.167
+    - symbol: KO
+      target_weight: 0.166
+  satellite_lines: []
   satellite_limits:
     max_satellite_weight_total: 0.20
     max_weight_per_satellite_line: 0.15
     max_satellite_names: 3
+
+# Sleeve corto como COBERTURA (ADR-064): el 30% corto se maneja como hedge_static
+# (canasta anti-factor GLD/WMT + regla de des-riesgo a cash) en vez de momentum táctico.
+# Override explícito: se promueve pese a que el win está en parte confundido con el rally
+# del oro (ADR-062). v1 corre el hedge sobre el 30% completo (táctico diferido).
+short_hedge:
+  enabled: true
+  mode: hedge_static
+  hedge_weight_total: 0.30
+  tactical_weight_total: 0.0
+  drift_rebalance_threshold_pp: 2.0
+  hedge_lines:
+    - symbol: GLD
+      target_weight: 0.50
+    - symbol: WMT
+      target_weight: 0.50
+  derisk_to_cash:
+    enabled: true
+    trigger: ar_factor_and_global_both_in_drawdown
+    ar_factor_drawdown_floor: -0.10
+    global_drawdown_floor: -0.10
 
 # Parámetros explícitos del short_term_engine v1 (Fase 3, señal diaria auditable)
 short_term_engine:
@@ -82,6 +130,9 @@ short_term_engine:
   volatility_20d_max: 0.04           # vol_20d máxima (desvío estándar diario)
   top_k_per_market: 5                # K máximo por mercado en ranking diario
   risk_budget_trade_pct: 0.005       # presupuesto de riesgo por trade (0.5% del bucket corto)
+  rsi_lookback: 14                   # RSI base para filtro de entrada/salida
+  rsi_overbought_entry: 80.0         # no comprar si RSI supera este umbral; vender al cruzar hacia arriba este nivel
+  rsi_exit_threshold: 45.0           # vender por crossover descendente bajo este umbral
   allow_leverage: false              # v1: sin apalancamiento
 
 # Pre-gate estadístico mínimo (walk-forward OOS del bloque corto; Fase 3 plan)
@@ -127,13 +178,23 @@ corporate_actions:
     - split
     - dividend
 
+# Umbrales informacionales para clasificar confianza en salidas v1 (no bloqueante;
+# alineado al stage validation/data_quality: imputed_pct > 5% es warning informativo)
+data_quality_confidence:
+  high:
+    min_n_observations: 60
+    max_imputed_pct: 2.0
+  medium:
+    min_n_observations: 20
+    max_imputed_pct: 5.0
+
 # Parámetros del workflow de validación pre-live
 validation_wf:
   lookback_trading_days: 90
 
 # Gate KPI OOS (Fase 5): walk-forward del informe v3 por tramo + tabla maestra + pass/fail (umbrales opcionales por métrica)
 kpi_oos_gate:
-  enabled: false
+  enabled: true
   walk_forward:
     burn_in_trading_days: 252
     oos_trading_days: 60
@@ -142,12 +203,15 @@ kpi_oos_gate:
   aggregate:
     rule: all
   thresholds:
-    min_sharpe_annualized_total: null
-    min_sortino_annualized_total: null
-    max_drawdown_total_floor: null
-    max_drawdown_short_floor: null
-    max_drawdown_long_floor: null
-    min_calmar_12m_long: null
-    max_mdd_12m_rolling_long_floor: null
-    max_turnover_long_monthly_last: null
-    min_alpha_simple_return_total: null
+    min_sharpe_annualized_total: 0.30
+    min_sortino_annualized_total: 0.40
+    max_drawdown_total_floor: -0.18
+    max_drawdown_short_floor: -0.10
+    max_drawdown_long_floor: -0.25
+    min_calmar_12m_long: null               # informativo; no bloqueante en v1
+    max_mdd_12m_rolling_long_floor: null     # informativo; no bloqueante en v1
+    max_turnover_long_monthly_last: 0.08
+    min_alpha_simple_return_total: -0.02
+
+# Fase de ramp-up hacia capital real (paper → live)
+ramp_stage: paper

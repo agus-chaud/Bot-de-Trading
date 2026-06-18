@@ -5,14 +5,30 @@ All tests are fully mocked — zero real network calls.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
-from data.connectors.ar_connector import fetch_ar_ohlcv
+from data.connectors.ar_connector import fetch_ar_ohlcv, fetch_ar_ohlcv_with_trace
+from data.fetch_trace import (
+    FETCH_STATUS_OK,
+    FETCH_STATUS_SKIP,
+    SKIP_CREDENTIALS_MISSING,
+    SKIP_FALLBACK_USED,
+    SOURCE_BYMA,
+    SOURCE_IOL,
+    SOURCE_MIXED,
+)
+from data.iol_api_meter import IolJobBudgetExhausted
+from data.iol_api_meter import (
+    IOL_KIND_HISTORY,
+    IOL_KIND_UNIVERSE_VOLUME,
+    iol_meter_session,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -22,14 +38,17 @@ from data.connectors.ar_connector import fetch_ar_ohlcv
 _START = date(2024, 3, 4)
 _END = date(2024, 3, 6)
 
+# Keys reales del endpoint `seriehistorica` de IOL: fechaHora + volumenNominal.
+# (El fixture viejo usaba fecha/volumen, que NO es lo que devuelve la API —
+# por eso los tests pasaban y producción caía al fallback. Ver complicación #3.)
 _IOL_PAYLOAD = [
     {
-        "fecha": "2024-03-04T00:00:00",
+        "fechaHora": "2024-03-04T00:00:00",
         "apertura": 1000.0,
         "maximo": 1050.0,
         "minimo": 990.0,
         "ultimoPrecio": 1030.0,
-        "volumen": 500_000.0,
+        "volumenNominal": 500_000.0,
     }
 ]
 
@@ -52,8 +71,8 @@ def _make_byma_df(rows: list[dict] | None = None) -> pd.DataFrame:
     return df
 
 
-def _patch_iol_token(token: str = "fake-token"):
-    return patch("data.connectors.ar_connector._iol_get_token", return_value=token)
+def _patch_iol_access_token(token: str = "fake-token"):
+    return patch("data.connectors.ar_connector._iol_get_access_token", return_value=token)
 
 
 def _patch_requests_get(json_payload=None, side_effect=None):
@@ -85,9 +104,9 @@ def _patch_byma_history(return_value=None, side_effect=None):
 
 class TestIolSuccess:
     def test_should_return_normalized_ar_ohlcv_rows_when_iol_succeeds_on_first_attempt(self):
-        """IOL primary succeeds → returns OHLCVRow list with venue=AR and currency=ARS."""
+        """IOL primary succeeds → returns OHLCVRow list with venue=XBUE and currency=ARS."""
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with _patch_requests_get():
                     result = fetch_ar_ohlcv("GGAL", _START, _END)
 
@@ -102,13 +121,13 @@ class TestIolSuccess:
         assert row.close == pytest.approx(1030.0)
         assert row.volume == pytest.approx(500_000.0)
         assert row.currency == "ARS"
-        assert row.venue == "AR"
+        assert row.venue == "XBUE"
         assert row.imputed is False
 
     def test_should_preserve_clean_symbol_without_ba_suffix_in_output_rows(self):
         """Symbol in output rows must not have a .BA suffix — IOL never uses it."""
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with _patch_requests_get():
                     result = fetch_ar_ohlcv("YPFD", _START, _END)
 
@@ -138,7 +157,7 @@ class TestIolRetry:
             return mock_resp
 
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with patch("data.connectors.ar_connector.requests.get", side_effect=get_side_effect):
                     with patch("data.connectors.ar_connector.time.sleep"):
                         result = fetch_ar_ohlcv("GGAL", _START, _END)
@@ -152,7 +171,7 @@ class TestIolRetry:
         sleep_calls = []
 
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with patch("data.connectors.ar_connector.requests.get", side_effect=ConnectionError("down")):
                     with patch("data.connectors.ar_connector.time.sleep", side_effect=lambda s: sleep_calls.append(s)):
                         with _patch_byma_history(side_effect=ConnectionError("byma also down")):
@@ -164,6 +183,65 @@ class TestIolRetry:
 
 
 # ---------------------------------------------------------------------------
+# IOL 401 / auth refresh
+# ---------------------------------------------------------------------------
+
+
+class TestIolUnauthorizedRetry:
+    def test_should_refresh_access_and_retry_when_history_returns_401(self):
+        """401 on history invalidates bearer; next attempt uses refresh_token grant then succeeds."""
+        from data.connectors.ar_connector import clear_iol_session_cache
+
+        clear_iol_session_cache()
+
+        def post_side_effect(url, data=None, **kwargs):
+            assert "invertironline.com/token" in url
+            gtype = (data or {}).get("grant_type")
+            mock = MagicMock()
+            mock.status_code = 200
+            mock.text = ""
+            if gtype == "password":
+                mock.json.return_value = {
+                    "access_token": "access-from-password",
+                    "refresh_token": "refresh-1",
+                    "expires_in": 900,
+                }
+                return mock
+            if gtype == "refresh_token":
+                mock.json.return_value = {
+                    "access_token": "access-from-refresh",
+                    "refresh_token": "refresh-2",
+                    "expires_in": 900,
+                }
+                return mock
+            raise AssertionError(f"unexpected grant_type: {gtype!r}")
+
+        get_calls = {"n": 0}
+
+        def get_side_effect(url, **kwargs):
+            get_calls["n"] += 1
+            if get_calls["n"] == 1:
+                first = MagicMock()
+                first.status_code = 401
+                return first
+            ok = MagicMock()
+            ok.status_code = 200
+            ok.json.return_value = _IOL_PAYLOAD
+            ok.raise_for_status = MagicMock()
+            return ok
+
+        with patch.dict("os.environ", _IOL_ENV):
+            with patch("data.connectors.ar_connector.requests.post", side_effect=post_side_effect):
+                with patch("data.connectors.ar_connector.requests.get", side_effect=get_side_effect):
+                    with patch("data.connectors.ar_connector.time.sleep"):
+                        result = fetch_ar_ohlcv("GGAL", _START, _END)
+
+        assert result is not None
+        assert len(result) == 1
+        assert get_calls["n"] == 2
+
+
+# ---------------------------------------------------------------------------
 # Fallback to Byma
 # ---------------------------------------------------------------------------
 
@@ -172,7 +250,7 @@ class TestBymaFallback:
     def test_should_use_byma_fallback_when_iol_exhausts_all_retries(self):
         """IOL fails all 3 attempts → Byma fallback returns valid rows."""
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with patch("data.connectors.ar_connector.requests.get", side_effect=ConnectionError("iol down")):
                     with patch("data.connectors.ar_connector.time.sleep"):
                         with _patch_byma_history():
@@ -180,13 +258,13 @@ class TestBymaFallback:
 
         assert result is not None
         assert len(result) == 1
-        assert result[0].venue == "AR"
+        assert result[0].venue == "XBUE"
         assert result[0].currency == "ARS"
 
     def test_should_log_fallback_trigger_when_switching_from_iol_to_byma(self, caplog):
         """When IOL fails and Byma is used, a structured INFO log with source=byma_fallback is emitted."""
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with patch("data.connectors.ar_connector.requests.get", side_effect=ConnectionError("iol down")):
                     with patch("data.connectors.ar_connector.time.sleep"):
                         with _patch_byma_history():
@@ -199,7 +277,7 @@ class TestBymaFallback:
     def test_should_strip_ba_suffix_from_symbol_in_byma_output_rows(self):
         """Byma uses GGAL.BA for fetching but output rows must have clean 'GGAL' symbol."""
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with patch("data.connectors.ar_connector.requests.get", side_effect=ConnectionError("iol down")):
                     with patch("data.connectors.ar_connector.time.sleep"):
                         with _patch_byma_history():
@@ -219,7 +297,7 @@ class TestTotalFailure:
     def test_should_return_none_when_iol_and_byma_both_exhaust_all_retries(self):
         """When all providers fail all attempts, returns None without raising."""
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with patch("data.connectors.ar_connector.requests.get", side_effect=ConnectionError("iol down")):
                     with patch("data.connectors.ar_connector.time.sleep"):
                         with _patch_byma_history(side_effect=ConnectionError("byma also down")):
@@ -230,7 +308,7 @@ class TestTotalFailure:
     def test_should_not_raise_exception_to_caller_when_all_providers_fail(self):
         """Caller safety contract: fetch_ar_ohlcv never propagates exceptions."""
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with patch("data.connectors.ar_connector.requests.get", side_effect=RuntimeError("crash")):
                     with patch("data.connectors.ar_connector.time.sleep"):
                         with _patch_byma_history(side_effect=OSError("network")):
@@ -244,7 +322,7 @@ class TestTotalFailure:
     def test_should_log_error_when_all_retries_exhausted(self, caplog):
         """A structured ERROR log is emitted after all providers exhaust retries."""
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with patch("data.connectors.ar_connector.requests.get", side_effect=ConnectionError("iol down")):
                     with patch("data.connectors.ar_connector.time.sleep"):
                         with _patch_byma_history(side_effect=ConnectionError("byma down")):
@@ -254,6 +332,57 @@ class TestTotalFailure:
         error_msgs = [r.message for r in caplog.records if r.levelno >= logging.ERROR]
         assert len(error_msgs) > 0
         assert any("fetch_skipped" in m for m in error_msgs)
+
+
+# ---------------------------------------------------------------------------
+# IOL-only mode (universe ranking — no Byma fallback)
+# ---------------------------------------------------------------------------
+
+
+class TestIolOnly:
+    def test_should_return_none_without_byma_when_iol_only_and_no_credentials(self):
+        """iol_only must not call yfinance if IOL credentials are absent."""
+        import os
+
+        with patch.dict("os.environ", {}, clear=True):
+            os.environ.pop("IOL_USER", None)
+            os.environ.pop("IOL_PASS", None)
+            with patch("data.connectors.ar_connector.yf.Ticker") as mock_ticker:
+                result = fetch_ar_ohlcv("GGAL", _START, _END, iol_only=True)
+        assert result is None
+        mock_ticker.assert_not_called()
+
+
+class TestIolPerKindMetering:
+    def test_should_increment_history_counter_for_default_ar_fetch(self):
+        db = MagicMock()
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with _patch_requests_get():
+                    with iol_meter_session(db, "2026-05", max_calls_per_job=500):
+                        fetch_ar_ohlcv("GGAL", _START, _END)
+        db.increment_iol_api_usage.assert_called()
+        kw_calls = [c.kwargs for c in db.increment_iol_api_usage.call_args_list]
+        assert any(k.get("history") == 1 and k.get("universe_volume") == 0 for k in kw_calls)
+
+    def test_should_increment_universe_volume_counter_when_meter_kind_set(self):
+        db = MagicMock()
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with _patch_requests_get():
+                    with iol_meter_session(db, "2026-05", max_calls_per_job=500):
+                        fetch_ar_ohlcv(
+                            "GGAL",
+                            _START,
+                            _END,
+                            iol_only=True,
+                            iol_meter_kind=IOL_KIND_UNIVERSE_VOLUME,
+                        )
+        kw_calls = [c.kwargs for c in db.increment_iol_api_usage.call_args_list]
+        assert any(k.get("universe_volume") == 1 for k in kw_calls)
+
+    def test_should_use_distinct_meter_kind_constants(self):
+        assert IOL_KIND_HISTORY != IOL_KIND_UNIVERSE_VOLUME
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +399,7 @@ class TestMissingCredentials:
             os.environ.pop("IOL_USER", None)
             os.environ.pop("IOL_PASS", None)
 
-            with patch("data.connectors.ar_connector._iol_get_token") as mock_token:
+            with patch("data.connectors.ar_connector._iol_get_access_token") as mock_token:
                 with patch("data.connectors.ar_connector.requests.get") as mock_get:
                     with _patch_byma_history():
                         result = fetch_ar_ohlcv("GGAL", _START, _END)
@@ -312,17 +441,126 @@ class TestMissingCredentials:
 # ---------------------------------------------------------------------------
 
 
+class TestIolFieldAliases:
+    """El normalizador IOL tolera alias de nombres de campo (complicación #3)."""
+
+    def test_parses_real_api_keys_fechahora_volumennominal(self):
+        from data.connectors.ar_connector import _normalize_iol
+
+        payload = [{
+            "fechaHora": "2024-03-04T00:00:00",
+            "apertura": 1000.0, "maximo": 1050.0, "minimo": 990.0,
+            "ultimoPrecio": 1030.0, "volumenNominal": 500_000.0,
+        }]
+        rows = _normalize_iol("GGAL", payload)
+        assert len(rows) == 1
+        assert rows[0].ts == date(2024, 3, 4)
+        assert rows[0].close == 1030.0
+        assert rows[0].volume == 500_000.0
+
+    def test_parses_legacy_keys_fecha_volumen(self):
+        from data.connectors.ar_connector import _normalize_iol
+
+        payload = [{
+            "fecha": "2024-03-04T00:00:00",
+            "apertura": 1000.0, "maximo": 1050.0, "minimo": 990.0,
+            "ultimoPrecio": 1030.0, "volumen": 500_000.0,
+        }]
+        rows = _normalize_iol("GGAL", payload)
+        assert len(rows) == 1
+        assert rows[0].volume == 500_000.0
+
+    def test_error_lists_received_keys_when_field_missing(self):
+        from data.connectors.ar_connector import DataError, _normalize_iol
+
+        payload = [{"apertura": 1.0, "maximo": 2.0, "minimo": 0.5, "ultimoPrecio": 1.5}]
+        with pytest.raises(DataError) as exc:
+            _normalize_iol("GGAL", payload)
+        msg = str(exc.value)
+        assert "volume" in msg and "date" in msg
+        assert "Keys received" in msg and "apertura" in msg
+
+
 class TestPartialData:
-    def test_should_return_empty_list_when_iol_payload_missing_required_keys(self):
-        """IOL response missing required keys (e.g. 'apertura') triggers DataError → []."""
+    def test_should_fall_back_to_byma_when_iol_payload_missing_required_keys(self):
+        """IOL DataError (keys faltantes) ya NO retorna []: cae al fallback Byma."""
         bad_payload = [{"fecha": "2024-03-04T00:00:00", "ultimoPrecio": 1030.0}]
 
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with _patch_requests_get(json_payload=bad_payload):
-                    result = fetch_ar_ohlcv("GGAL", _START, _END)
+                    with _patch_byma_history(return_value=_make_byma_df()):
+                        result = fetch_ar_ohlcv("GGAL", _START, _END)
 
-        assert result == []
+        # Byma aportó la data que IOL no pudo entregar.
+        assert len(result) == 1
+        assert result[0].venue == "XBUE"
+        assert result[0].close == 1030.0
+
+    def test_should_fall_back_to_byma_when_iol_returns_empty(self):
+        """IOL vacío (símbolo que no sirve, p. ej. varios CEDEARs) → fallback Byma."""
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with _patch_requests_get(json_payload=[]):  # IOL responde 200 con []
+                    with _patch_byma_history(return_value=_make_byma_df()):
+                        result = fetch_ar_ohlcv("SPY", _START, _END)
+
+        assert len(result) == 1
+        assert result[0].venue == "XBUE"
+
+    def test_should_retry_sinajustar_when_ajustada_empty_for_bonds(self):
+        """Bonos (AL30/GD30): IOL devuelve [] en 'ajustada' pero serie en 'sinAjustar'.
+        El connector debe reintentar el segundo modo antes de declarar vacío. (ADR-061)"""
+        seen_urls: list[str] = []
+
+        def get_side_effect(url, **kwargs):
+            seen_urls.append(url)
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            if url.endswith("/ajustada"):
+                mock_resp.json.return_value = []          # bono: vacío en ajustada
+            else:
+                mock_resp.json.return_value = _IOL_PAYLOAD  # serie en sinAjustar
+            return mock_resp
+
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with patch("data.connectors.ar_connector.requests.get", side_effect=get_side_effect):
+                    result = fetch_ar_ohlcv("AL30", _START, _END, iol_only=True)
+
+        assert result is not None and len(result) == 1
+        assert result[0].symbol == "AL30"
+        assert any(u.endswith("/ajustada") for u in seen_urls)
+        assert any(u.endswith("/sinAjustar") for u in seen_urls)
+
+    def test_should_dedup_multiple_plazos_per_date_keeping_max_volume(self):
+        """Los bonos traen varias filas por fecha (plazos CI/48hs); _normalize_iol
+        deja una por fecha, la de mayor volumen. (ADR-061)"""
+        from data.connectors.ar_connector import _normalize_iol
+
+        payload = [
+            {"fechaHora": "2024-03-04T00:00:00", "apertura": 100.0, "maximo": 110.0,
+             "minimo": 95.0, "ultimoPrecio": 105.0, "volumenNominal": 10.0},   # CI, vol bajo
+            {"fechaHora": "2024-03-04T00:00:00", "apertura": 101.0, "maximo": 111.0,
+             "minimo": 96.0, "ultimoPrecio": 106.0, "volumenNominal": 999.0},  # 48hs, vol alto
+        ]
+        rows = _normalize_iol("AL30", payload)
+        assert len(rows) == 1
+        assert rows[0].ts == date(2024, 3, 4)
+        assert rows[0].volume == pytest.approx(999.0)
+        assert rows[0].close == pytest.approx(106.0)
+
+    def test_iol_only_does_not_fall_back_to_byma_on_empty(self):
+        """Con iol_only=True, IOL vacío NO debe caer a Byma (contrato de iol_only)."""
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with _patch_requests_get(json_payload=[]):
+                    with _patch_byma_history(return_value=_make_byma_df()) as byma_mock:
+                        result = fetch_ar_ohlcv("SPY", _START, _END, iol_only=True)
+
+        assert not result  # None o [] — IOL vacío, sin fallback
+        byma_mock.assert_not_called()
 
     def test_should_return_empty_list_when_byma_response_missing_required_columns(self):
         """Byma DataFrame missing Volume column triggers DataError → []."""
@@ -343,7 +581,8 @@ class TestPartialData:
         assert result == []
 
     def test_should_not_retry_on_data_error_from_iol(self):
-        """DataError from IOL payload is not retried — only one attempt made before returning []."""
+        """DataError de IOL no se reintenta: una sola llamada, sin sleep. (Byma
+        parcheado a vacío para aislar la conducta de IOL del fallback.)"""
         bad_payload = [{"only_junk": True}]
         call_count = 0
 
@@ -356,11 +595,143 @@ class TestPartialData:
             return mock_resp
 
         with patch.dict("os.environ", _IOL_ENV):
-            with _patch_iol_token():
+            with _patch_iol_access_token():
                 with patch("data.connectors.ar_connector.requests.get", side_effect=get_side_effect):
                     with patch("data.connectors.ar_connector.time.sleep") as mock_sleep:
-                        result = fetch_ar_ohlcv("GGAL", _START, _END)
+                        with _patch_byma_history(return_value=_make_byma_df()):
+                            fetch_ar_ohlcv("GGAL", _START, _END)
 
-        assert result == []
+        # IOL no reintentó el data_error (1 sola llamada GET, sin backoff).
         assert call_count == 1
         mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Partial fallback / source attribution (fetch_log extra)
+# ---------------------------------------------------------------------------
+
+
+class TestPartialSourceAttribution:
+    def test_should_merge_byma_when_iol_covers_only_part_of_expected_calendar(self):
+        """Con calendario explícito, huecos IOL se rellenan con Byma y se audita rows_by_source."""
+        expected = {date(2024, 3, 4), date(2024, 3, 5), date(2024, 3, 6)}
+        byma_df = _make_byma_df(
+            [
+                {
+                    "Date": pd.Timestamp("2024-03-05"),
+                    "Open": 1010.0,
+                    "High": 1060.0,
+                    "Low": 1000.0,
+                    "Close": 1040.0,
+                    "Volume": 400_000.0,
+                },
+                {
+                    "Date": pd.Timestamp("2024-03-06"),
+                    "Open": 1020.0,
+                    "High": 1070.0,
+                    "Low": 1010.0,
+                    "Close": 1050.0,
+                    "Volume": 300_000.0,
+                },
+            ]
+        )
+
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with _patch_requests_get(json_payload=_IOL_PAYLOAD):
+                    with _patch_byma_history(return_value=byma_df):
+                        out = fetch_ar_ohlcv_with_trace(
+                            "GGAL",
+                            _START,
+                            _END,
+                            expected_dates=expected,
+                        )
+
+        assert out.rows is not None
+        assert len(out.rows) == 3
+        assert {r.ts for r in out.rows} == expected
+        assert out.trace.extra["partial_fallback"] is True
+        assert out.trace.source == SOURCE_MIXED
+        assert out.trace.extra["rows_by_source"][SOURCE_IOL] == 1
+        assert out.trace.extra["rows_by_source"][SOURCE_BYMA] == 2
+
+    def test_should_record_zero_iol_rows_on_full_byma_fallback(self):
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with patch(
+                    "data.connectors.ar_connector.requests.get",
+                    side_effect=ConnectionError("iol down"),
+                ):
+                    with patch("data.connectors.ar_connector.time.sleep"):
+                        with _patch_byma_history():
+                            out = fetch_ar_ohlcv_with_trace("GGAL", _START, _END)
+
+        assert out.rows is not None
+        assert out.trace.extra["rows_by_source"] == {SOURCE_IOL: 0, SOURCE_BYMA: 1}
+        assert out.trace.extra["partial_fallback"] is False
+        assert out.trace.extra["effective_source"] == SOURCE_BYMA
+
+
+# ---------------------------------------------------------------------------
+# fetch_log trace fields (status / source / skip_reason / provider)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchTraceFields:
+    def test_should_record_iol_provider_and_ok_status_on_trace_when_iol_succeeds(self):
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with _patch_requests_get():
+                    out = fetch_ar_ohlcv_with_trace("GGAL", _START, _END)
+
+        assert out.rows is not None
+        assert out.trace.status == FETCH_STATUS_OK
+        assert out.trace.provider == SOURCE_IOL
+        assert out.trace.source == SOURCE_IOL
+        assert out.trace.skip_reason is None
+        assert out.trace.iol_only is False
+        entry = out.trace.to_log_entry()
+        extra = json.loads(entry["extra"])
+        assert extra["provider"] == SOURCE_IOL
+        assert extra["rows"] == 1
+
+    def test_should_set_credentials_missing_on_trace_when_iol_only_without_credentials(self):
+        import os
+
+        with patch.dict("os.environ", {}, clear=True):
+            os.environ.pop("IOL_USER", None)
+            os.environ.pop("IOL_PASS", None)
+            with patch("data.connectors.ar_connector.yf.Ticker") as mock_ticker:
+                out = fetch_ar_ohlcv_with_trace("GGAL", _START, _END, iol_only=True)
+
+        mock_ticker.assert_not_called()
+        assert out.rows is None
+        assert out.trace.status == FETCH_STATUS_SKIP
+        assert out.trace.skip_reason == SKIP_CREDENTIALS_MISSING
+        assert out.trace.provider == SOURCE_IOL
+        assert out.trace.iol_only is True
+
+    def test_should_fallback_to_byma_and_record_budget_detail_when_iol_budget_exhausted(self):
+        with patch.dict("os.environ", _IOL_ENV):
+            with patch(
+                "data.connectors.ar_connector._fetch_with_retry_iol",
+                side_effect=IolJobBudgetExhausted("max_calls_per_job exceeded"),
+            ):
+                with _patch_byma_history():
+                    out = fetch_ar_ohlcv_with_trace("GGAL", _START, _END)
+
+        assert out.rows is not None
+        assert out.trace.status == FETCH_STATUS_OK
+        assert out.trace.source == SOURCE_BYMA
+        assert out.trace.skip_reason == SKIP_FALLBACK_USED
+        assert "budget_detail" in out.trace.extra
+        assert "max_calls_per_job" in out.trace.extra["budget_detail"]
+
+    def test_should_raise_when_iol_only_and_iol_budget_exhausted(self):
+        with patch.dict("os.environ", _IOL_ENV):
+            with patch(
+                "data.connectors.ar_connector._fetch_with_retry_iol",
+                side_effect=IolJobBudgetExhausted("max_calls_per_job exceeded"),
+            ):
+                with pytest.raises(IolJobBudgetExhausted):
+                    fetch_ar_ohlcv_with_trace("GGAL", _START, _END, iol_only=True)

@@ -22,7 +22,8 @@
     "data_providers",
     "calendar",
     "corporate_actions",
-    "validation_wf"
+    "validation_wf",
+    "ramp_stage"
   ],
   "properties": {
     "schema_version": {
@@ -62,7 +63,7 @@
       "required": ["short", "long"],
       "properties": {
         "short": { "type": "string", "enum": ["daily"] },
-        "long": { "type": "string", "enum": ["monthly"] }
+        "long": { "type": "string", "enum": ["weekly", "monthly"] }
       }
     },
     "execution_mode": {
@@ -75,12 +76,16 @@
       "required": [
         "whitelist_us_file",
         "whitelist_ar_file",
+        "whitelist_cedear_file",
         "inline_us",
-        "inline_ar"
+        "inline_ar",
+        "universe_selection"
       ],
       "properties": {
         "whitelist_us_file": { "type": "string", "minLength": 1 },
         "whitelist_ar_file": { "type": "string", "minLength": 1 },
+        "whitelist_cedear_file": { "type": "string", "minLength": 1 },
+        "whitelist_hedge_file": { "type": "string", "minLength": 1 },
         "inline_us": {
           "type": "array",
           "items": { "type": "string" }
@@ -88,6 +93,57 @@
         "inline_ar": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "universe_selection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "rebalance_frequency",
+            "targets",
+            "volume_window_trading_days",
+            "tiebreakers",
+            "api_budget"
+          ],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "rebalance_frequency": {
+              "type": "string",
+              "enum": ["daily", "weekly", "monthly"]
+            },
+            "targets": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["merval_top_n", "cedears_top_n"],
+              "properties": {
+                "merval_top_n": { "type": "integer", "minimum": 1, "maximum": 200 },
+                "cedears_top_n": { "type": "integer", "minimum": 1, "maximum": 500 }
+              }
+            },
+            "volume_window_trading_days": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 252
+            },
+            "tiebreakers": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "enum": ["avg_notional_desc", "symbol_asc"]
+              }
+            },
+            "api_budget": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["monthly_limit", "soft_limit_pct", "max_calls_per_job"],
+              "properties": {
+                "monthly_limit": { "type": "integer", "minimum": 1 },
+                "soft_limit_pct": { "type": "number", "minimum": 0, "maximum": 1 },
+                "max_calls_per_job": { "type": "integer", "minimum": 1 }
+              }
+            }
+          }
         }
       }
     },
@@ -167,8 +223,13 @@
         },
         "rebalance_rule": {
           "type": "string",
-          "minLength": 1,
-          "description": "Regla inequívoca de día de revisión mensual (v1: primer día de sesión US del mes)."
+          "enum": [
+            "first_us_trading_day_of_calendar_week",
+            "first_us_trading_day_of_calendar_month",
+            "first_ar_business_day_of_calendar_week",
+            "first_ar_business_day_of_calendar_month"
+          ],
+          "description": "Día de revisión: calendario US (XNYS) o calendario hábil AR (XBUE), semana o mes."
         },
         "max_long_rebalance_turnover_pct": {
           "type": ["number", "null"],
@@ -179,12 +240,13 @@
         "satellite_markets": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "enum": ["US"] }
+          "maxItems": 1,
+          "items": { "type": "string", "enum": ["US", "AR"] }
         },
         "core_lines": {
           "type": "array",
           "minItems": 2,
-          "maxItems": 3,
+          "maxItems": 8,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -232,6 +294,9 @@
         "volatility_20d_max",
         "top_k_per_market",
         "risk_budget_trade_pct",
+        "rsi_lookback",
+        "rsi_overbought_entry",
+        "rsi_exit_threshold",
         "allow_leverage"
       ],
       "properties": {
@@ -240,7 +305,43 @@
         "volatility_20d_max": { "type": "number", "minimum": 0 },
         "top_k_per_market": { "type": "integer", "minimum": 1 },
         "risk_budget_trade_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "rsi_lookback": { "type": "integer", "minimum": 2, "maximum": 100 },
+        "rsi_overbought_entry": { "type": "number", "minimum": 0, "maximum": 100 },
+        "rsi_exit_threshold": { "type": "number", "minimum": 0, "maximum": 100 },
         "allow_leverage": { "type": "boolean" }
+      }
+    },
+    "short_hedge": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "mode": { "type": "string" },
+        "hedge_weight_total": { "type": "number", "minimum": 0, "maximum": 1 },
+        "tactical_weight_total": { "type": "number", "minimum": 0, "maximum": 1 },
+        "drift_rebalance_threshold_pp": { "type": "number", "exclusiveMinimum": 0 },
+        "hedge_lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["symbol", "target_weight"],
+            "properties": {
+              "symbol": { "type": "string" },
+              "target_weight": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "derisk_to_cash": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "trigger": { "type": "string" },
+            "ar_factor_drawdown_floor": { "type": ["number", "null"] },
+            "global_drawdown_floor": { "type": ["number", "null"] }
+          }
+        }
       }
     },
     "markets": {
@@ -298,6 +399,16 @@
             "enum": ["split", "dividend"]
           }
         }
+      }
+    },
+    "data_quality_confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["high", "medium"],
+      "description": "Umbrales informacionales para clasificar confianza en salidas v1 (no bloqueante).",
+      "properties": {
+        "high": { "$ref": "#/$defs/dataQualityConfidenceTier" },
+        "medium": { "$ref": "#/$defs/dataQualityConfidenceTier" }
       }
     },
     "validation_wf": {
@@ -414,9 +525,32 @@
           }
         }
       }
+    },
+    "ramp_stage": {
+      "type": "string",
+      "enum": ["paper", "ramp_10", "ramp_25", "ramp_50", "live_100"],
+      "description": "Fase actual de ramp-up hacia capital real. Cambia solo con revisión humana documentada."
     }
   },
   "$defs": {
+    "dataQualityConfidenceTier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min_n_observations", "max_imputed_pct"],
+      "properties": {
+        "min_n_observations": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Mínimo de barras consumidas para este nivel de confianza."
+        },
+        "max_imputed_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Máximo porcentaje de barras imputadas (0-100) para este nivel."
+        }
+      }
+    },
     "marketCosts": {
       "type": "object",
       "additionalProperties": false,

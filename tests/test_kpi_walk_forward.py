@@ -32,8 +32,21 @@ def _policy_with_kpi_gate(tmp_path: Path) -> Path:
         "symbols": {
             "whitelist_us_file": "config/symbols/whitelist_us.yaml",
             "whitelist_ar_file": "config/symbols/whitelist_ar.yaml",
+            "whitelist_cedear_file": "config/symbols/whitelist_cedear.yaml",
             "inline_us": [],
             "inline_ar": [],
+            "universe_selection": {
+                "enabled": False,
+                "rebalance_frequency": "weekly",
+                "targets": {"merval_top_n": 10, "cedears_top_n": 20},
+                "volume_window_trading_days": 20,
+                "tiebreakers": ["avg_notional_desc", "symbol_asc"],
+                "api_budget": {
+                    "monthly_limit": 25000,
+                    "soft_limit_pct": 0.8,
+                    "max_calls_per_job": 2000,
+                },
+            },
         },
         "risk": {
             "max_notional_per_ticker_pct": 0.08,
@@ -60,7 +73,7 @@ def _policy_with_kpi_gate(tmp_path: Path) -> Path:
         "long_term_engine": {
             "drift_rebalance_threshold_pp": 2.0,
             "drift_convention": "per_line",
-            "rebalance_rule": "first_us_trading_day_of_calendar_month",
+            "rebalance_rule": "first_us_trading_day_of_calendar_week",
             "max_long_rebalance_turnover_pct": None,
             "satellite_markets": ["US"],
             "core_lines": [

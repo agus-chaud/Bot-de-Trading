@@ -30,3 +30,26 @@ class CorporateActionRow:
     ts: date
     type: str       # "split" | "dividend"
     factor: float   # split ratio or cash dividend amount per share
+
+
+@dataclass(frozen=True)
+class UniverseSnapshotRow:
+    """One line of the universe snapshot (liquidity selection or overlay)."""
+
+    selection_date: date
+    bucket: str  # "merval" | "cedear"
+    symbol: str
+    rank: int
+    metric_value: float | None  # e.g. total volume in window; None for overlay-only rows
+    source: str  # dynamic | fallback_last_valid | fallback_static | holding_overlay
+    schema_version: int
+
+
+@dataclass(frozen=True)
+class PortfolioMeta:
+    """Persisted inception capital for a paper/backtest mode (audit C1 / T1.1)."""
+
+    mode: str  # "paper_live" | "backtest"
+    starting_cash: float
+    currency: str  # "ARS" | "USD"
+    inception_date: date

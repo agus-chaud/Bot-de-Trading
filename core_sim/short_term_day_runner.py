@@ -27,13 +27,23 @@ from .short_term_engine import (
     RiskCaps,
     ShortEngineConfig,
     build_orders_intent,
+    compute_rsi,
     compute_signal_candidates,
     rank_top_k_by_market,
 )
 
 
-def load_merged_whitelist(repo_root: Path, policy_doc: dict[str, Any]) -> dict[str, str]:
-    """Return `symbol_upper -> market` for US and AR combined (+ inline lists)."""
+def load_merged_whitelist(
+    repo_root: Path,
+    policy_doc: dict[str, Any],
+    *,
+    ar_operational_symbols: list[str] | None = None,
+) -> dict[str, str]:
+    """Return `symbol_upper -> market` for US and AR combined (+ inline lists).
+
+    When *ar_operational_symbols* is set (dynamic universe / fetch ∪ holdings), AR tickers
+    are exactly that list (plus inline_ar), merged after US files so ADRs stay US.
+    """
     sym_cfg = policy_doc["symbols"]
     merged: dict[str, str] = {}
     for raw in sym_cfg.get("inline_us", []) or []:
@@ -43,16 +53,35 @@ def load_merged_whitelist(repo_root: Path, policy_doc: dict[str, Any]) -> dict[s
 
     us_path = repo_root / str(sym_cfg["whitelist_us_file"])
     ar_path = repo_root / str(sym_cfg["whitelist_ar_file"])
+    ced_path_str = sym_cfg.get("whitelist_cedear_file")
+    ced_path = repo_root / str(ced_path_str) if ced_path_str else None
+
     with us_path.open(encoding="utf-8") as f:
         us_doc = yaml.safe_load(f) or {}
     with ar_path.open(encoding="utf-8") as f:
         ar_doc = yaml.safe_load(f) or {}
 
-    for bucket in ("etfs", "stocks"):
+    if ar_operational_symbols is None:
+        for raw in ar_doc.get("stocks", []) or []:
+            merged[str(raw).strip().upper()] = "AR"
+        if ced_path and ced_path.is_file():
+            with ced_path.open(encoding="utf-8") as f:
+                ced_doc = yaml.safe_load(f) or {}
+            for raw in ced_doc.get("stocks", []) or []:
+                su = str(raw).strip().upper()
+                if su and merged.get(su) != "US":
+                    merged[su] = "AR"
+    else:
+        for sym in ar_operational_symbols:
+            su = str(sym).strip().upper()
+            if not su:
+                continue
+            if merged.get(su) == "US":
+                continue
+            merged[su] = "AR"
+    for bucket in ("etfs", "stocks", "adrs"):
         for raw in us_doc.get(bucket, []) or []:
             merged[str(raw).strip().upper()] = "US"
-    for raw in ar_doc.get("stocks", []) or []:
-        merged[str(raw).strip().upper()] = "AR"
     return merged
 
 
@@ -148,6 +177,10 @@ def build_market_snapshot_rows(
         if vol_20d is None:
             skipped.append({"symbol": sym, "reason": "insufficient_returns_for_vol"})
             continue
+        rsi = compute_rsi(combined, lookback=ste_cfg.rsi_lookback)
+        if rsi is None:
+            skipped.append({"symbol": sym, "reason": "insufficient_history_for_rsi"})
+            continue
 
         session_valid = (
             bool(market_open.get("is_us_session")) if market == "US" else bool(market_open.get("is_ar_business_day"))
@@ -161,6 +194,7 @@ def build_market_snapshot_rows(
                 "close_n_days_ago": float(close_n_days_ago),
                 "volume_percentile": float(vol_pct.get(sym, 0.0)),
                 "vol_20d": float(vol_20d),
+                "rsi": float(rsi),
                 "session_valid": session_valid,
                 "sector": sector_map.get(sym, "UNKNOWN"),
             }
@@ -222,6 +256,7 @@ def _data_quality_broken(
         "invalid_price",
         "insufficient_history",
         "insufficient_returns_for_vol",
+        "insufficient_history_for_rsi",
     }
     return any(s.get("reason") in bad for s in (skipped_whitelist or []))
 
@@ -272,7 +307,16 @@ def create_short_term_pipeline_handlers(
     db: "MarketDB | None" = None,
 ) -> dict[str, Callable[..., Any]]:
     """Handlers listos para inyectar en `DailyEventBacktester` (signals/propose/risk)."""
-    merged = load_merged_whitelist(repo_root, policy_doc)
+    from data.universe_selector import resolve_ar_universe_for_short_pipeline
+
+    def _symbol_ctx() -> tuple[dict[str, str], frozenset[str] | None]:
+        ar_u = resolve_ar_universe_for_short_pipeline(policy_doc, repo_root, ledger, db)
+        merged_map = load_merged_whitelist(
+            repo_root,
+            policy_doc,
+            ar_operational_symbols=ar_u.symbols_ar_bars,
+        )
+        return merged_map, ar_u.ar_signal_symbols
     ste_raw = policy_doc["short_term_engine"]
     ste = ShortEngineConfig(
         momentum_lookback_days=int(ste_raw["momentum_lookback_days"]),
@@ -280,6 +324,9 @@ def create_short_term_pipeline_handlers(
         volatility_20d_max=float(ste_raw["volatility_20d_max"]),
         top_k_per_market=int(ste_raw["top_k_per_market"]),
         risk_budget_trade_pct=float(ste_raw["risk_budget_trade_pct"]),
+        rsi_lookback=int(ste_raw.get("rsi_lookback", 14)),
+        rsi_overbought_entry=float(ste_raw.get("rsi_overbought_entry", 80.0)),
+        rsi_exit_threshold=float(ste_raw.get("rsi_exit_threshold", 45.0)),
         allow_leverage=bool(ste_raw.get("allow_leverage", False)),
     )
     risk_cfg = policy_doc["risk"]
@@ -303,7 +350,8 @@ def create_short_term_pipeline_handlers(
         "fallback_pct_ar": float(_sl_raw.get("fallback_pct_ar", -0.08)),
     }
 
-    def _empty_proposal(halt_reason: str) -> dict[str, Any]:
+    def _empty_proposal(halt_reason: str, *, signals: dict[str, Any] | None = None) -> dict[str, Any]:
+        sig = signals if isinstance(signals, dict) else {}
         return {
             "orders_intent": [],
             "broker_orders": [],
@@ -314,9 +362,26 @@ def create_short_term_pipeline_handlers(
                 "symbols_selected": 0,
                 "halt_reason": halt_reason,
             },
+            "skipped_signal": list(sig.get("skipped_signal") or []),
+            "skipped_whitelist_or_data": list(sig.get("skipped_whitelist_or_data") or []),
+            "redistribution_log": [],
+            "allocation_headroom": None,
         }
 
+    def _serialize_redistribution_log(alloc: Any) -> list[dict[str, object]]:
+        return [
+            {
+                "from_bucket": entry.from_bucket,
+                "to_bucket": entry.to_bucket,
+                "amount": float(entry.amount),
+                "reason": entry.reason,
+            }
+            for entry in alloc.redistribution_log
+        ]
+
     from .risk_guardrails import GuardrailResult
+
+    _KILL_DD_DISABLED = -100.0
 
     def _check_risk_with_optional_db(
         sb: dict,
@@ -325,56 +390,33 @@ def create_short_term_pipeline_handlers(
         now_minutes_from_open: int | None,
         trading_day: date,
     ) -> "GuardrailResult":
-        """When db is available, replace the stateless kill switch check with the persisted one.
+        """Lightweight orchestrator: reuses check_short_risk for common checks,
+        injects check_and_persist_kill_switch when db is available.
 
-        Checks run in the same order as check_short_risk:
-        data_quality → no_trade_window → kill_switch → daily_loss.
-        The only difference is that kill_switch uses check_and_persist_kill_switch when db is set.
+        Order: data_quality → no_trade_window → kill_switch → daily_loss.
+        Without DB: delegates entirely to check_short_risk (stateless kill switch).
+        With DB: replaces the stateless kill switch step with the persisted one.
         """
         if db is None:
             return check_short_risk(sb, flags, risk_config, now_minutes_from_open)
 
-        # data_quality
-        halt_on_dq = bool(flags.get("halt_on_data_quality", True))
-        data_ok = bool(flags.get("data_quality_ok", True))
-        if halt_on_dq and not data_ok:
-            return GuardrailResult(
-                allowed=False,
-                reason="halt_data_quality",
-                meta={"halt_on_data_quality": halt_on_dq, "data_quality_ok": data_ok},
-            )
+        pre_config = {**risk_config, "kill_dd": _KILL_DD_DISABLED, "max_daily_short": 0.0}
+        pre = check_short_risk(sb, flags, pre_config, now_minutes_from_open)
+        if not pre.allowed:
+            return pre
 
-        # no_trade_window
-        no_trade_first = int(risk_config.get("no_trade_first", 0))
-        no_trade_last = int(risk_config.get("no_trade_last", 0))
-        if now_minutes_from_open is not None and in_no_trade_window(
-            no_trade_first=no_trade_first,
-            no_trade_last=no_trade_last,
-            session_minutes_from_open=now_minutes_from_open,
-            session_length_minutes=us_regular_session_length_minutes(),
-        ):
-            return GuardrailResult(
-                allowed=False,
-                reason="no_trade_window",
-                meta={"now_minutes_from_open": now_minutes_from_open},
-            )
-
-        # kill_switch — persisted path
         ks_result = check_and_persist_kill_switch(sb, risk_config, db, engine="short", today=trading_day)
         if not ks_result.allowed:
             return ks_result
 
-        # daily_loss
-        max_daily_short = float(risk_config.get("max_daily_short", -0.02))
-        daily_ret = float(sb.get("daily_return", 0.0))
-        if max_daily_short < 0.0 and daily_ret < max_daily_short:
-            return GuardrailResult(
-                allowed=False,
-                reason="short_daily_loss_limit",
-                meta={"daily_return": daily_ret, "limit": max_daily_short},
-            )
+        daily_config = {**risk_config, "kill_dd": _KILL_DD_DISABLED}
+        daily_flags = {"halt_on_data_quality": False, "data_quality_ok": True}
+        post = check_short_risk(sb, daily_flags, daily_config, None)
+        if not post.allowed:
+            return post
 
         monthly_dd = float(sb.get("monthly_drawdown", 0.0))
+        daily_ret = float(sb.get("daily_return", 0.0))
         return GuardrailResult(allowed=True, reason="ok", meta={"monthly_drawdown": monthly_dd, "daily_return": daily_ret})
 
     def generate_signals(**ctx: Any) -> dict[str, Any]:
@@ -385,16 +427,24 @@ def create_short_term_pipeline_handlers(
         if not isinstance(sector_map, dict):
             sector_map = {}
 
+        merged_map, ar_signal_filter = _symbol_ctx()
         rows, skipped_whitelist = build_market_snapshot_rows(
             trading_day=ctx["trading_day"],
             daily_bars=ctx["daily_bars"],
             history_by_symbol=history_by_symbol,
-            merged_whitelist=merged,
+            merged_whitelist=merged_map,
             market_open=ctx["market_open"],
             ste_cfg=ste,
             sector_map=sector_map,
         )
-        candidates, skipped_signal = compute_signal_candidates(rows, ste)
+        rows_for_rank = rows
+        if ar_signal_filter is not None:
+            rows_for_rank = [
+                r
+                for r in rows
+                if str(r.get("market")) != "AR" or str(r["symbol"]) in ar_signal_filter
+            ]
+        candidates, skipped_signal = compute_signal_candidates(rows_for_rank, ste)
         selected = rank_top_k_by_market(candidates, ste.top_k_per_market)
         daily = ctx.get("daily_bars") or {}
         data_ok = bool(daily) and not _data_quality_broken(skipped_whitelist)
@@ -403,8 +453,9 @@ def create_short_term_pipeline_handlers(
             "selected": selected,
             "skipped_whitelist_or_data": skipped_whitelist,
             "skipped_signal": skipped_signal,
+            "rsi_by_symbol": {str(row["symbol"]): float(row["rsi"]) for row in rows if "rsi" in row},
             "metrics": {
-                "whitelist_size": len(merged),
+                "whitelist_size": len(merged_map),
                 "snapshot_rows": len(rows),
                 "candidates": len(candidates),
                 "selected": len(selected),
@@ -418,10 +469,11 @@ def create_short_term_pipeline_handlers(
     def propose_orders(**ctx: Any) -> dict[str, Any]:
         signals = ctx["signals"]
         if not isinstance(signals, dict):
-            return _empty_proposal("invalid_signals")
+            return _empty_proposal("invalid_signals", signals=None)
         flags = signals.get("risk_flags") or {}
 
         selected = signals.get("selected") or []
+        rsi_today_by_symbol = signals.get("rsi_by_symbol") or {}
         snap = ledger.mark_to_market(trading_day=ctx["trading_day"], daily_bars=ctx["daily_bars"])
         equity_total = float(snap["equity_total"])
         short_mv, notionals, sector_pct = _short_bucket_exposure(snap)
@@ -445,7 +497,7 @@ def create_short_term_pipeline_handlers(
                 orders_filled=0,
                 kill_switch_active=(guardrail.reason == "short_monthly_kill_switch"),
             )
-            return _empty_proposal(guardrail.reason)
+            return _empty_proposal(guardrail.reason, signals=signals)
 
         alloc = compute_allocation(
             equity_total=equity_total,
@@ -476,7 +528,51 @@ def create_short_term_pipeline_handlers(
             short_tranche_headroom=short_tranche_headroom,
             geo_headroom=geo_headroom,
         )
+        entries_blocked_by_rsi = sum(1 for item in (signals.get("skipped_signal") or []) if item.get("reason") == "rsi_overbought")
+        metrics["entries_blocked_by_rsi"] = int(entries_blocked_by_rsi)
+        metrics["exits_by_rsi"] = 0
+        metrics["exits_by_stop_loss"] = 0
         broker_orders = orders_intent_to_broker_orders(intents)
+
+        rsi_prev_by_symbol = ctx.get("rsi_prev_by_symbol") or {}
+        rsi_exit_symbols: set[str] = set()
+        for sym, pos in (snap.get("positions") or {}).items():
+            if str(pos.get("bucket")) != "short":
+                continue
+            qty = float(pos.get("qty", 0.0))
+            if qty <= 0:
+                continue
+            prev_rsi = rsi_prev_by_symbol.get(sym)
+            today_rsi = rsi_today_by_symbol.get(sym)
+            if prev_rsi is None or today_rsi is None:
+                continue
+            prev_f = float(prev_rsi)
+            today_f = float(today_rsi)
+            if prev_f < ste.rsi_overbought_entry and today_f >= ste.rsi_overbought_entry:
+                rsi_exit_symbols.add(str(sym))
+                broker_orders.append(
+                    {
+                        "symbol": str(sym),
+                        "side": "SELL",
+                        "qty": qty,
+                        "market": str(pos.get("market", "US")),
+                        "bucket": "short",
+                        "reason": "rsi_overbought_reached",
+                    }
+                )
+                continue
+            if prev_f >= ste.rsi_exit_threshold and today_f < ste.rsi_exit_threshold:
+                rsi_exit_symbols.add(str(sym))
+                broker_orders.append(
+                    {
+                        "symbol": str(sym),
+                        "side": "SELL",
+                        "qty": qty,
+                        "market": str(pos.get("market", "US")),
+                        "bucket": "short",
+                        "reason": "rsi_momentum_exhausted",
+                    }
+                )
 
         # Evaluate stop loss for every open short position regardless of guardrail state
         all_positions = snap.get("positions") or {}
@@ -495,9 +591,13 @@ def create_short_term_pipeline_handlers(
             price_history=ohlcv_history,
             config=stop_loss_config,
         )
+        stop_loss_symbols: set[str] = set()
         for sym in sl_triggered:
+            if sym in rsi_exit_symbols:
+                continue
             pos_info = sl_positions[sym]
             bar = ctx["daily_bars"].get(sym) or {}
+            stop_loss_symbols.add(str(sym))
             broker_orders.append(
                 {
                     "symbol": sym,
@@ -509,6 +609,8 @@ def create_short_term_pipeline_handlers(
                     "reason": "stop_loss",
                 }
             )
+        metrics["exits_by_rsi"] = len(rsi_exit_symbols)
+        metrics["exits_by_stop_loss"] = len(stop_loss_symbols)
 
         log_risk_cycle(
             engine="short",
@@ -523,9 +625,17 @@ def create_short_term_pipeline_handlers(
             "broker_orders": broker_orders,
             "skip_sizing": skip_sizing,
             "sizing_metrics": metrics,
+            "rsi_today_by_symbol": rsi_today_by_symbol,
+            "skipped_signal": list(signals.get("skipped_signal") or []),
+            "skipped_whitelist_or_data": list(signals.get("skipped_whitelist_or_data") or []),
+            "redistribution_log": _serialize_redistribution_log(alloc),
+            "allocation_headroom": {
+                "target_by_bucket": dict(alloc.target_by_bucket),
+                "headroom_by_bucket": dict(alloc.headroom_by_bucket),
+            },
         }
 
-    def risk_check(**ctx: Any) -> list[dict[str, str | float]]:
+    def risk_check(**ctx: Any) -> dict[str, Any]:
         proposed = ctx["proposed_orders"]
         if isinstance(proposed, dict):
             broker_orders = proposed.get("broker_orders") or []
@@ -549,16 +659,31 @@ def create_short_term_pipeline_handlers(
         }
         guardrail = _check_risk_with_optional_db(sb, flags, risk_config, ctx.get("session_minutes_from_open"), ctx["trading_day"])
 
+        merged_map, _ = _symbol_ctx()
         approved: list[dict[str, str | float]] = list(stop_loss_orders)
+        blocked: list[dict[str, object]] = []
         if guardrail.allowed:
             for order in normal_orders:
                 sym = str(order["symbol"]).strip().upper()
-                if sym not in merged:
+                if sym not in merged_map:
+                    blocked.append({**order, "block_reason": "symbol_not_in_whitelist"})
                     continue
-                if merged[sym] != str(order.get("market", "")):
+                if merged_map[sym] != str(order.get("market", "")):
+                    blocked.append({**order, "block_reason": "market_tag_mismatch"})
                     continue
                 approved.append(order)
-        return approved
+        else:
+            for order in normal_orders:
+                blocked.append({**order, "block_reason": guardrail.reason})
+
+        return {
+            "approved_orders": approved,
+            "risk_audit": {
+                "guardrail_allowed": guardrail.allowed,
+                "guardrail_reason": guardrail.reason,
+                "blocked_orders": blocked,
+            },
+        }
 
     return {
         "generate_signals": generate_signals,

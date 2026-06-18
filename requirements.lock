@@ -1,0 +1,54 @@
+# Lockfile reproducible — versiones EXACTAS para CI y paper-live diario.
+#
+# requirements.txt = intención (rangos legibles para humanos).
+# requirements.lock = lo que realmente se instala (pins exactos del árbol completo).
+#
+# Resuelto sobre Python 3.13 (igual que el dev local y los workflows).
+# Regenerar tras cambiar requirements.txt:
+#   pip install -r requirements.txt
+#   python -c "import importlib.metadata as m; ..."   # ver scripts o regenerar a mano
+# Luego revisar el diff de este archivo como cualquier cambio de dependencias.
+
+attrs==25.4.0
+beautifulsoup4==4.14.2
+certifi==2025.10.5
+cffi==2.0.0
+charset-normalizer==3.4.4
+colorama==0.4.6
+coverage==7.13.5
+curl-cffi==0.13.0
+exchange-calendars==4.13.2
+frozendict==2.4.7
+idna==3.11
+iniconfig==2.3.0
+jsonschema==4.25.1
+jsonschema-specifications==2025.9.1
+korean-lunar-calendar==0.3.1
+multitasking==0.0.12
+numpy==2.3.4
+packaging==25.0
+pandas==2.3.3
+pandas-market-calendars==5.3.2
+peewee==4.0.0
+platformdirs==4.5.0
+pluggy==1.6.0
+protobuf==5.29.6
+pycparser==2.23
+pygments==2.19.2
+pyluach==2.3.0
+pytest==9.0.2
+pytest-cov==7.1.0
+python-dateutil==2.9.0.post0
+pytz==2025.2
+pyyaml==6.0.3
+referencing==0.37.0
+requests==2.32.5
+rpds-py==0.28.0
+six==1.17.0
+soupsieve==2.8
+toolz==1.1.0
+typing-extensions==4.15.0
+tzdata==2025.2
+urllib3==2.5.0
+websockets==15.0.1
+yfinance==1.2.0

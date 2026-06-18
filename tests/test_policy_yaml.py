@@ -62,12 +62,31 @@ def test_whitelist_files_exist_relative_to_repo():
     cfg = _load_policy()
     us_path = REPO_ROOT / cfg["symbols"]["whitelist_us_file"]
     ar_path = REPO_ROOT / cfg["symbols"]["whitelist_ar_file"]
+    ced_path = REPO_ROOT / cfg["symbols"]["whitelist_cedear_file"]
     assert us_path.is_file()
     assert ar_path.is_file()
+    assert ced_path.is_file()
     with us_path.open(encoding="utf-8") as f:
         us = yaml.safe_load(f)
     assert set(us["etfs"]) >= {"SPY", "QQQ", "IWM"}
     assert isinstance(us["stocks"], list) and len(us["stocks"]) >= 1
+
+
+def test_long_term_ar_calendar_satellite_markets_and_spy_cedear_paso5():
+    """Contrato repo: sleeve largo en calendario AR + SPY admitido como CEDEAR."""
+    cfg = _load_policy()
+    lt = cfg["long_term_engine"]
+    assert lt["satellite_markets"] == ["AR"]
+    rule = str(lt["rebalance_rule"])
+    assert rule.startswith("first_ar_business_day_of_")
+    sleeve_syms = {row["symbol"] for row in lt["core_lines"]} | {row["symbol"] for row in lt["satellite_lines"]}
+    assert "SPY" in sleeve_syms
+
+    ced_path = REPO_ROOT / cfg["symbols"]["whitelist_cedear_file"]
+    with ced_path.open(encoding="utf-8") as f:
+        ced = yaml.safe_load(f) or {}
+    ced_syms_upper = {str(s).strip().upper() for s in ced.get("stocks", []) if s}
+    assert "SPY" in ced_syms_upper
 
 
 def test_calendar_and_corporate_actions_files_exist_relative_to_repo():

@@ -1,9 +1,9 @@
 """Long-term monthly pipeline: snapshot → engine → risk → broker-shaped orders.
 
 Agent-teams-lite boundaries:
-- **Data**: precios del daily_bars del sleeve largo + us_sessions del pipeline_context.
+- **Data**: precios del daily_bars del sleeve largo + sesiones de calendario (US o AR) según policy.
 - **Engine**: `build_long_term_orders_intent` (targets, drift, rebalance gate, intents).
-- **Risk**: whitelist US v1 (solo US en v1).
+- **Risk**: whitelist BYMA (pesos) o US según `satellite_markets` en policy.
 - **Core sim**: salida compatible con `PaperBrokerSim.fill_orders` (sin `price`).
 
 Los inputs de sleeve (long_bucket_mtm, long_cash, positions_qty_long) vienen del caller
@@ -16,18 +16,63 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
+import yaml
+
 from .long_term_engine import (
     LongTermEngineConfig,
     build_long_term_orders_intent,
+    long_rebalance_calendar_from_rule,
+    long_sleeve_trade_market,
     long_term_engine_config_from_policy_dict,
 )
 from .risk_guardrails import check_long_risk, log_risk_cycle
 from .short_term_day_runner import load_merged_whitelist, orders_intent_to_broker_orders
 
 
-def _whitelist_us_only(merged: dict[str, str]) -> frozenset[str]:
-    """Filtra la whitelist combinada a sólo símbolos del mercado US."""
-    return frozenset(sym for sym, mkt in merged.items() if mkt == "US")
+def _whitelist_long_symbols_us_merged(
+    merged: dict[str, str], lt_cfg: LongTermEngineConfig
+) -> frozenset[str]:
+    """Universo del sleeve largo ∩ tickers marcados US en whitelist combinada."""
+    universe = frozenset(
+        str(sym).strip().upper() for sym, _ in (*lt_cfg.core_lines, *lt_cfg.satellite_lines)
+    )
+    return frozenset(sym for sym in universe if merged.get(sym) == "US")
+
+
+def _whitelist_long_ar_from_symbol_files(
+    repo_root: Path,
+    policy_doc: dict[str, Any],
+    lt_cfg: LongTermEngineConfig,
+) -> frozenset[str]:
+    """Operables BYMA para el largo: intersección de líneas del policy con AR ∪ CEDEAR.
+
+    El merge global (`load_merged_whitelist`) puede marcar un ticker como US (p. ej. SPY ETF)
+    aunque el sleeve largo opere el mismo símbolo como CEDEAR; aquí prevalecen las listas
+    `whitelist_ar_file` + `whitelist_cedear_file` para no bloquear el universo largo AR.
+    """
+    universe = frozenset(
+        str(sym).strip().upper() for sym, _ in (*lt_cfg.core_lines, *lt_cfg.satellite_lines)
+    )
+    sym_cfg = policy_doc["symbols"]
+    ar_path = repo_root / str(sym_cfg["whitelist_ar_file"])
+    listed: set[str] = set()
+    with ar_path.open(encoding="utf-8") as f:
+        ar_doc = yaml.safe_load(f) or {}
+    for raw in ar_doc.get("stocks", []) or []:
+        su = str(raw).strip().upper()
+        if su:
+            listed.add(su)
+    ced_raw = sym_cfg.get("whitelist_cedear_file")
+    if ced_raw:
+        ced_path = repo_root / str(ced_raw)
+        if ced_path.is_file():
+            with ced_path.open(encoding="utf-8") as f:
+                ced_doc = yaml.safe_load(f) or {}
+            for raw in ced_doc.get("stocks", []) or []:
+                su = str(raw).strip().upper()
+                if su:
+                    listed.add(su)
+    return frozenset(s for s in universe if s in listed)
 
 
 def _empty_signal(skip_reason: str) -> dict[str, Any]:
@@ -82,7 +127,8 @@ def create_long_term_pipeline_handlers(
     """Handlers listos para inyectar en `DailyEventBacktester` (signals/propose/risk).
 
     El caller pasa en `pipeline_context`:
-      - us_sessions: frozenset[date]
+      - Para US: ``us_sessions: frozenset[date]`` (o derive vía calendar_store).
+      - Para AR pesos: ``ar_business_days: frozenset[date]`` (o derive vía calendar_store.ar_business_days).
       - long_bucket_mtm: float
       - long_cash: float
       - positions_qty_long: dict[str, float]
@@ -90,21 +136,37 @@ def create_long_term_pipeline_handlers(
       - data_quality_halt: bool (default False)
     """
     merged = load_merged_whitelist(repo_root, policy_doc)
-    whitelist_us = _whitelist_us_only(merged)
     lt_cfg: LongTermEngineConfig = long_term_engine_config_from_policy_dict(
         policy_doc["long_term_engine"]
     )
+    cal_kind = long_rebalance_calendar_from_rule(lt_cfg.rebalance_rule)
+    whitelist_long = (
+        _whitelist_long_ar_from_symbol_files(repo_root, policy_doc, lt_cfg)
+        if cal_kind == "AR"
+        else _whitelist_long_symbols_us_merged(merged, lt_cfg)
+    )
+
+    trade_mkt_expected = long_sleeve_trade_market(lt_cfg)
+
     max_daily_long = float(policy_doc["risk"]["max_daily_loss_long_pct"])
 
     def generate_signals(**ctx: Any) -> dict[str, Any]:
         trading_day: date = ctx["trading_day"]
         daily_bars: dict[str, dict[str, float]] = ctx.get("daily_bars") or {}
 
-        us_sessions = ctx.get("us_sessions") or (
-            calendar_store.us_sessions if calendar_store is not None else None
-        )
-        if us_sessions is None:
-            return _empty_signal("missing_us_sessions")
+        if cal_kind == "US":
+            calendar_sessions = ctx.get("us_sessions") or (
+                calendar_store.us_sessions if calendar_store is not None else None
+            )
+            miss_reason = "missing_us_sessions"
+        else:
+            calendar_sessions = ctx.get("ar_business_days") or (
+                calendar_store.ar_business_days if calendar_store is not None else None
+            )
+            miss_reason = "missing_ar_business_days"
+
+        if calendar_sessions is None:
+            return _empty_signal(miss_reason)
 
         long_bucket_mtm = ctx.get("long_bucket_mtm")
         if long_bucket_mtm is None:
@@ -128,9 +190,9 @@ def create_long_term_pipeline_handlers(
             positions_qty_long, corporate_actions
         )
 
-        # Precios del sleeve: cierre de cada símbolo de la whitelist US en daily_bars.
+        # Precios del sleeve: cierre por símbolo según whitelist del largo.
         prices: dict[str, float] = {}
-        for sym in whitelist_us:
+        for sym in whitelist_long:
             bar = daily_bars.get(sym)
             if bar and "close" in bar and float(bar["close"]) > 0:
                 prices[sym] = float(bar["close"])
@@ -138,12 +200,12 @@ def create_long_term_pipeline_handlers(
         intents, skips, metrics = build_long_term_orders_intent(
             lt_cfg,
             trading_day=trading_day,
-            us_sessions=frozenset(us_sessions),
+            calendar_sessions=frozenset(calendar_sessions),
             long_bucket_mtm=float(long_bucket_mtm),
             long_cash=float(long_cash),
             positions_qty=adjusted_positions_qty,
             prices=prices,
-            whitelist_us=whitelist_us,
+            whitelist_long=whitelist_long,
             halt_long_engine=halt_long,
             data_quality_halt=data_quality_halt,
         )
@@ -164,8 +226,8 @@ def create_long_term_pipeline_handlers(
             return _empty_proposal("invalid_signals")
 
         snap = ledger.mark_to_market(trading_day=ctx["trading_day"], daily_bars=ctx["daily_bars"])
-        sb = snap or {}
-        guardrail = check_long_risk(sb, {"max_daily_long": max_daily_long})
+        long_bucket = snap.get("long_bucket") or {}
+        guardrail = check_long_risk(long_bucket, {"max_daily_long": max_daily_long})
         if not guardrail.allowed:
             log_risk_cycle(
                 engine="long",
@@ -208,16 +270,16 @@ def create_long_term_pipeline_handlers(
             broker_orders = list(proposed)
 
         snap = ledger.mark_to_market(trading_day=ctx["trading_day"], daily_bars=ctx["daily_bars"])
-        sb = snap or {}
-        guardrail = check_long_risk(sb, {"max_daily_long": max_daily_long})
+        long_bucket = snap.get("long_bucket") or {}
+        guardrail = check_long_risk(long_bucket, {"max_daily_long": max_daily_long})
         if not guardrail.allowed:
             return []
 
-        # v1: long es sólo US → filtrar por whitelist_us
+        # Filtrar por whitelist del sleeve y mercado esperado según policy.
         approved: list[dict[str, str | float]] = []
         for order in broker_orders:
             sym = str(order.get("symbol", "")).strip().upper()
-            if sym in whitelist_us and str(order.get("market", "")) == "US":
+            if sym in whitelist_long and str(order.get("market", "")).upper() == trade_mkt_expected:
                 approved.append(order)
         return approved
 

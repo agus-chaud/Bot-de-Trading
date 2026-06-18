@@ -103,7 +103,11 @@ def _simulate_oos_window(
     starting_cash: float,
     history_cap: int,
 ) -> dict[str, Any]:
-    ledger = PortfolioLedger(starting_cash=float(starting_cash))
+    short_weight = float(policy_doc.get("weights", {}).get("short", 0.30))
+    ledger = PortfolioLedger(
+        starting_cash=float(starting_cash),
+        short_allocation=float(starting_cash) * short_weight,
+    )
     broker = PaperBrokerSim(ledger=ledger, cost_model=_cost_model_from_policy(policy_doc))
     backtester = create_short_term_daily_backtester(
         policy_doc=policy_doc,
@@ -119,6 +123,10 @@ def _simulate_oos_window(
     min_monthly_dd_short = 0.0
     equities: list[float] = []
     n_fills = 0
+    entries_blocked_by_rsi = 0
+    exits_by_rsi = 0
+    exits_by_stop_loss = 0
+    rsi_by_symbol_prev: dict[str, float] = {}
 
     for d in window_days:
         daily = bars_by_date.get(d)
@@ -131,8 +139,21 @@ def _simulate_oos_window(
         events = backtester.run_day(
             trading_day=d,
             daily_bars=daily,
-            pipeline_context={"history_by_symbol": hist},
+            pipeline_context={
+                "history_by_symbol": hist,
+                "rsi_prev_by_symbol": dict(rsi_by_symbol_prev),
+            },
         )
+        proposed = events[2].payload
+        if isinstance(proposed, dict):
+            sizing_metrics = proposed.get("sizing_metrics") or {}
+            entries_blocked_by_rsi += int(sizing_metrics.get("entries_blocked_by_rsi", 0))
+            exits_by_rsi += int(sizing_metrics.get("exits_by_rsi", 0))
+            exits_by_stop_loss += int(sizing_metrics.get("exits_by_stop_loss", 0))
+            rsi_today = proposed.get("rsi_today_by_symbol") or {}
+            if isinstance(rsi_today, dict):
+                rsi_by_symbol_prev = {str(k): float(v) for k, v in rsi_today.items()}
+
         fills = events[4].payload
         if isinstance(fills, list):
             for fill in fills:
@@ -148,8 +169,23 @@ def _simulate_oos_window(
             min_monthly_dd_short = min(min_monthly_dd_short, dd)
             equities.append(float(snap.get("equity_total", starting_cash)))
 
+    start_equity = float(equities[0]) if equities else float(starting_cash)
+    end_equity = float(equities[-1]) if equities else float(starting_cash)
     avg_equity = sum(equities) / max(len(equities), 1)
     n_days = len(window_days)
+    total_return_pct = 0.0
+    if start_equity > 0:
+        total_return_pct = (end_equity / start_equity) - 1.0
+
+    # Drawdown sobre la curva de equity total dentro de la ventana.
+    peak = start_equity
+    max_drawdown = 0.0
+    for eq in equities:
+        peak = max(peak, float(eq))
+        if peak > 0:
+            dd = (float(eq) / peak) - 1.0
+            max_drawdown = min(max_drawdown, dd)
+
     turnover_ann = 0.0
     if avg_equity > 0 and n_days > 0:
         turnover_ann = (sum_buy_notional / avg_equity) * (252.0 / float(n_days))
@@ -161,11 +197,18 @@ def _simulate_oos_window(
         "total_fees": total_fees,
         "fee_ratio_of_initial": fee_ratio,
         "sum_buy_notional": sum_buy_notional,
+        "start_equity": start_equity,
+        "end_equity": end_equity,
+        "total_return_pct": total_return_pct,
+        "max_drawdown_pct": max_drawdown,
         "min_short_monthly_drawdown": min_monthly_dd_short,
         "avg_equity": avg_equity,
         "n_days": n_days,
         "turnover_annualized_proxy": turnover_ann,
         "n_fills": n_fills,
+        "entries_blocked_by_rsi": entries_blocked_by_rsi,
+        "exits_by_rsi": exits_by_rsi,
+        "exits_by_stop_loss": exits_by_stop_loss,
     }
 
 

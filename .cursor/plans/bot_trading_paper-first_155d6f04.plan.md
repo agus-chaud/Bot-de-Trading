@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: data-layer
     content: Definir esquema de datos común + conectores US/AR (paper con datos reales) + calendario y corporate actions mínimos US
-    status: pending
+    status: completed
   - id: long-policy-yaml
     content: "long_term: POLICY + policy.v1.yaml/schema — core 2-3 ETFs, satélite (topes, nº líneas), drift_rebalance_threshold_pp, regla día mensual"
     status: completed
@@ -31,13 +31,13 @@ todos:
     status: completed
   - id: risk-kill-switch
     content: Implementar risk_guardrails + drawdown mensual corto + pausa motor y logging
-    status: pending
+    status: completed
   - id: validation-wf
     content: Walk-forward + informe KPI segmentado + benchmark mixto reproducible + gate con umbrales pre-registrados
-    status: pending
+    status: completed
   - id: gate-ramp
     content: Documentar criterios de aprobación pre-registro y protocolo ramp 10→100% para capital real
-    status: pending
+    status: completed
 isProject: false
 ---
 

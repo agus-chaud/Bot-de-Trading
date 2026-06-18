@@ -5,7 +5,7 @@ External connectors (yfinance, IOL) are mocked — everything else runs for real
 
 Key contract discoveries captured here:
 - us_connector produces venue="XNYS" (canonical ISO MIC for NYSE) — normalizer passes it through unchanged
-- ar_connector produces venue="AR" (NOT "XBUE") — same
+- ar_connector produces venue="XBUE" (BYMA MIC) — same as calendars table
 - MarketDB.get_ohlcv filters by venue, so queries must use the venue the connector sets
 - calendar_builder uses "XNYS"/"XBUE" as venue keys in the calendars table
 - fetcher._get_calendar queries by venue from calendars table — must match what build_calendar inserts
@@ -19,6 +19,8 @@ from unittest.mock import patch
 
 import pytest
 
+from data.connectors.ar_connector import ArFetchResult
+from data.fetch_trace import FETCH_STATUS_OK, FETCH_STATUS_SKIP, SymbolFetchTrace, VENUE_AR
 from data.fetcher import FetchReport, fetch_and_store
 from data.normalizer import normalize
 from data.schema import OHLCVRow
@@ -60,7 +62,7 @@ def _ar_row(symbol: str, ts: date, close: float = 500.0) -> OHLCVRow:
         close=close,
         volume=50_000.0,
         currency="ARS",
-        venue="AR",   # what ar_connector actually produces
+        venue="XBUE",   # what ar_connector actually produces
         imputed=False,
     )
 
@@ -104,17 +106,17 @@ class TestUSPipelineHappyPath:
 
 
 class TestARPipelineHappyPath:
-    def test_ar_rows_stored_with_ar_venue_and_ars_currency(self, db):
-        """AR connector rows keep venue=AR and currency=ARS through the full pipeline."""
+    def test_ar_rows_stored_with_xbue_venue_and_ars_currency(self, db):
+        """AR connector rows keep venue=XBUE and currency=ARS through the full pipeline."""
         rows = [_ar_row("GGAL", d) for d in WEEKDAYS]
         calendar = set(WEEKDAYS)
 
         normalized = normalize(rows, calendar)
         db.upsert_ohlcv(normalized)
 
-        stored = db.get_ohlcv("GGAL", START, END, venue="AR")
+        stored = db.get_ohlcv("GGAL", START, END, venue="XBUE")
         assert len(stored) == 5
-        assert all(r.venue == "AR" for r in stored)
+        assert all(r.venue == "XBUE" for r in stored)
         assert all(r.currency == "ARS" for r in stored)
         assert all(r.imputed is False for r in stored)
 
@@ -168,12 +170,26 @@ class TestPipelineWithGap:
 
 _PATCH_BUILD_CAL = "data.fetcher.build_calendar"
 _PATCH_FETCH_US = "data.fetcher.fetch_us_ohlcv"
-_PATCH_FETCH_AR = "data.fetcher.fetch_ar_ohlcv"
+_PATCH_FETCH_AR = "data.fetcher.fetch_ar_ohlcv_with_trace"
 
 
 def _seed_calendar(db: MarketDB, venue: str, days: list[date]) -> None:
     """Directly seed the calendars table so fetcher._get_calendar returns real days."""
     db.upsert_calendars(venue=venue, days=days)
+
+
+def _ar_fetch_result(rows: list[OHLCVRow] | None, *, symbol: str = "GGAL") -> ArFetchResult:
+    status = FETCH_STATUS_OK if rows else FETCH_STATUS_SKIP
+    trace = SymbolFetchTrace(
+        symbol=symbol,
+        venue=VENUE_AR,
+        start_date=START,
+        end_date=END,
+        status=status,
+        iol_only=False,
+        rows=len(rows) if rows else 0,
+    )
+    return ArFetchResult(rows=rows, trace=trace)
 
 
 class TestFetchAndStoreRoundTrip:
@@ -189,7 +205,7 @@ class TestFetchAndStoreRoundTrip:
         with (
             patch(_PATCH_BUILD_CAL),
             patch(_PATCH_FETCH_US, return_value=us_rows),
-            patch(_PATCH_FETCH_AR, return_value=ar_rows),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(ar_rows)),
         ):
             report = fetch_and_store(["SPY"], ["GGAL"], START, END, db)
 
@@ -201,7 +217,7 @@ class TestFetchAndStoreRoundTrip:
         assert report.rows_stored == 10  # 5 US + 5 AR
 
         spy_rows = db.get_ohlcv("SPY", START, END, venue="XNYS")
-        ggal_rows = db.get_ohlcv("GGAL", START, END, venue="AR")
+        ggal_rows = db.get_ohlcv("GGAL", START, END, venue="XBUE")
         assert len(spy_rows) == 5
         assert len(ggal_rows) == 5
 
@@ -220,7 +236,7 @@ class TestFetchPartialFailure:
         with (
             patch(_PATCH_BUILD_CAL),
             patch(_PATCH_FETCH_US, side_effect=_us_connector),
-            patch(_PATCH_FETCH_AR, return_value=None),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(None)),
         ):
             report = fetch_and_store(["SPY", "QQQ"], [], START, END, db)
 
@@ -243,14 +259,14 @@ class TestFetchIdempotent:
         with (
             patch(_PATCH_BUILD_CAL),
             patch(_PATCH_FETCH_US, return_value=us_rows),
-            patch(_PATCH_FETCH_AR, return_value=None),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(None)),
         ):
             report1 = fetch_and_store(["SPY"], [], START, END, db)
 
         with (
             patch(_PATCH_BUILD_CAL),
             patch(_PATCH_FETCH_US, return_value=us_rows),
-            patch(_PATCH_FETCH_AR, return_value=None),
+            patch(_PATCH_FETCH_AR, return_value=_ar_fetch_result(None)),
         ):
             report2 = fetch_and_store(["SPY"], [], START, END, db)
 

@@ -1,0 +1,73 @@
+{
+  "run_id": "golden-replay-v1",
+  "mode": "paper_live",
+  "starting_cash": 100000.0,
+  "days": [
+    {
+      "trading_day": "2026-03-02",
+      "fills": [
+        {
+          "symbol": "NFLX",
+          "side": "BUY",
+          "qty": 2.0,
+          "price": 98.66,
+          "market": "US",
+          "bucket": "short",
+          "fee": 0.1,
+          "cost_breakdown": {
+            "slippage": 0.05,
+            "commission": 0.05,
+            "spread": 0.0,
+            "total": 0.1,
+            "notional": 197.32,
+            "market": "US"
+          }
+        }
+      ]
+    },
+    {
+      "trading_day": "2026-03-04",
+      "fills": [
+        {
+          "symbol": "XOM",
+          "side": "BUY",
+          "qty": 1.0,
+          "price": 148.81,
+          "market": "US",
+          "bucket": "short",
+          "fee": 0.05,
+          "cost_breakdown": {
+            "slippage": 0.02,
+            "commission": 0.03,
+            "spread": 0.0,
+            "total": 0.05,
+            "notional": 148.81,
+            "market": "US"
+          }
+        }
+      ]
+    },
+    {
+      "trading_day": "2026-03-19",
+      "fills": [
+        {
+          "symbol": "NFLX",
+          "side": "SELL",
+          "qty": 2.0,
+          "price": 91.74,
+          "market": "US",
+          "bucket": "short",
+          "fee": 0.1,
+          "cost_breakdown": {
+            "slippage": 0.05,
+            "commission": 0.05,
+            "spread": 0.0,
+            "total": 0.1,
+            "notional": 183.48,
+            "market": "US"
+          }
+        }
+      ]
+    }
+  ]
+}

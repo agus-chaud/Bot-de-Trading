@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bot de Trading — Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+  <script src="/static/neural-bg.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <canvas id="neural-canvas" aria-hidden="true"></canvas>
+  <div class="scanline" aria-hidden="true"></div>
+
+  <div class="app-shell">
+    <header class="top-bar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div>
+          <h1 class="brand-title">Paper-Live Monitor</h1>
+          <p class="brand-sub" id="meta-line">Cargando…</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span class="status-pill" id="status-pill">—</span>
+        <button type="button" class="btn-secondary" id="btn-refresh">Actualizar</button>
+      </div>
+    </header>
+
+    <section class="freshness-banner hidden" id="freshness-banner" aria-live="polite"></section>
+
+    <section class="alerts-panel" id="alerts-panel" aria-live="polite"></section>
+
+    <section class="kpi-grid" id="kpi-grid">
+      <article class="card kpi-card" data-kpi="equity">
+        <span class="kpi-label">Equity total</span>
+        <span class="kpi-value" id="kpi-equity">—</span>
+        <span class="kpi-caption" id="kpi-equity-caption"></span>
+      </article>
+      <article class="card kpi-card" data-kpi="sharpe">
+        <span class="kpi-label">Sharpe anualizado</span>
+        <span class="kpi-value" id="kpi-sharpe">—</span>
+        <span class="kpi-caption" id="kpi-sharpe-caption"></span>
+      </article>
+      <article class="card kpi-card" data-kpi="calmar">
+        <span class="kpi-label">Calmar</span>
+        <span class="kpi-value" id="kpi-calmar">—</span>
+        <span class="kpi-caption" id="kpi-calmar-caption"></span>
+      </article>
+      <article class="card kpi-card" data-kpi="drawdown">
+        <span class="kpi-label">Max drawdown</span>
+        <span class="kpi-value negative" id="kpi-drawdown">—</span>
+        <span class="kpi-caption" id="kpi-drawdown-caption"></span>
+      </article>
+    </section>
+
+    <main class="dashboard-grid">
+      <section class="card panel chart-panel">
+        <div class="panel-header">
+          <h2>Curva de equity</h2>
+          <div class="chart-legend" id="chart-legend"></div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="equity-chart" role="img" aria-label="Curva de equity"></canvas>
+        </div>
+      </section>
+
+      <section class="card panel positions-panel">
+        <div class="panel-header">
+          <h2>Posiciones hoy</h2>
+          <span class="panel-meta" id="positions-count">0</span>
+        </div>
+        <div class="table-wrap" id="positions-table"></div>
+      </section>
+
+      <section class="card panel fills-panel">
+        <div class="panel-header">
+          <h2>Últimas operaciones</h2>
+        </div>
+        <div class="table-wrap" id="fills-table"></div>
+      </section>
+
+      <section class="card panel risk-panel">
+        <div class="panel-header">
+          <h2>Por qué frenó (riesgo)</h2>
+          <span class="risk-badge" id="risk-badge">—</span>
+        </div>
+        <ul class="risk-list" id="risk-list"></ul>
+        <div class="risk-thresholds" id="risk-thresholds"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span id="footer-ts">—</span>
+      <span class="footer-sep">|</span>
+      <span>Modo paper-first · datos desde market.db</span>
+    </footer>
+  </div>
+</body>
+</html>

@@ -44,6 +44,8 @@ para aplicar fills + MTM y devolver un snapshot inmutable.
      - actualizar qty; si queda 0, eliminar posición
 3. MTM:
    - para cada posición abierta: `market_value = qty * close`
+     (si falta la barra del día, carry-forward del último close conocido o `avg_cost`,
+     marcando `stale` — ver **ADR-051**; nunca crashea ni valúa a 0)
    - `unrealized = (close - avg_cost) * qty`
    - sumar equity total
 4. Calcular equity del bucket `short`.
@@ -57,7 +59,8 @@ para aplicar fills + MTM y devolver un snapshot inmutable.
 
 - **Método de costo**: promedio ponderado en v1 (simple, determinístico y estable para paper).
 - **Granularidad de DD corto**: mensual calendario con reset automático.
-- **Errores explícitos**: se falla rápido ante fills inválidos o datos de precio incompletos.
+- **Errores explícitos**: se falla rápido ante fills inválidos. Para *valuación* (MTM),
+  en cambio, un hueco de barra NO crashea: se usa carry-forward observable (`stale`) — ver **ADR-051**.
 
 ## Integración con código existente
 

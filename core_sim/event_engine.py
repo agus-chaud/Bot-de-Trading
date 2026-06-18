@@ -15,6 +15,17 @@ from .pending_order_queue import PendingOrder, PendingOrderQueue
 EventHandler = Callable[..., Any]
 
 
+def approved_orders_from_risk_check(result: Any) -> list[dict[str, Any]]:
+    """Normalize risk_check output: legacy list or enriched dict with approved_orders."""
+    if isinstance(result, dict):
+        orders = result.get("approved_orders")
+        if isinstance(orders, list):
+            return orders
+    if isinstance(result, list):
+        return result
+    return []
+
+
 @dataclass(frozen=True)
 class EventStep:
     """Represents a single step in the daily event pipeline."""
@@ -117,8 +128,9 @@ class DailyEventBacktester:
         proposed_orders = self.propose_orders(**{**ctx, "signals": signals})
         events.append(EventStep(name="OrdersProposed", payload=proposed_orders))
 
-        risk_checked_orders = self.risk_check(**{**ctx, "proposed_orders": proposed_orders})
-        events.append(EventStep(name="RiskChecked", payload=risk_checked_orders))
+        risk_check_result = self.risk_check(**{**ctx, "proposed_orders": proposed_orders})
+        risk_checked_orders = approved_orders_from_risk_check(risk_check_result)
+        events.append(EventStep(name="RiskChecked", payload=risk_check_result))
 
         if self.execution_mode == "semi_auto" and self.pending_queue is not None:
             _logger = logging.getLogger("event_engine")

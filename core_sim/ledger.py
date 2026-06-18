@@ -35,9 +35,11 @@ class PositionState:
 class PortfolioLedger:
     """Tracks cash, positions and daily metrics for paper trading."""
 
-    def __init__(self, starting_cash: float) -> None:
+    def __init__(self, starting_cash: float, *, short_allocation: float = 0.0) -> None:
         if starting_cash < 0:
             raise ValueError("starting_cash must be >= 0")
+        if short_allocation < 0:
+            raise ValueError("short_allocation must be >= 0")
 
         self.cash = float(starting_cash)
         self.short_cash = 0.0  # cash asignado al bucket corto (aumenta con SELLs, disminuye con BUYs)
@@ -45,11 +47,34 @@ class PortfolioLedger:
         self.realized_pnl_total = 0.0
         self.equity_curve_points: list[dict[str, float | str]] = []
         self._costs_by_trading_day: dict[date, float] = {}
+        self._short_allocation = float(short_allocation)
         self._current_short_month: tuple[int, int] | None = None
         self._short_monthly_peak = 0.0
         self._short_monthly_drawdown = 0.0
         # short MV por fecha (última escritura gana) para `daily_return` con varias MTM en un día
         self._short_eod_by_trading_date: dict[date, float] = {}
+        # long equity por fecha para daily return del sleeve largo
+        self._long_eod_by_trading_date: dict[date, float] = {}
+        # último close válido visto por símbolo, para carry-forward de valuación
+        # cuando un día falta la barra (hueco de datos). Evita crashear la corrida.
+        self._last_mark: dict[str, float] = {}
+
+    def reset_last_marks(self) -> None:
+        """Vaciar el carry-forward. La capa sim lo usa para descartar marks
+        intermedios (p. ej. una barra en moneda equivocada que un motor valuó) antes
+        de re-hidratar con el último close legítimo y producir el snapshot autoritativo."""
+        self._last_mark.clear()
+
+    def seed_last_mark(self, symbol: str, price: float) -> None:
+        """Sembrar el último mark conocido para carry-forward (no-op si ya hay uno).
+
+        La capa de orquestación reconstruye un ledger nuevo por día (replay de fills),
+        por lo que `_last_mark` arranca vacío y el carry-forward del ADR-051 no tendría
+        de dónde arrastrar. Este setter permite hidratarlo con el último close conocido
+        antes de valuar, sin meter lógica de precios en el ledger. No pisa un mark
+        aprendido en el día (p. ej. de una barra fresca)."""
+        if price > 0 and symbol not in self._last_mark:
+            self._last_mark[symbol] = float(price)
 
     def apply_fills(
         self,
@@ -85,8 +110,13 @@ class PortfolioLedger:
         mv_us = 0.0
         mv_ar = 0.0
 
+        stale_marks: list[str] = []
         for symbol, position in self.positions.items():
-            close_price = self._extract_close(symbol=symbol, daily_bars=daily_bars)
+            close_price, is_stale = self._resolve_mark_price(
+                symbol=symbol, position=position, daily_bars=daily_bars
+            )
+            if is_stale:
+                stale_marks.append(symbol)
             market_value = position.qty * close_price
             unrealized = (close_price - position.avg_cost) * position.qty
 
@@ -97,6 +127,7 @@ class PortfolioLedger:
                 "bucket": position.bucket,
                 "market_value": market_value,
                 "unrealized_pnl": unrealized,
+                "stale": is_stale,
             }
             market_value_total += market_value
             unrealized_pnl_total += unrealized
@@ -142,6 +173,11 @@ class PortfolioLedger:
             short_equity=short_equity,
         )
 
+        long_daily_return, long_bucket = self._attach_long_daily_return(
+            trading_day=trading_day,
+            long_equity=equity_long,
+        )
+
         return {
             "trading_day": trading_day.isoformat(),
             "cash": self.cash,
@@ -154,6 +190,8 @@ class PortfolioLedger:
             "costs_day": costs_day,
             "equity_curve_points": list(self.equity_curve_points),
             "short_bucket": short_bucket,
+            "long_bucket": long_bucket,
+            "stale_marks": stale_marks,
         }
 
     def update_day(
@@ -272,14 +310,33 @@ class PortfolioLedger:
             "fee": fee,
         }
 
-    def _extract_close(self, symbol: str, daily_bars: dict[str, dict[str, float]]) -> float:
+    def _resolve_mark_price(
+        self,
+        symbol: str,
+        position: PositionState,
+        daily_bars: dict[str, dict[str, float]],
+    ) -> tuple[float, bool]:
+        """Precio para valuar una posición abierta, resiliente a huecos de datos.
+
+        Devuelve `(precio, is_stale)`. Prioridad:
+        1) close válido (>0) del día → fresco; actualiza el último mark conocido.
+        2) último mark conocido (carry-forward) → stale.
+        3) `avg_cost` de la posición → stale (nunca se vio precio de mercado).
+
+        Nunca valúa a 0 ni crashea: un hueco de datos en un símbolo no debe tirar
+        abajo toda la corrida de validación. El flag `is_stale` deja el evento
+        observable para la capa de calidad de datos.
+        """
         bar = daily_bars.get(symbol)
-        if bar is None or "close" not in bar:
-            raise ValueError(f"missing close price for symbol {symbol}")
-        close = float(bar["close"])
-        if close <= 0:
-            raise ValueError(f"close must be > 0 for symbol {symbol}")
-        return close
+        if bar is not None and "close" in bar:
+            close = float(bar["close"])
+            if close > 0:
+                self._last_mark[symbol] = close
+                return close, False
+        last = self._last_mark.get(symbol)
+        if last is not None and last > 0:
+            return last, True
+        return float(position.avg_cost), True
 
     def _update_short_drawdown(
         self,
@@ -287,27 +344,31 @@ class PortfolioLedger:
         short_equity: float,
         short_cash: float = 0.0,
     ) -> dict[str, float]:
-        """Drawdown mensual del bucket corto medido sobre BUCKET EQUITY.
+        """Drawdown mensual del bucket corto medido sobre ADJUSTED EQUITY.
 
-        `bucket_equity = short_cash + short_equity` (MV de posiciones abiertas).
-        El peak es el running max de `bucket_equity` dentro del mes calendario,
-        reseteado al primer call de cada mes nuevo. DD = `bucket_equity / peak - 1`,
-        clampado a 0 cuando `peak <= 0`. La key `equity` del dict retornado MANTIENE
-        `short_equity` (MV) por contrato con `_attach_short_daily_return` (REQ-5).
+        `adjusted_equity = short_cash + short_equity + short_allocation` donde
+        `short_allocation` es el capital nominal asignado al bucket (inyectado al
+        construir el ledger). El peak es el running max de `adjusted_equity` dentro
+        del mes calendario, reseteado al primer call de cada mes nuevo.
+        DD = max(-1.0, adjusted_equity / peak - 1), clampado a 0 cuando peak <= 0.
+        La key `equity` del dict retornado MANTIENE `short_equity` (MV) por contrato
+        con `_attach_short_daily_return` (REQ-5).
         """
         bucket_equity = float(short_cash) + float(short_equity)
+        adjusted_equity = bucket_equity + self._short_allocation
         month_key = (trading_day.year, trading_day.month)
 
         if self._current_short_month != month_key:
-            # Primer call de un nuevo mes calendario → reset peak al bucket_equity actual.
             self._current_short_month = month_key
-            self._short_monthly_peak = bucket_equity
+            self._short_monthly_peak = adjusted_equity
             self._short_monthly_drawdown = 0.0
         else:
-            self._short_monthly_peak = max(self._short_monthly_peak, bucket_equity)
+            self._short_monthly_peak = max(self._short_monthly_peak, adjusted_equity)
 
         if self._short_monthly_peak > 0:
-            self._short_monthly_drawdown = (bucket_equity / self._short_monthly_peak) - 1.0
+            self._short_monthly_drawdown = max(
+                -1.0, (adjusted_equity / self._short_monthly_peak) - 1.0
+            )
         else:
             self._short_monthly_drawdown = 0.0
 
@@ -335,3 +396,19 @@ class PortfolioLedger:
         out: dict[str, float] = dict(short_bucket)
         out["daily_return"] = float(daily)
         return float(daily), out
+
+    def _attach_long_daily_return(
+        self,
+        trading_day: date,
+        long_equity: float,
+    ) -> tuple[float, dict[str, float]]:
+        """Daily return del sleeve largo vs. última MTM con fecha estrictamente anterior a `trading_day`."""
+        prior_dates = [d for d in self._long_eod_by_trading_date if d < trading_day]
+        if not prior_dates:
+            daily = 0.0
+        else:
+            d_prev = max(prior_dates)
+            prev = float(self._long_eod_by_trading_date[d_prev])
+            daily = 0.0 if prev <= 0.0 else (float(long_equity) - prev) / prev
+        self._long_eod_by_trading_date[trading_day] = float(long_equity)
+        return float(daily), {"long_daily_return": float(daily), "long_equity": float(long_equity)}
