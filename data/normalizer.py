@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import statistics
 from datetime import date, timedelta
 from typing import NamedTuple
@@ -76,16 +77,40 @@ def _normalize(rows: list[OHLCVRow], calendar: set[date]) -> list[OHLCVRow]:
     return sorted(result, key=lambda r: r.ts)
 
 
+def _is_finite_positive(value: float | None) -> bool:
+    """True when *value* is a finite number strictly greater than zero."""
+    if value is None:
+        return False
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(v) and v > 0
+
+
+def _is_finite_non_negative_volume(value: float | None) -> bool:
+    """Volume may be zero on AR feeds (yfinance stale quote); reject NaN/negative only."""
+    if value is None:
+        return False
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(v) and v >= 0
+
+
 def _drop_invalid(rows: list[OHLCVRow]) -> tuple[list[OHLCVRow], set[date]]:
-    """Remove rows with non-positive OHLCV values. Returns (kept, dropped_dates)."""
+    """Remove rows with invalid OHLCV values. Returns (kept, dropped_dates)."""
     kept: list[OHLCVRow] = []
     dropped: set[date] = set()
     for row in rows:
-        if row.volume is None or row.volume <= 0:
+        if not _is_finite_non_negative_volume(row.volume):
             _log_skip(row.symbol, row.ts, "invalid_volume")
             dropped.add(row.ts)
             continue
-        if any(v is None or v <= 0 for v in (row.open, row.high, row.low, row.close)):
+        if not all(
+            _is_finite_positive(v) for v in (row.open, row.high, row.low, row.close)
+        ):
             _log_skip(row.symbol, row.ts, "invalid_price")
             dropped.add(row.ts)
             continue

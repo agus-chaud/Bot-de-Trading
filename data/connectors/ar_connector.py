@@ -550,7 +550,7 @@ def _iol_history_get(
         raise IolJobBudgetExhausted("max_calls_per_job exceeded before IOL history GET")
     url = _IOL_HISTORY_URL.format(
         mercado=_IOL_MERCADO,
-        symbol=symbol,
+        symbol=_provider_symbol(symbol),
         start=start_date.isoformat(),
         end=(end_date + timedelta(days=1)).isoformat(),  # IOL end is exclusive
         ajuste=ajuste,
@@ -563,6 +563,10 @@ def _iol_history_get(
         )
         if resp.status_code == 401:
             raise IolUnauthorized("IOL history returned HTTP 401 (bearer expired or invalid)")
+        if resp.status_code == 404:
+            # Ticker inexistente en IOL — no reintentar como error de red.
+            record_iol_call(meter_kind)
+            return []
         resp.raise_for_status()
         payload = resp.json()
     except IolUnauthorized:
@@ -695,6 +699,22 @@ def _normalize_iol(symbol: str, payload: list[dict]) -> list[OHLCVRow]:
 # Byma / yfinance fallback
 # ---------------------------------------------------------------------------
 
+# Algunos CEDEARs en BYMA/IOL no usan el ticker US en la API (p. ej. DIS → DISN).
+_AR_SYMBOL_ALIASES: dict[str, str] = {
+    "DIS": "DISN",
+}
+
+
+def _provider_symbol(symbol: str) -> str:
+    """Map internal whitelist symbol to IOL/yfinance provider ticker."""
+    return _AR_SYMBOL_ALIASES.get(symbol.upper(), symbol)
+
+
+def _yfinance_ba_ticker(symbol: str) -> str:
+    """Map internal AR symbol to Yahoo Finance .BA ticker (BYMA)."""
+    return f"{_provider_symbol(symbol)}.BA"
+
+
 def _fetch_with_retry_byma(
     symbol: str,
     start_date: date,
@@ -703,7 +723,7 @@ def _fetch_with_retry_byma(
 ) -> tuple[Optional[list[OHLCVRow]], int, str | None]:
     """Retry loop for Byma via yfinance. Returns (rows, attempts, skip_reason_if_not_ok)."""
     last_exc: Exception | None = None
-    yf_symbol = f"{symbol}.BA"
+    yf_symbol = _yfinance_ba_ticker(symbol)
 
     for attempt in range(_MAX_ATTEMPTS):
         try:

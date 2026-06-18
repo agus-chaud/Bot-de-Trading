@@ -287,6 +287,47 @@ class TestBymaFallback:
         assert all(row.symbol == "GGAL" for row in result)
         assert all(".BA" not in row.symbol for row in result)
 
+    def test_should_use_yfinance_alias_for_dis_cedear(self):
+        """DIS CEDEAR is DISN.BA on Yahoo — not DIS.BA (delisted / empty)."""
+        seen: list[str] = []
+
+        def ticker_factory(yf_symbol: str):
+            seen.append(yf_symbol)
+            mock_ticker = MagicMock()
+            mock_ticker.history.return_value = _make_byma_df()
+            return mock_ticker
+
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with _patch_requests_get(json_payload=[]):
+                    with patch("data.connectors.ar_connector.yf.Ticker", side_effect=ticker_factory):
+                        result = fetch_ar_ohlcv("DIS", _START, _END)
+
+        assert result is not None
+        assert seen == ["DISN.BA"]
+        assert all(row.symbol == "DIS" for row in result)
+
+    def test_should_query_iol_with_disn_alias_for_dis(self):
+        """IOL seriehistorica uses DISN, not DIS (404 on the latter)."""
+        seen_urls: list[str] = []
+
+        def get_side_effect(url, **kwargs):
+            seen_urls.append(url)
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = _IOL_PAYLOAD
+            return mock_resp
+
+        with patch.dict("os.environ", _IOL_ENV):
+            with _patch_iol_access_token():
+                with patch("data.connectors.ar_connector.requests.get", side_effect=get_side_effect):
+                    result = fetch_ar_ohlcv("DIS", _START, _END)
+
+        assert result is not None
+        assert any("/Titulos/DISN/" in u for u in seen_urls)
+        assert all("/Titulos/DIS/" not in u or "/Titulos/DISN/" in u for u in seen_urls)
+
 
 # ---------------------------------------------------------------------------
 # Total failure (IOL + Byma both exhaust retries)
