@@ -96,6 +96,8 @@ npx vercel deploy --prod   # production
 
 Variables: ver `web/.env.example`. Auth cátedra en **F1-06**.
 
+**Sincronización de ramas:** el workflow se lee desde `main`; los datos diarios van a `paper-live-data`. Tras mergear cambios de CI a `main`, ejecutar `git checkout paper-live-data && git merge main` en local (ver `docs/dashboard.md` § Ramas).
+
 ## Ver también
 
 - `docs/dashboard.md` — F1-01 a F1-06, pipeline CI, monitor local

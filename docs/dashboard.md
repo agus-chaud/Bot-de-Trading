@@ -291,6 +291,26 @@ Cada push exitoso de paper-live en `paper-live-data` dispara **rebuild de produc
 
 Ver **ADR-065**.
 
+### Ramas `main` vs `paper-live-data` (operación CI + Vercel)
+
+GitHub Actions usa **dos ramas** con roles distintos:
+
+| Qué | Rama | Por qué |
+|-----|------|---------|
+| **Receta del workflow** (`paper_live_daily.yml`) | **`main`** (default) | GitHub lee schedule/dispatch desde la rama default |
+| **Ejecución** (checkout, DB, push diario) | **`paper-live-data`** | Datos operativos + JSON del día |
+| **Production Vercel** | **`paper-live-data`** | Cada push diario dispara rebuild con JSON nuevo |
+
+**Flujo típico tras cambiar el pipeline (ej. F1-05):**
+
+1. PR con cambios de workflow / `web/` → **merge a `main`**
+2. En local: `git checkout paper-live-data && git merge main` (alinear código en la rama operativa)
+3. Próxima corrida paper-live (10:00 UTC Lun–Vie) usa la receta nueva de `main`
+
+**Secretos GitHub** (Settings → Actions): `IOL_USER`, `IOL_PASS`, `VERCEL_DEPLOY_HOOK` (deploy hook del proyecto `bot-de-trading`).
+
+Conflictos de merge en `data/market.db` (LFS): `git checkout --ours|--theirs` en el puntero; no editar `<<<<<<<` a mano.
+
 ### Implicaciones futuras
 
 - Si el JSON crece mucho (p. ej. historial completo de fills), subir `export_version` y/o paginar bloques — no migrar a SQLite sin necesidad demostrada.
