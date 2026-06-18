@@ -1,0 +1,181 @@
+{
+  "meta": {
+    "mode": "paper_live",
+    "currency": "ARS",
+    "starting_cash": 1000000.0,
+    "inception_date": "2026-06-09",
+    "last_trading_day": "2026-06-17",
+    "equity_total": 999575.6528157273,
+    "num_open_positions": 1
+  },
+  "data_freshness": {
+    "status": "ok",
+    "message": "DB local alineada con el remoto.",
+    "commits_behind": 0,
+    "worktree_dirty": false,
+    "remote_ref": "origin/paper-live-data",
+    "sync_hint": "git fetch origin paper-live-data && git checkout origin/paper-live-data -- data/market.db && git lfs checkout data/market.db"
+  },
+  "equity_curve": [
+    {
+      "date": "2026-06-09",
+      "equity_total": 999991.6016453782,
+      "equity_short": -8.398354621887847,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-10",
+      "equity_total": 1000655.3516453782,
+      "equity_short": 655.3516453781122,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-11",
+      "equity_total": 1000342.652365593,
+      "equity_short": 342.6523655929559,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-12",
+      "equity_total": 1000369.2035359421,
+      "equity_short": 369.203535942077,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-15",
+      "equity_total": 1000369.2035359421,
+      "equity_short": 369.203535942077,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-16",
+      "equity_total": 999678.902365593,
+      "equity_short": -321.0976344070441,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-17",
+      "equity_total": 999575.6528157273,
+      "equity_short": -424.34718427276675,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    }
+  ],
+  "positions": [
+    {
+      "symbol": "KO",
+      "qty": 295.0,
+      "avg_cost": 81.33999633789062,
+      "market": "US",
+      "bucket": "short",
+      "market_value": 23579.350090026855,
+      "unrealized_pnl": -415.9488296508789,
+      "stale": false
+    }
+  ],
+  "recent_fills": [
+    {
+      "trading_day": "2026-06-09",
+      "ts_fill": "2026-06-11T18:49:43.871530+00:00",
+      "symbol": "KO",
+      "side": "BUY",
+      "qty": 295.0,
+      "price": 81.33999633789062,
+      "bucket": "short",
+      "engine": "short_term_v1",
+      "reason": null,
+      "fee": 8.398354621887208,
+      "cost_total": 8.398354621887208
+    }
+  ],
+  "risk": {
+    "trading_allowed": true,
+    "kill_switch": {
+      "active": false,
+      "activated_at": null,
+      "monthly_dd": null
+    },
+    "thresholds": {
+      "short_kill_switch_monthly_dd": -0.08,
+      "max_daily_loss_short_pct": -0.02
+    },
+    "latest_snapshot": {
+      "trading_day": "2026-06-17",
+      "short_monthly_drawdown": 0.0,
+      "short_daily_return": 0.0,
+      "num_fills_today": 0,
+      "kill_switch_active": false
+    },
+    "factors": [
+      {
+        "level": "info",
+        "code": "no_fills_today",
+        "message": "Sin fills el 2026-06-17 (guardrails, sin señal, o semi_auto pendiente)"
+      }
+    ]
+  },
+  "kpis": {
+    "status": "ok",
+    "n_days": 7,
+    "sharpe_annualized": -2.4620012534574,
+    "sharpe_na_reason": null,
+    "sortino_annualized": -3.6968893969274443,
+    "max_drawdown": -0.0010789917106579505,
+    "net_return_annualized": -0.01732185333608538,
+    "calmar_total": -16.05374088140382,
+    "calmar_12m_long": null,
+    "calmar_12m_na_reason": "insufficient_history",
+    "hit_rate": null,
+    "profit_factor": null,
+    "ts_start": "2026-06-09",
+    "ts_end": "2026-06-17"
+  },
+  "alerts": [
+    {
+      "severity": "warning",
+      "code": "missing_run_days",
+      "title": "Días de mercado sin corrida",
+      "detail": "Último snapshot 2026-06-17; sin procesar: 2026-06-18"
+    },
+    {
+      "severity": "info",
+      "code": "idle_with_positions",
+      "title": "Día sin operaciones con posiciones abiertas",
+      "detail": "2026-06-17: 0 fills pero 1 posiciones abiertas."
+    },
+    {
+      "severity": "warning",
+      "code": "fetch_errors",
+      "title": "Errores recientes de ingesta OHLCV",
+      "detail": "DIS@XBUE (skip: empty_data); DIS@XBUE (skip: empty_data); YPFD@XBUE (error: unexpected_error); XOM@XBUE (error: unexpected_error)"
+    }
+  ],
+  "generated_at": "2026-06-18T15:24:04.893147+00:00",
+  "export_version": "1",
+  "export_source": {
+    "db_path": "C:\\Users\\Dell\\Agus\\Bot de Trading\\data\\market.db",
+    "policy_path": "C:\\Users\\Dell\\Agus\\Bot de Trading\\config\\policy.v1.yaml",
+    "calendar_path": "C:\\Users\\Dell\\Agus\\Bot de Trading\\config\\calendars\\trading_days.v1.yaml",
+    "mode": "paper_live"
+  }
+}

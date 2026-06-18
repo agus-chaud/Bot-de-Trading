@@ -202,7 +202,7 @@ python -m pytest tests/test_web_dashboard.py tests/test_dashboard_export.py -v
 Orden de búsqueda al copiar payload:
 
 1. `../data/dashboard_payload.json` (export real o copia desde `paper-live-data`)
-2. `web/fixtures/dashboard_payload.json` (fixture commiteado para dev sin DB)
+2. `web/fixtures/dashboard_payload.json` — fixture **commiteado** (dev sin DB; fallback de build Vercel si aún no hay export en `data/`)
 
 En producción (Vercel), el build corre desde la raíz del monorepo con `data/dashboard_payload.json`
 presente en la rama **`paper-live-data`** tras el paper-live diario.
