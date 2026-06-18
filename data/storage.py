@@ -515,6 +515,20 @@ class MarketDB:
                 ),
             )
 
+    def get_recent_fetch_errors(self, limit: int = 8) -> list[dict[str, Any]]:
+        """Return recent fetch_log rows where status != 'ok'."""
+        cursor = self._conn.execute(
+            """
+            SELECT symbol, venue, status, skip_reason, created_at
+            FROM fetch_log
+            WHERE status != 'ok'
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     # ------------------------------------------------------------------
     # Kill switch log
     # ------------------------------------------------------------------
@@ -713,6 +727,39 @@ class MarketDB:
         if row and row["last_day"]:
             return date.fromisoformat(row["last_day"])
         return None
+
+    def get_paper_snapshots(
+        self,
+        mode: str,
+        *,
+        since: date | None = None,
+        until: date | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return EOD snapshots for *mode* ordered by trading_day ASC."""
+        clauses = ["mode = ?"]
+        params: list[Any] = [mode]
+        if since is not None:
+            clauses.append("trading_day >= ?")
+            params.append(since.isoformat())
+        if until is not None:
+            clauses.append("trading_day <= ?")
+            params.append(until.isoformat())
+        where = " AND ".join(clauses)
+        cursor = self._conn.execute(
+            f"""
+            SELECT trading_day, equity_total, equity_short, equity_long,
+                   short_cash, cash, realized_pnl_total, unrealized_pnl_total,
+                   costs_day, mv_us, mv_ar, short_monthly_peak,
+                   short_monthly_drawdown, short_daily_return,
+                   kill_switch_active, num_open_positions, num_fills_today,
+                   realized_pnl_day, created_at
+            FROM paper_snapshots
+            WHERE {where}
+            ORDER BY trading_day ASC
+            """,
+            params,
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
     def get_portfolio_meta(self, mode: str) -> PortfolioMeta | None:
         """Return persisted inception capital for *mode*, or None if never initialized."""

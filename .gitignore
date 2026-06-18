@@ -71,3 +71,8 @@ data/_sim/sim_500k_fills.csv
 data/market.db.bak-20260611-154911
 data/market_backfill_log.txt
 .engram/chunks/6e26dae9.jsonl.gz
+defensa_bot_trading.pptx
+.agents/
+.agents/skills/cavecrew/README.md
+skills-lock.json
+scripts/build_defensa_pptx.py
