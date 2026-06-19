@@ -137,16 +137,26 @@ class TestInvalidPriceDropped:
 # ---------------------------------------------------------------------------
 
 class TestInvalidVolumeDropped:
-    def test_zero_volume_is_dropped(self, caplog):
+    def test_zero_volume_is_kept_when_prices_are_valid(self):
+        """yfinance AR often reports volume=0 on stale quotes; price is still usable."""
         days = _workweek(MON, 2)
         rows = [_row(days[0], volume=0.0), _row(days[1])]
+
+        result = normalize(rows, set(days))
+
+        assert len(result) == 2
+        assert days[0] in {r.ts for r in result}
+
+    def test_nan_price_is_dropped(self, caplog):
+        days = _workweek(MON, 2)
+        rows = [_row(days[0], open_=float("nan")), _row(days[1])]
 
         with caplog.at_level(logging.WARNING, logger="data.normalizer"):
             result = normalize(rows, set(days))
 
         assert len(result) == 1
         assert result[0].ts == days[1]
-        assert "invalid_volume" in caplog.text
+        assert "invalid_price" in caplog.text
 
     def test_negative_volume_is_dropped(self, caplog):
         days = _workweek(MON, 2)

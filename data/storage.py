@@ -516,13 +516,18 @@ class MarketDB:
             )
 
     def get_recent_fetch_errors(self, limit: int = 8) -> list[dict[str, Any]]:
-        """Return recent fetch_log rows where status != 'ok'."""
+        """Return symbols whose *latest* fetch_log row is not ok (not stale history)."""
         cursor = self._conn.execute(
             """
-            SELECT symbol, venue, status, skip_reason, created_at
-            FROM fetch_log
-            WHERE status != 'ok'
-            ORDER BY id DESC
+            SELECT f.symbol, f.venue, f.status, f.skip_reason, f.created_at
+            FROM fetch_log f
+            INNER JOIN (
+                SELECT symbol, venue, MAX(id) AS max_id
+                FROM fetch_log
+                GROUP BY symbol, venue
+            ) latest ON f.id = latest.max_id
+            WHERE f.status != 'ok'
+            ORDER BY f.id DESC
             LIMIT ?
             """,
             (limit,),

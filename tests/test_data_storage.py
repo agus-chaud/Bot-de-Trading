@@ -185,6 +185,34 @@ class TestFetchLog:
         assert stored_extra["effective_source"] == "mixed"
         assert stored_extra["rows_by_source"] == {"iol": 1, "byma": 2}
 
+    def test_get_recent_fetch_errors_ignores_superseded_failures(self, db):
+        """Alert only when the latest fetch per symbol failed — not older history."""
+        db.log_fetch({
+            "symbol": "DIS",
+            "venue": "XBUE",
+            "status": "skip",
+            "skip_reason": "empty_data",
+        })
+        db.log_fetch({
+            "symbol": "DIS",
+            "venue": "XBUE",
+            "status": "ok",
+            "source": "byma",
+            "skip_reason": "fallback_used",
+        })
+        db.log_fetch({
+            "symbol": "YPFD",
+            "venue": "XBUE",
+            "status": "error",
+            "skip_reason": "unexpected_error",
+        })
+
+        rows = db.get_recent_fetch_errors(limit=8)
+
+        assert len(rows) == 1
+        assert rows[0]["symbol"] == "YPFD"
+        assert rows[0]["status"] == "error"
+
 
 class TestCalendarsUpsert:
     def test_should_persist_and_be_readable(self, db):
