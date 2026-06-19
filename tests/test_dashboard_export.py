@@ -123,6 +123,55 @@ def test_write_dashboard_payload_creates_parent_dirs(tmp_path):
     assert out.is_file()
 
 
+def test_no_db_freshness_should_drop_stale_local_db_alert(seeded_db):
+    # seeded_db lives in a tmp dir (not a git repo), so the freshness check is
+    # non-"ok" and the service injects the stale_local_db alert by default.
+    default = export_dashboard_payload(
+        db_path=seeded_db, policy_path=_POLICY, calendar_path=_CALENDAR
+    )
+    default_codes = {a["code"] for a in default["alerts"]}
+    assert "stale_local_db" in default_codes
+
+    published = export_dashboard_payload(
+        db_path=seeded_db,
+        policy_path=_POLICY,
+        calendar_path=_CALENDAR,
+        include_db_freshness=False,
+    )
+    published_codes = {a["code"] for a in published["alerts"]}
+    assert "stale_local_db" not in published_codes
+    assert published["data_freshness"]["status"] == "ok"
+    assert published["data_freshness"]["worktree_dirty"] is False
+    validate_payload_shape(published)
+
+
+def test_cli_no_db_freshness_flag_should_neutralize_freshness(seeded_db, tmp_path):
+    out = tmp_path / "published.json"
+    code = main(
+        [
+            "--db",
+            str(seeded_db),
+            "--policy",
+            str(_POLICY),
+            "--calendar",
+            str(_CALENDAR),
+            "--out",
+            str(out),
+            "--no-db-freshness",
+        ]
+    )
+    assert code == 0
+    loaded = json.loads(out.read_text(encoding="utf-8"))
+    assert loaded["data_freshness"]["status"] == "ok"
+    assert all(a["code"] != "stale_local_db" for a in loaded["alerts"])
+
+
+def test_paper_live_workflow_should_publish_without_local_db_freshness():
+    workflow = REPO_ROOT / ".github" / "workflows" / "paper_live_daily.yml"
+    text = workflow.read_text(encoding="utf-8")
+    assert "--no-db-freshness" in text
+
+
 def test_paper_live_workflow_should_export_dashboard_artifact():
     workflow = REPO_ROOT / ".github" / "workflows" / "paper_live_daily.yml"
     text = workflow.read_text(encoding="utf-8")
