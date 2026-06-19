@@ -22,13 +22,22 @@ export function validatePayloadShape(payload: DashboardPayload): void {
 }
 
 export const DASHBOARD_JSON_URL = "/dashboard_payload.json";
+export const DASHBOARD_SIM_JSON_URL = "/dashboard_payload.sim.json";
 
-export async function fetchDashboardPayload(): Promise<DashboardPayload> {
-  const res = await fetch(`${DASHBOARD_JSON_URL}?t=${Date.now()}`, { cache: "no-store" });
+export async function fetchDashboardPayloadFrom(url: string): Promise<DashboardPayload> {
+  const res = await fetch(`${url}?t=${Date.now()}`, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} loading dashboard payload`);
   }
   const payload = (await res.json()) as DashboardPayload;
   validatePayloadShape(payload);
   return payload;
+}
+
+export function fetchDashboardPayload(): Promise<DashboardPayload> {
+  return fetchDashboardPayloadFrom(DASHBOARD_JSON_URL);
+}
+
+export function fetchSimDashboardPayload(): Promise<DashboardPayload> {
+  return fetchDashboardPayloadFrom(DASHBOARD_SIM_JSON_URL);
 }

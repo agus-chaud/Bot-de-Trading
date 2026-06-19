@@ -137,6 +137,42 @@ body {
   gap: 0.75rem;
 }
 
+.view-tabs {
+  display: inline-flex;
+  padding: 0.2rem;
+  gap: 0.2rem;
+  border-radius: 999px;
+  border: 1px solid var(--cool-grey);
+  background: rgba(42, 42, 42, 0.6);
+}
+
+.view-tab {
+  font-family: var(--font-tech);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.85rem;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #9aa0a6);
+  cursor: pointer;
+  transition: background 200ms ease, color 200ms ease;
+}
+
+.view-tab:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.view-tab.active {
+  background: var(--accent-green, #76b900);
+  color: #0b0b0b;
+}
+
+.view-tab:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .status-pill {
   font-size: 0.875rem;
   font-weight: 600;
