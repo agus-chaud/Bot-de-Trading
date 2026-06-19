@@ -1,0 +1,3412 @@
+{
+  "meta": {
+    "mode": "research_sim",
+    "currency": "ARS",
+    "starting_cash": 500000.0,
+    "inception_date": "2025-01-02",
+    "last_trading_day": "2026-06-12",
+    "equity_total": 11537440.088483585,
+    "num_open_positions": 0
+  },
+  "data_freshness": {
+    "status": "ok",
+    "message": "Simulación de investigación; no aplica el chequeo de DB local.",
+    "commits_behind": 0,
+    "worktree_dirty": false,
+    "remote_ref": "",
+    "sync_hint": ""
+  },
+  "equity_curve": [
+    {
+      "date": "2025-01-02",
+      "equity_total": 499712.9194654297,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-03",
+      "equity_total": 500421.10560605465,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-06",
+      "equity_total": 500672.53636669915,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-07",
+      "equity_total": 502991.66820263665,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-08",
+      "equity_total": 500930.69164013665,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-09",
+      "equity_total": 509299.32249951165,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-10",
+      "equity_total": 507695.03539013665,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-13",
+      "equity_total": 495192.03539013665,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-14",
+      "equity_total": 498685.02367138665,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-15",
+      "equity_total": 498344.50999951165,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-16",
+      "equity_total": 493076.52171826165,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-17",
+      "equity_total": 486080.23460888665,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-20",
+      "equity_total": 489195.01878857415,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-21",
+      "equity_total": 492143.13011669915,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-22",
+      "equity_total": 498508.80003857415,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-23",
+      "equity_total": 496924.87425732415,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-24",
+      "equity_total": 490874.35081982415,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-27",
+      "equity_total": 482302.09244695434,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-28",
+      "equity_total": 480844.66764226684,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-29",
+      "equity_total": 493876.69791570434,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-30",
+      "equity_total": 506033.48990789184,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-01-31",
+      "equity_total": 504645.53190007934,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-03",
+      "equity_total": 999862.7769206848,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-04",
+      "equity_total": 1011946.2534831848,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-05",
+      "equity_total": 1005741.2993816223,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-06",
+      "equity_total": 1007933.9058269348,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-07",
+      "equity_total": 994191.1665691223,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-10",
+      "equity_total": 988084.1636394348,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-11",
+      "equity_total": 975803.8512566222,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-12",
+      "equity_total": 980089.0582878722,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-13",
+      "equity_total": 998708.0846550597,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-14",
+      "equity_total": 1005749.5553581847,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-17",
+      "equity_total": 996283.0299675597,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-18",
+      "equity_total": 1017044.5934441222,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-19",
+      "equity_total": 1021768.5045769347,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-20",
+      "equity_total": 1011205.2828972472,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-21",
+      "equity_total": 1002070.9179023742,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-24",
+      "equity_total": 992296.3143867492,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-25",
+      "equity_total": 986010.3934883117,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-26",
+      "equity_total": 980459.0429023742,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-27",
+      "equity_total": 968188.9589179992,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-02-28",
+      "equity_total": 979483.2753168518,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-03",
+      "equity_total": 1479483.2753168521,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-04",
+      "equity_total": 1479483.2753168521,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-05",
+      "equity_total": 1491784.1194648226,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-06",
+      "equity_total": 1486350.4046210726,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-07",
+      "equity_total": 1475242.7777892612,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-10",
+      "equity_total": 1424764.1107970737,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-11",
+      "equity_total": 1430158.5731994174,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-12",
+      "equity_total": 1456918.6352325229,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-13",
+      "equity_total": 1446631.1078887729,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-14",
+      "equity_total": 1487488.4726348666,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-17",
+      "equity_total": 1519487.579080179,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-18",
+      "equity_total": 1533795.871388773,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-19",
+      "equity_total": 1556601.543263773,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-20",
+      "equity_total": 1543468.215138773,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-21",
+      "equity_total": 1564762.7849629917,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-24",
+      "equity_total": 1564762.7849629917,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-25",
+      "equity_total": 1581954.5188462436,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-26",
+      "equity_total": 1563034.5110337436,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-27",
+      "equity_total": 1562506.1916978061,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-28",
+      "equity_total": 1564694.7307603061,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-03-31",
+      "equity_total": 1585106.5256821811,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-01",
+      "equity_total": 2080580.600014456,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-02",
+      "equity_total": 2080580.600014456,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-03",
+      "equity_total": 2044283.264076956,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-04",
+      "equity_total": 1969442.5013894562,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-07",
+      "equity_total": 1950567.2239896697,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-08",
+      "equity_total": 1932417.9930873262,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-09",
+      "equity_total": 2025169.8094935762,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-10",
+      "equity_total": 2068488.516036545,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-11",
+      "equity_total": 2129769.648849045,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-14",
+      "equity_total": 2083387.315212496,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-15",
+      "equity_total": 2019081.152378878,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-16",
+      "equity_total": 1933805.070347628,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-17",
+      "equity_total": 1933805.070347628,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-21",
+      "equity_total": 1835176.350256559,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-22",
+      "equity_total": 1897846.5504518715,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-23",
+      "equity_total": 1953144.799475309,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-24",
+      "equity_total": 1963656.067053434,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-25",
+      "equity_total": 1969500.553381559,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-28",
+      "equity_total": 1948702.986975309,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-29",
+      "equity_total": 1933460.0738893715,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-04-30",
+      "equity_total": 1915160.518225309,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-01",
+      "equity_total": 2415160.518225308,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-02",
+      "equity_total": 2415160.518225308,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-05",
+      "equity_total": 2415436.738563217,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-06",
+      "equity_total": 2451677.410438217,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-07",
+      "equity_total": 2358646.6588187832,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-08",
+      "equity_total": 2332030.8736625332,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-09",
+      "equity_total": 2337399.6920219082,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-12",
+      "equity_total": 2393011.382390097,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-13",
+      "equity_total": 2431762.456608847,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-14",
+      "equity_total": 2422696.860905722,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-15",
+      "equity_total": 2444302.226140097,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-16",
+      "equity_total": 2492758.306426108,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-19",
+      "equity_total": 2501787.44315531,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-20",
+      "equity_total": 2521496.05253031,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-21",
+      "equity_total": 2492693.577920935,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-22",
+      "equity_total": 2467666.007608435,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-23",
+      "equity_total": 2503770.570108435,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-26",
+      "equity_total": 2504992.8628795776,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-27",
+      "equity_total": 2525187.4097545776,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-28",
+      "equity_total": 2524492.7925670776,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-29",
+      "equity_total": 2535479.9468639526,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-05-30",
+      "equity_total": 2541213.1831920776,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-02",
+      "equity_total": 2997812.6592248045,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-03",
+      "equity_total": 3002239.849654492,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-04",
+      "equity_total": 2943105.771529492,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-05",
+      "equity_total": 2936186.771529492,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-06",
+      "equity_total": 2959191.814498242,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-09",
+      "equity_total": 2936586.927779492,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-10",
+      "equity_total": 2977036.1123498045,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-11",
+      "equity_total": 2961333.904341992,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-12",
+      "equity_total": 2969313.443629712,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-13",
+      "equity_total": 2920296.467067212,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-16",
+      "equity_total": 2920296.467067212,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-17",
+      "equity_total": 2854701.1907000244,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-18",
+      "equity_total": 2817276.607692212,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-19",
+      "equity_total": 2839355.8050855957,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-20",
+      "equity_total": 2839355.8050855957,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-23",
+      "equity_total": 2819833.8392220214,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-24",
+      "equity_total": 2875956.4778938964,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-25",
+      "equity_total": 2886413.4778938964,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-26",
+      "equity_total": 2895964.510120459,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-27",
+      "equity_total": 2909498.524408472,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-06-30",
+      "equity_total": 2913599.057611597,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-01",
+      "equity_total": 3476311.953205347,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-02",
+      "equity_total": 3508364.4639475346,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-03",
+      "equity_total": 3538077.007892847,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-04",
+      "equity_total": 3553197.953205347,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-07",
+      "equity_total": 3579122.2580540776,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-08",
+      "equity_total": 3583086.6506322026,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-09",
+      "equity_total": 3583086.6506322026,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-10",
+      "equity_total": 3540105.0119603276,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-11",
+      "equity_total": 3500126.3688939214,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-14",
+      "equity_total": 3624527.233151734,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-15",
+      "equity_total": 3585067.6506322026,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-16",
+      "equity_total": 3538549.1330540776,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-17",
+      "equity_total": 3587370.4084447026,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-18",
+      "equity_total": 3620185.4084447026,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-21",
+      "equity_total": 3575826.8532689214,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-22",
+      "equity_total": 3517424.1936009526,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-23",
+      "equity_total": 3559325.573483765,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-24",
+      "equity_total": 3632305.1560032964,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-25",
+      "equity_total": 3705035.5002415776,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-28",
+      "equity_total": 3704624.241452515,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-29",
+      "equity_total": 3774017.682409742,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-30",
+      "equity_total": 3834834.440222242,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-07-31",
+      "equity_total": 3899878.586706617,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-01",
+      "equity_total": 4390338.388770679,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-04",
+      "equity_total": 4362684.251160071,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-05",
+      "equity_total": 4370344.251160071,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-06",
+      "equity_total": 4427179.081238196,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-07",
+      "equity_total": 4338249.2086796025,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-08",
+      "equity_total": 4347174.081238196,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-11",
+      "equity_total": 4339004.049988196,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-12",
+      "equity_total": 4345219.134949134,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-13",
+      "equity_total": 4304224.219910071,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-14",
+      "equity_total": 4192045.6793827275,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-15",
+      "equity_total": 4192045.6793827275,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-18",
+      "equity_total": 4161475.959656165,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-19",
+      "equity_total": 4083630.6481327275,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-20",
+      "equity_total": 4110574.308376966,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-21",
+      "equity_total": 4126869.4299589973,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-22",
+      "equity_total": 4148343.365508167,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-25",
+      "equity_total": 4132798.3391409796,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-26",
+      "equity_total": 4112281.2330159796,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-27",
+      "equity_total": 4072506.2486409796,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-28",
+      "equity_total": 4057846.556258167,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-08-29",
+      "equity_total": 4077021.1334066046,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-01",
+      "equity_total": 4631929.644461903,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-02",
+      "equity_total": 4604959.730399403,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-03",
+      "equity_total": 4598604.730399403,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-04",
+      "equity_total": 4663269.808036122,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-05",
+      "equity_total": 4666779.683036122,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-08",
+      "equity_total": 4584359.784437526,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-09",
+      "equity_total": 4600538.102796901,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-10",
+      "equity_total": 4711493.102796901,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-11",
+      "equity_total": 4746832.978285182,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-12",
+      "equity_total": 4761070.197035182,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-15",
+      "equity_total": 4814492.312269557,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-16",
+      "equity_total": 4841405.745863307,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-17",
+      "equity_total": 4873286.398207057,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-18",
+      "equity_total": 4894910.72730862,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-19",
+      "equity_total": 4942069.089652126,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-22",
+      "equity_total": 4780465.217190456,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-23",
+      "equity_total": 4732619.596584987,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-24",
+      "equity_total": 4725897.788615456,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-25",
+      "equity_total": 4620377.788615456,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-26",
+      "equity_total": 4727143.467751198,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-29",
+      "equity_total": 4807920.711891823,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-09-30",
+      "equity_total": 4898649.586891823,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-01",
+      "equity_total": 5503119.670209939,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-02",
+      "equity_total": 5527201.678022439,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-03",
+      "equity_total": 5501482.451459939,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-06",
+      "equity_total": 5472627.22147767,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-07",
+      "equity_total": 5533016.875774545,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-08",
+      "equity_total": 5569242.481243295,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-09",
+      "equity_total": 5460298.225929573,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-10",
+      "equity_total": 5460298.225929573,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-13",
+      "equity_total": 5432100.427101448,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-14",
+      "equity_total": 5471964.774975472,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-15",
+      "equity_total": 5506084.83259266,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-16",
+      "equity_total": 5620368.147045785,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-17",
+      "equity_total": 5828259.096264535,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-20",
+      "equity_total": 5900268.766512483,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-21",
+      "equity_total": 5997451.109731234,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-22",
+      "equity_total": 6014374.609731234,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-23",
+      "equity_total": 5861703.385121859,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-24",
+      "equity_total": 5922872.670278109,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-27",
+      "equity_total": 6081353.496062084,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-28",
+      "equity_total": 6290338.189421459,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-29",
+      "equity_total": 6482406.915833812,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-30",
+      "equity_total": 6539321.900208812,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-10-31",
+      "equity_total": 6751631.646302562,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-03",
+      "equity_total": 7502843.859054077,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-04",
+      "equity_total": 7460864.749679077,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-05",
+      "equity_total": 7349750.866866577,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-06",
+      "equity_total": 7286971.046554077,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-07",
+      "equity_total": 7079992.827804077,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-10",
+      "equity_total": 7387254.345232419,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-11",
+      "equity_total": 7388124.036638669,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-12",
+      "equity_total": 7412244.036638669,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-13",
+      "equity_total": 7239798.974482419,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-14",
+      "equity_total": 7341968.884638669,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-17",
+      "equity_total": 7215672.974482419,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-18",
+      "equity_total": 7222167.0164746065,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-19",
+      "equity_total": 7117197.316279294,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-20",
+      "equity_total": 7231656.77388696,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-21",
+      "equity_total": 7207241.2494728975,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-24",
+      "equity_total": 7207209.813014102,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-25",
+      "equity_total": 7426760.64016254,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-26",
+      "equity_total": 7598105.72610004,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-27",
+      "equity_total": 7589910.53860004,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-11-28",
+      "equity_total": 7602118.24953754,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-01",
+      "equity_total": 8136101.060493985,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-02",
+      "equity_total": 8098589.263618985,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-03",
+      "equity_total": 8177348.263618985,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-04",
+      "equity_total": 8114091.787056485,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-05",
+      "equity_total": 8033550.53510336,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-08",
+      "equity_total": 8033550.53510336,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-09",
+      "equity_total": 7924804.935099936,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-10",
+      "equity_total": 7928333.360881186,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-11",
+      "equity_total": 7905499.804240561,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-12",
+      "equity_total": 8046582.868693686,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-15",
+      "equity_total": 8153529.358928061,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-16",
+      "equity_total": 8260584.247599936,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-17",
+      "equity_total": 8145179.247599936,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-18",
+      "equity_total": 8212574.247599936,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-19",
+      "equity_total": 8219630.821818686,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-22",
+      "equity_total": 8159273.427896714,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-23",
+      "equity_total": 8106083.663248276,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-24",
+      "equity_total": 8130303.663248276,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-26",
+      "equity_total": 8118340.297738998,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-29",
+      "equity_total": 8044491.420839096,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-30",
+      "equity_total": 7947809.819276596,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2025-12-31",
+      "equity_total": 7947809.819276596,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-02",
+      "equity_total": 8583847.419127963,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-05",
+      "equity_total": 8666442.641784213,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-06",
+      "equity_total": 8671999.466002963,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-07",
+      "equity_total": 8574214.466002963,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-08",
+      "equity_total": 8701910.947448276,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-09",
+      "equity_total": 8786842.289245151,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-12",
+      "equity_total": 8812804.00086569,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-13",
+      "equity_total": 8724651.979381315,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-14",
+      "equity_total": 8620284.880510952,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-15",
+      "equity_total": 8599345.237932827,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-16",
+      "equity_total": 8597920.118792202,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-19",
+      "equity_total": 8620448.237932827,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-20",
+      "equity_total": 8626773.999651577,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-21",
+      "equity_total": 8767649.999651577,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-22",
+      "equity_total": 8766147.118792202,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-23",
+      "equity_total": 8808009.071874967,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-26",
+      "equity_total": 8813557.169531217,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-27",
+      "equity_total": 8871000.952734342,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-28",
+      "equity_total": 8880026.846913932,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-29",
+      "equity_total": 8858623.573476432,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-01-30",
+      "equity_total": 8764555.56573234,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-02",
+      "equity_total": 9184650.289359605,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-03",
+      "equity_total": 9206085.174033776,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-04",
+      "equity_total": 9218116.935752526,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-05",
+      "equity_total": 9142037.416221276,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-06",
+      "equity_total": 9209150.916221276,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-09",
+      "equity_total": 9172072.154502526,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-10",
+      "equity_total": 9238739.083213463,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-11",
+      "equity_total": 9227474.154502526,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-12",
+      "equity_total": 9012865.207850866,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-13",
+      "equity_total": 9021404.270350866,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-17",
+      "equity_total": 9021404.270350866,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-18",
+      "equity_total": 8716525.575295707,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-19",
+      "equity_total": 8877734.98694815,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-20",
+      "equity_total": 8906356.875620024,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-23",
+      "equity_total": 8793796.904291898,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-24",
+      "equity_total": 8849608.341791898,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-25",
+      "equity_total": 8948428.681635648,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-26",
+      "equity_total": 8893879.900385648,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-02-27",
+      "equity_total": 8762303.27245596,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-02",
+      "equity_total": 9187873.970885843,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-03",
+      "equity_total": 9181017.79022178,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-04",
+      "equity_total": 9170424.363463968,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-05",
+      "equity_total": 9089142.70819053,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-06",
+      "equity_total": 9240153.533717973,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-09",
+      "equity_total": 9237259.533717973,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-10",
+      "equity_total": 9336250.086452348,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-11",
+      "equity_total": 9339616.197780473,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-12",
+      "equity_total": 9188224.932724759,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-13",
+      "equity_total": 9057616.029404446,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-16",
+      "equity_total": 9038007.95425098,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-17",
+      "equity_total": 9140593.55971973,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-18",
+      "equity_total": 9080867.887261575,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-19",
+      "equity_total": 9132572.8345272,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-20",
+      "equity_total": 9010421.972222513,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-23",
+      "equity_total": 9098316.472222513,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-24",
+      "equity_total": 9098316.472222513,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-25",
+      "equity_total": 9098580.472222513,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-26",
+      "equity_total": 8993121.945855325,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-27",
+      "equity_total": 9098087.8345272,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-30",
+      "equity_total": 9227918.749566263,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-03-31",
+      "equity_total": 9350831.887261577,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-01",
+      "equity_total": 9939766.274313921,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-02",
+      "equity_total": 9939766.274313921,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-06",
+      "equity_total": 9970384.954548832,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-07",
+      "equity_total": 9795059.651814457,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-08",
+      "equity_total": 9967131.046345707,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-09",
+      "equity_total": 10090305.487751957,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-10",
+      "equity_total": 10068863.651814457,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-13",
+      "equity_total": 10020033.675251957,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-14",
+      "equity_total": 10008267.675251957,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-15",
+      "equity_total": 9907748.909626957,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-16",
+      "equity_total": 9872421.909626957,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-17",
+      "equity_total": 9923394.175251957,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-20",
+      "equity_total": 10015762.175251957,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-21",
+      "equity_total": 9955081.663533207,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-22",
+      "equity_total": 9941150.663533207,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-23",
+      "equity_total": 9910584.632826373,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-24",
+      "equity_total": 9978526.632826373,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-27",
+      "equity_total": 10068209.50263635,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-28",
+      "equity_total": 10022783.5221676,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-29",
+      "equity_total": 9886121.0221676,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-04-30",
+      "equity_total": 9987663.5221676,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-01",
+      "equity_total": 10487663.5221676,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-04",
+      "equity_total": 10318079.543842211,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-05",
+      "equity_total": 10257070.432514086,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-06",
+      "equity_total": 10542838.692279711,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-07",
+      "equity_total": 10473128.821185961,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-08",
+      "equity_total": 10391964.873920336,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-11",
+      "equity_total": 10384595.39259221,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-12",
+      "equity_total": 10348642.76368596,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-13",
+      "equity_total": 10345677.76368596,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-14",
+      "equity_total": 10316916.875014085,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-15",
+      "equity_total": 10258588.175779711,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-18",
+      "equity_total": 10392445.81293748,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-19",
+      "equity_total": 10319619.18403123,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-20",
+      "equity_total": 10326704.92621873,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-21",
+      "equity_total": 10319068.62721873,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-22",
+      "equity_total": 10317063.570578106,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-26",
+      "equity_total": 10422815.070578106,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-27",
+      "equity_total": 10601914.848578105,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-28",
+      "equity_total": 10635807.42084373,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-05-29",
+      "equity_total": 10752687.977484355,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-01",
+      "equity_total": 11299747.076796085,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-02",
+      "equity_total": 11288195.076796085,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-03",
+      "equity_total": 11276710.076796085,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-04",
+      "equity_total": 11310821.22328046,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-05",
+      "equity_total": 11157705.51481171,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-08",
+      "equity_total": 11269735.51481171,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-09",
+      "equity_total": 11273541.368327335,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-10",
+      "equity_total": 11213935.03184296,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-11",
+      "equity_total": 11536437.178327335,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-12",
+      "equity_total": 11537440.088483585,
+      "equity_short": 0.0,
+      "equity_long": 0.0,
+      "cash": 0.0,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    }
+  ],
+  "positions": [],
+  "recent_fills": [],
+  "risk": {
+    "trading_allowed": true,
+    "kill_switch": {
+      "active": false,
+      "activated_at": null,
+      "monthly_dd": null
+    },
+    "thresholds": {
+      "short_kill_switch_monthly_dd": 0.0,
+      "max_daily_loss_short_pct": 0.0
+    },
+    "factors": [
+      {
+        "level": "info",
+        "code": "research_mode",
+        "message": "Modo investigación: aportes mensuales DCA, métricas TWR. No es el gate de producción."
+      }
+    ]
+  },
+  "kpis": {
+    "status": "ok",
+    "n_days": 371,
+    "sharpe_annualized": 1.3897504665745857,
+    "sharpe_na_reason": null,
+    "sortino_annualized": null,
+    "max_drawdown": -0.13832167190084999,
+    "net_return_annualized": 0.3196255446299232,
+    "calmar_total": 2.31074090008855,
+    "calmar_12m_long": null,
+    "calmar_12m_na_reason": null,
+    "hit_rate": null,
+    "profit_factor": null,
+    "ts_start": "2025-01-02",
+    "ts_end": "2026-06-12"
+  },
+  "alerts": [
+    {
+      "severity": "info",
+      "code": "research_sim",
+      "title": "Simulación walk-forward (aportes mensuales)",
+      "detail": "Aporte mensual 500,000 ARS · total aportado 9,000,000 · TWR acumulado +50.26% · Calmar 2.31"
+    }
+  ],
+  "generated_at": "2026-06-19T21:35:38.924832+00:00",
+  "export_version": "1",
+  "export_source": {
+    "kind": "research_sim",
+    "monthly_contribution": "500000.0",
+    "period": "2025-01-02..2026-06-12"
+  }
+}
