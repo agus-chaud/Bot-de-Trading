@@ -1,0 +1,224 @@
+{
+  "meta": {
+    "mode": "paper_live",
+    "currency": "ARS",
+    "starting_cash": 1000000.0,
+    "inception_date": "2026-06-09",
+    "last_trading_day": "2026-06-18",
+    "equity_total": 998828.3202956467,
+    "num_open_positions": 3
+  },
+  "data_freshness": {
+    "status": "ok",
+    "message": "Snapshot publicado por CI; el chequeo de DB local no aplica.",
+    "commits_behind": 0,
+    "worktree_dirty": false,
+    "remote_ref": "origin/paper-live-data",
+    "sync_hint": "git fetch origin paper-live-data && git checkout origin/paper-live-data -- data/market.db && git lfs checkout data/market.db"
+  },
+  "equity_curve": [
+    {
+      "date": "2026-06-09",
+      "equity_total": 999991.6016453782,
+      "equity_short": -8.398354621887847,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-10",
+      "equity_total": 1000655.3516453782,
+      "equity_short": 655.3516453781122,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-11",
+      "equity_total": 1000342.652365593,
+      "equity_short": 342.6523655929559,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-12",
+      "equity_total": 1000369.2035359421,
+      "equity_short": 369.203535942077,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-15",
+      "equity_total": 1000369.2035359421,
+      "equity_short": 369.203535942077,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-16",
+      "equity_total": 999678.902365593,
+      "equity_short": -321.0976344070441,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-17",
+      "equity_total": 999575.6528157273,
+      "equity_short": -424.34718427276675,
+      "equity_long": 1000000.0,
+      "cash": 975996.3027257004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-18",
+      "equity_total": 998828.3202956467,
+      "equity_short": -1171.6797043533297,
+      "equity_long": 1000000.0,
+      "cash": 688563.2704757004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    }
+  ],
+  "positions": [
+    {
+      "symbol": "WMT",
+      "qty": 15.0,
+      "avg_cost": 9795.0,
+      "market": "AR",
+      "bucket": "short",
+      "market_value": 146925.0,
+      "unrealized_pnl": 0.0,
+      "stale": false
+    },
+    {
+      "symbol": "GLD",
+      "qty": 12.0,
+      "avg_cost": 11660.0,
+      "market": "AR",
+      "bucket": "short",
+      "market_value": 139920.0,
+      "unrealized_pnl": 0.0,
+      "stale": false
+    },
+    {
+      "symbol": "KO",
+      "qty": 295.0,
+      "avg_cost": 81.33999633789062,
+      "market": "US",
+      "bucket": "short",
+      "market_value": 23420.04981994629,
+      "unrealized_pnl": -575.2490997314453,
+      "stale": false
+    }
+  ],
+  "recent_fills": [
+    {
+      "trading_day": "2026-06-18",
+      "ts_fill": "2026-06-19T13:40:45.026942+00:00",
+      "symbol": "WMT",
+      "side": "BUY",
+      "qty": 15.0,
+      "price": 9795.0,
+      "bucket": "short",
+      "engine": "short_term_v1",
+      "reason": null,
+      "fee": 301.19625,
+      "cost_total": 301.19625
+    },
+    {
+      "trading_day": "2026-06-18",
+      "ts_fill": "2026-06-19T13:40:45.026942+00:00",
+      "symbol": "GLD",
+      "side": "BUY",
+      "qty": 12.0,
+      "price": 11660.0,
+      "bucket": "short",
+      "engine": "short_term_v1",
+      "reason": null,
+      "fee": 286.836,
+      "cost_total": 286.836
+    },
+    {
+      "trading_day": "2026-06-09",
+      "ts_fill": "2026-06-11T18:49:43.871530+00:00",
+      "symbol": "KO",
+      "side": "BUY",
+      "qty": 295.0,
+      "price": 81.33999633789062,
+      "bucket": "short",
+      "engine": "short_term_v1",
+      "reason": null,
+      "fee": 8.398354621887208,
+      "cost_total": 8.398354621887208
+    }
+  ],
+  "risk": {
+    "trading_allowed": true,
+    "kill_switch": {
+      "active": false,
+      "activated_at": null,
+      "monthly_dd": null
+    },
+    "thresholds": {
+      "short_kill_switch_monthly_dd": -0.08,
+      "max_daily_loss_short_pct": -0.02
+    },
+    "latest_snapshot": {
+      "trading_day": "2026-06-18",
+      "short_monthly_drawdown": 0.0,
+      "short_daily_return": 0.0,
+      "num_fills_today": 2,
+      "kill_switch_active": false
+    },
+    "factors": [
+      {
+        "level": "ok",
+        "code": "nominal",
+        "message": "Sin bloqueos de riesgo detectados en el último snapshot"
+      }
+    ]
+  },
+  "kpis": {
+    "status": "ok",
+    "n_days": 8,
+    "sharpe_annualized": -5.477573020028304,
+    "sharpe_na_reason": null,
+    "sortino_annualized": -8.563924777519976,
+    "max_drawdown": -0.001825834785900371,
+    "net_return_annualized": -0.04103706802960971,
+    "calmar_total": -22.475783869663307,
+    "calmar_12m_long": null,
+    "calmar_12m_na_reason": "insufficient_history",
+    "hit_rate": null,
+    "profit_factor": null,
+    "ts_start": "2026-06-09",
+    "ts_end": "2026-06-18"
+  },
+  "alerts": [
+    {
+      "severity": "warning",
+      "code": "missing_run_days",
+      "title": "Días de mercado sin corrida",
+      "detail": "Último snapshot 2026-06-18; sin procesar: 2026-06-19"
+    }
+  ],
+  "generated_at": "2026-06-19T18:16:08.932984+00:00",
+  "export_version": "1",
+  "export_source": {
+    "db_path": "C:\\Users\\Dell\\Agus\\Bot de Trading\\data\\market.db",
+    "policy_path": "C:\\Users\\Dell\\Agus\\Bot de Trading\\config\\policy.v1.yaml",
+    "calendar_path": "C:\\Users\\Dell\\Agus\\Bot de Trading\\config\\calendars\\trading_days.v1.yaml",
+    "mode": "paper_live"
+  }
+}
