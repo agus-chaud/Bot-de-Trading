@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import { EquityChart } from "@/components/EquityChart";
 import { NeuralBackground } from "@/components/NeuralBackground";
-import { fetchDashboardPayload } from "@/lib/dashboard-client";
+import { fetchDashboardPayload, fetchSimDashboardPayload } from "@/lib/dashboard-client";
 import { fmtMoney, fmtNum, fmtPct } from "@/lib/format";
 import type { DashboardAlert, DashboardPayload } from "@/lib/types";
 
@@ -43,23 +43,48 @@ interface DashboardViewProps {
   initialData: DashboardPayload;
 }
 
+type DashboardViewMode = "live" | "sim";
+
 export function DashboardView({ initialData }: DashboardViewProps) {
-  const [data, setData] = useState(initialData);
+  const [view, setView] = useState<DashboardViewMode>("live");
+  const [liveData, setLiveData] = useState(initialData);
+  const [simData, setSimData] = useState<DashboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const refresh = useCallback(async () => {
+  // While the sim payload loads (or if it's unavailable), fall back to live data
+  // so the layout never renders empty.
+  const data = view === "sim" ? simData ?? liveData : liveData;
+
+  const load = useCallback(async (mode: DashboardViewMode) => {
     setLoading(true);
     setError(null);
     try {
-      const next = await fetchDashboardPayload();
-      setData(next);
+      if (mode === "sim") {
+        setSimData(await fetchSimDashboardPayload());
+      } else {
+        setLiveData(await fetchDashboardPayload());
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const refresh = useCallback(() => load(view), [load, view]);
+
+  const switchView = useCallback(
+    (mode: DashboardViewMode) => {
+      setError(null);
+      setView(mode);
+      // Lazy-load the sim payload the first time the tab is opened.
+      if (mode === "sim" && simData == null) {
+        void load("sim");
+      }
+    },
+    [load, simData],
+  );
 
   const ccy = data.meta.currency || "ARS";
   const status = useMemo(
@@ -107,6 +132,28 @@ export function DashboardView({ initialData }: DashboardViewProps) {
             </div>
           </div>
           <div className="top-actions">
+            <div className="view-tabs" role="tablist" aria-label="Vista del dashboard">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "live"}
+                className={`view-tab${view === "live" ? " active" : ""}`}
+                onClick={() => switchView("live")}
+                disabled={loading}
+              >
+                Live
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "sim"}
+                className={`view-tab${view === "sim" ? " active" : ""}`}
+                onClick={() => switchView("sim")}
+                disabled={loading}
+              >
+                Simulación
+              </button>
+            </div>
             <span className={error ? "status-pill critical" : status.className}>
               {error ? "Error" : status.label}
             </span>
