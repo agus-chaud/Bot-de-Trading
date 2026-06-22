@@ -2,8 +2,10 @@ name: Paper Live Daily
 
 on:
   schedule:
-    # 10:00 UTC Mon–Fri (post US market close)
-    - cron: "0 10 * * 1-5"
+    # 10:23 UTC Mon–Fri (post US market close). Minuto "raro" a propósito: el
+    # evento schedule es best-effort y los slots en hora redonda (:00) sufren la
+    # mayor congestión/demora en GitHub Actions. Un minuto off-peak reduce el lag.
+    - cron: "23 10 * * 1-5"
   workflow_dispatch:
     inputs:
       date:
