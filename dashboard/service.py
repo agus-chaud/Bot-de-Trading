@@ -12,6 +12,8 @@ import yaml
 from core_sim.calendar_store import TradingCalendarStore
 from data.storage import MarketDB
 from dashboard.db_freshness import check_db_freshness
+from dashboard.risk_matrix import build_risk_matrix
+from dashboard.trade_thesis import build_position_theses
 from reporting.kpi_v0 import build_kpi_v0_report_from_tables
 
 _VENUE_MAP: dict[str, str] = {"US": "XNYS", "AR": "XBUE", "XNYS": "XNYS", "XBUE": "XBUE"}
@@ -86,17 +88,58 @@ class DashboardService:
                     ),
                 },
             )
+
+        positions = self._positions(db, meta, last_day)
+        context = self._position_market_context(db, positions, last_day, policy)
+        latest = snapshots[-1] if snapshots else None
+        max_lag = max((c["lag_days"] for c in context.values()), default=0)
+        ks_floor = float(policy.get("short_kill_switch_monthly_dd", -0.08))
+
         return {
             "meta": self._meta_block(meta, last_day, snapshots),
             "data_freshness": freshness,
             "equity_curve": self._equity_curve(snapshots),
-            "positions": self._positions(db, meta, last_day),
+            "positions": positions,
             "recent_fills": self._recent_fills(db, limit=25),
             "risk": self._risk_block(snapshots, ks, policy),
+            "risk_matrix": build_risk_matrix(
+                latest_snapshot=latest,
+                positions=positions,
+                max_data_lag_days=max_lag,
+                fetch_issue_count=len(db.get_recent_fetch_errors()),
+                ks_active=bool(ks.active),
+                ks_floor=ks_floor,
+            ),
+            "position_theses": build_position_theses(positions, context),
             "kpis": self._kpis(snapshots, db),
             "alerts": alerts,
             "generated_at": datetime.now(tz=timezone.utc).isoformat(),
         }
+
+    def _position_market_context(
+        self,
+        db: MarketDB,
+        positions: list[dict[str, Any]],
+        last_day: date | None,
+        policy: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        """Per-symbol closes (for technicals) + lag de datos (para staleness)."""
+        ctx: dict[str, dict[str, Any]] = {}
+        if last_day is None:
+            return ctx
+        lookback = int(
+            (policy.get("short_term_engine") or {}).get("momentum_lookback_days", 20)
+        )
+        start = last_day - timedelta(days=lookback * 2 + 15)
+        for pos in positions:
+            symbol = str(pos["symbol"])
+            venue = _VENUE_MAP.get(str(pos.get("market")).upper(), "XNYS")
+            rows = db.get_ohlcv(symbol, start, last_day, venue)
+            closes = [float(r.close) for r in rows][-lookback:]
+            last_ts = rows[-1].ts if rows else None
+            lag_days = (last_day - last_ts).days if last_ts else 999
+            ctx[symbol] = {"closes": closes, "lag_days": lag_days}
+        return ctx
 
     def _data_freshness_block(self) -> dict[str, Any]:
         report = check_db_freshness(self.config.db_path, fetch=False)

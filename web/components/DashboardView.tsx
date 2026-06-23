@@ -102,6 +102,8 @@ export function DashboardView({ initialData }: DashboardViewProps) {
     .join(" · ");
 
   const calmar = data.kpis.calmar_total ?? data.kpis.calmar_12m_long;
+  const theses = data.position_theses ?? [];
+  const riskMatrix = data.risk_matrix ?? [];
   const displayAlerts =
     error != null
       ? [
@@ -355,6 +357,88 @@ export function DashboardView({ initialData }: DashboardViewProps) {
               </div>
             </div>
           </section>
+
+          {theses.length > 0 && (
+            <section className="card panel thesis-panel">
+              <div className="panel-header">
+                <h2>Tesis por posición</h2>
+                <span className="panel-meta">{theses.length}</span>
+              </div>
+              <div className="thesis-list">
+                {theses.map((t) => (
+                  <article key={`${t.symbol}-${t.bucket}`} className="thesis-card">
+                    <div className="thesis-head">
+                      <span className="thesis-symbol">
+                        {t.symbol}
+                        <span className={`thesis-side ${t.side}`}>{t.side}</span>
+                      </span>
+                      <span className={`thesis-stance ${t.stance.toLowerCase()}`}>{t.stance}</span>
+                    </div>
+                    <div className="thesis-tech">
+                      Tendencia {t.technical.trend}
+                      {t.technical.momentum_pct != null
+                        ? ` · momentum ${fmtPct(t.technical.momentum_pct)}`
+                        : ""}
+                      {t.unrealized_pnl_pct != null
+                        ? ` · PnL ${fmtPct(t.unrealized_pnl_pct)}`
+                        : ""}
+                    </div>
+                    <ul className="thesis-factors">
+                      {t.bull.map((b, i) => (
+                        <li key={`bull-${i}`} className="thesis-factor bull">
+                          ▲ {b}
+                        </li>
+                      ))}
+                      {t.bear.map((b, i) => (
+                        <li key={`bear-${i}`} className="thesis-factor bear">
+                          ▼ {b}
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
+              </div>
+              <div className="thesis-note">
+                Tesis derivada de mercado + estado de la posición (no del razonamiento del motor).
+              </div>
+            </section>
+          )}
+
+          {riskMatrix.length > 0 && (
+            <section className="card panel risk-matrix-panel">
+              <div className="panel-header">
+                <h2>Matriz de riesgo</h2>
+              </div>
+              <div className="table-wrap">
+                <table className="data-table risk-matrix-table">
+                  <thead>
+                    <tr>
+                      <th>Riesgo</th>
+                      <th>Prob.</th>
+                      <th>Impacto</th>
+                      <th>Mitigación</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {riskMatrix.map((r) => (
+                      <tr key={r.code}>
+                        <td>
+                          <span className={`risk-dot ${r.severity}`} /> {r.title}
+                        </td>
+                        <td>
+                          <span className={`prob-pill prob-${r.probability}`}>{r.probability}</span>
+                        </td>
+                        <td className="risk-impact">{r.impact}</td>
+                        <td className="risk-mitigation">{r.mitigation}</td>
+                        <td className="risk-status">{r.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
         </main>
 
         <footer className="footer">

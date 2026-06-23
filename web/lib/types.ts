@@ -99,6 +99,38 @@ export interface DashboardKpis {
   ts_end: string | null;
 }
 
+export interface RiskMatrixEntry {
+  code: string;
+  title: string;
+  probability: string;
+  impact: string;
+  mitigation: string;
+  severity: AlertSeverity;
+  status: string;
+}
+
+export interface PositionTechnical {
+  trend: string;
+  momentum_pct: number | null;
+  vs_sma_pct: number | null;
+  last_close: number | null;
+}
+
+export interface PositionThesis {
+  symbol: string;
+  bucket: string;
+  market: string | null;
+  side: string;
+  qty: number;
+  market_value: number | null;
+  unrealized_pnl: number;
+  unrealized_pnl_pct: number | null;
+  stance: string;
+  technical: PositionTechnical;
+  bull: string[];
+  bear: string[];
+}
+
 export interface DashboardPayload {
   meta: DashboardMeta;
   data_freshness: DataFreshness;
@@ -106,6 +138,8 @@ export interface DashboardPayload {
   positions: PositionRow[];
   recent_fills: FillRow[];
   risk: DashboardRisk;
+  risk_matrix?: RiskMatrixEntry[];
+  position_theses?: PositionThesis[];
   kpis: DashboardKpis;
   alerts: DashboardAlert[];
   generated_at: string;
