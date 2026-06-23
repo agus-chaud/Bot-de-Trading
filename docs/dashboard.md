@@ -91,9 +91,11 @@ Por defecto escribe **`data/dashboard_payload.json`** (gitignored en `main`; el 
 | `positions` | Posiciones abiertas al último día |
 | `recent_fills` | Últimas ~25 operaciones |
 | `risk` | Kill switch, umbrales, si “se puede operar” hoy |
+| `risk_matrix` | Matriz de riesgo: 5 amenazas con probabilidad / impacto / mitigación / estado (**ADR-068**) |
+| `position_theses` | Tesis por posición: postura técnica + factores a favor/en contra + stance (**ADR-068**) |
 | `kpis` | Sharpe, Calmar, max drawdown (si hay historia suficiente) |
 | `alerts` | Avisos automáticos (huecos, fetch, kill switch) |
-| `data_freshness` | Si la DB local está alineada con remoto |
+| `data_freshness` | Si la DB local está alineada con remoto (neutralizado en el payload publicado, **ADR-066**) |
 | `generated_at` | Timestamp UTC del export |
 | `export_version` | Versión del formato (hoy: `"1"`) |
 | `export_source` | Paths de DB/policy usados (auditoría local) |
@@ -108,6 +110,7 @@ Por defecto escribe **`data/dashboard_payload.json`** (gitignored en `main`; el 
 | `--mode` | `paper_live` | Modo en snapshots |
 | `--out` | `data/dashboard_payload.json` | Ruta de salida |
 | `--pretty` | off | JSON indentado (diff humano) |
+| `--no-db-freshness` | off | Neutraliza el chequeo de DB local (alerta `stale_local_db`) para el payload **publicado**. El CI lo usa; el monitor local NO (**ADR-066**) |
 
 ### Códigos de salida
 
@@ -128,6 +131,51 @@ Tras cada corrida exitosa de **Paper Live Daily**, el workflow:
 **Descargarlo:** repo en GitHub → **Actions** → corrida de *Paper Live Daily* → sección **Artifacts** → `dashboard-payload`.
 
 Ese archivo es el que consumirá la web en Vercel (F1-04): no hace falta clonar el repo ni correr Python para ver el estado del paper-live del día.
+
+---
+
+## Pestaña "Simulación" (ADR-067)
+
+El dashboard tiene un toggle **Live | Simulación** arriba a la derecha. La pestaña
+Simulación muestra la **mejor corrida de investigación** (aportes mensuales 500k ARS,
+criterio Calmar; ver **ADR-058**) sobre +1 año de historia — útil porque el live solo
+tiene ~8 días desde inception y sus KPIs anualizados son ruido.
+
+```text
+python scripts/export_sim_dashboard_payload.py --pretty --out web/public/dashboard_payload.sim.json
+```
+
+- Corre `run_research_sim` y **traduce** su serie TWR al **mismo contrato** del dashboard
+  (Opción B: segundo archivo, no segundo contrato).
+- **DB por defecto: `data/market_backfill.db`** (historia completa), NO `data/market.db`.
+  ⚠️ Correrla sobre la DB de paper-live envenena la valuación (data US stale → equity explota).
+- La UI hace fetch lazy de `/dashboard_payload.sim.json` al abrir la pestaña; reusa
+  `DashboardView`. La sim emite `risk_matrix` y `position_theses` vacías.
+- Métricas: TWR acumulado/anualizado, MWR (TIR), Calmar, Sharpe. Limitación: la curva
+  muestra solo equity total (la serie no trae desglose short/long).
+
+| Flag | Default | Uso |
+|------|---------|-----|
+| `--db` | `data/market_backfill.db` | DB con historia completa (NO paper-live) |
+| `--contrib` | `500000` | Aporte mensual ARS (la mejor sim) |
+| `--start` / `--end` | `2025-01-01` / hoy | Ventana de la sim |
+| `--out` | `web/public/dashboard_payload.sim.json` | Salida (gitignored; CI/manual con `-f`) |
+
+## Matriz de riesgo y tesis por posición (ADR-068)
+
+El payload live incluye dos bloques de **explicabilidad** (la sim los emite vacíos):
+
+- **`risk_matrix`** — 5 riesgos con `probabilidad / impacto / mitigación / estado`,
+  calculados de señales reales: `stale_market_data` (lag de datos → mismark),
+  `drawdown_kill_switch`, `concentration`, `ingestion_failures`, `stale_position_quote`.
+  Hace VISIBLE el riesgo latente antes de que muerda.
+- **`position_theses`** — por posición: postura técnica (tendencia/momentum) + factores
+  a favor/en contra **interpretados según el lado** (un short gana si baja el precio) +
+  stance Mantener/Atención/Revisar.
+
+**Límite honesto**: la tesis es DERIVADA de mercado + estado de la posición, NO el
+razonamiento del motor al entrar (`fills.reason` sigue vacío). Lógica pura en
+`dashboard/risk_matrix.py` y `dashboard/trade_thesis.py` (testeable sin DB).
 
 ---
 
@@ -197,7 +245,8 @@ python -m pytest tests/test_web_dashboard.py tests/test_dashboard_export.py -v
 |------|-----------|---------|
 | **Build** | `scripts/copy-payload.mjs` (hook `predev` / `prebuild`) | `public/dashboard_payload.json` |
 | **SSR inicial** | `lib/dashboard-server.ts` lee del disco | mismo path o `fixtures/` |
-| **Refresh manual** | Botón «Actualizar» → `fetch('/dashboard_payload.json')` | `lib/dashboard-client.ts` |
+| **Refresh manual** | Botón «Actualizar» → re-`fetch` del payload de la pestaña activa | `lib/dashboard-client.ts` |
+| **Pestaña Simulación** | Toggle Live\|Simulación → fetch lazy de `/dashboard_payload.sim.json` (**ADR-067**) | `lib/dashboard-client.ts` |
 
 Orden de búsqueda al copiar payload:
 
@@ -214,6 +263,9 @@ presente en la rama **`paper-live-data`** tras el paper-live diario.
 - Posiciones abiertas al último día
 - Últimas operaciones (`recent_fills`, ~25)
 - Panel de riesgo (kill switch, factores, umbrales)
+- **Matriz de riesgo** (5 amenazas: prob / impacto / mitigación / estado) — **ADR-068**
+- **Tesis por posición** (postura técnica + factores a favor/en contra + stance) — **ADR-068**
+- **Toggle Live | Simulación** (segundo payload `*.sim.json`) — **ADR-067**
 - Alertas operativas (huecos, fetch, idle con posiciones, etc.)
 - Fondo animado (port de `dashboard/static/neural-bg.js`)
 
@@ -305,7 +357,7 @@ GitHub Actions usa **dos ramas** con roles distintos:
 
 1. PR con cambios de workflow / `web/` → **merge a `main`**
 2. En local: `git checkout paper-live-data && git merge main` (alinear código en la rama operativa)
-3. Próxima corrida paper-live (10:00 UTC Lun–Vie) usa la receta nueva de `main`
+3. Próxima corrida paper-live (**10:23 UTC** Lun–Vie; minuto off-peak por la demora del `schedule` de GitHub, **ADR-066**) usa la receta nueva de `main`
 
 **Secretos GitHub** (Settings → Actions): `IOL_USER`, `IOL_PASS`, `VERCEL_DEPLOY_HOOK` (deploy hook del proyecto `bot-de-trading`).
 
@@ -353,14 +405,19 @@ Detalle del plan: canvas `mvp-interfaz-plan` y `docs/mvp_gate.md` (gate de capit
 
 | Ruta | Rol |
 |------|-----|
-| `dashboard/service.py` | Agrega datos de `MarketDB` + KPIs |
+| `dashboard/service.py` | Agrega datos de `MarketDB` + KPIs + risk_matrix + tesis |
 | `dashboard/server.py` | FastAPI + estáticos |
 | `dashboard/db_freshness.py` | Chequeo LFS / remoto |
+| `dashboard/risk_matrix.py` | Matriz de riesgo (puro) — **ADR-068** |
+| `dashboard/trade_thesis.py` | Tesis por posición (puro) — **ADR-068** |
 | `dashboard/static/` | HTML, CSS, JS del monitor |
 | `scripts/run_dashboard.py` | Arranque del servidor |
-| `scripts/export_dashboard_payload.py` | Export JSON estático |
+| `scripts/export_dashboard_payload.py` | Export JSON estático (`--no-db-freshness`, **ADR-066**) |
+| `scripts/export_sim_dashboard_payload.py` | Export del payload de la sim (**ADR-067**) |
 | `web/` | App Next.js read-only para Vercel (**F1-04**) — ver `web/README.md` |
 | `tests/test_dashboard_export.py` | Comportamiento del export + workflow CI |
+| `tests/test_sim_dashboard_export.py` | Traducción sim → payload (**ADR-067**) |
+| `tests/test_dashboard_risk_thesis.py` | Matriz de riesgo + tesis (**ADR-068**) |
 | `tests/test_web_dashboard.py` | Fixture, scaffold y scripts de build web |
 
 ---
@@ -370,4 +427,4 @@ Detalle del plan: canvas `mvp-interfaz-plan` y `docs/mvp_gate.md` (gate de capit
 - `web/README.md` — desarrollo y build de la demo Next.js
 - `AGENTS.md` — comandos rápidos
 - `docs/mvp_gate.md` — gate para autorizar 10% de capital (no es el dashboard)
-- `decisiones-tecnicas.md` — ADR-040, ADR-050 (paper-live), ADR-063 (MVP), **ADR-065** (Vercel JSON)
+- `decisiones-tecnicas.md` — ADR-040, ADR-050 (paper-live), ADR-063 (MVP), **ADR-065** (Vercel JSON), **ADR-066** (freshness/flag), **ADR-067** (pestaña sim), **ADR-068** (matriz riesgo + tesis)

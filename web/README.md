@@ -63,6 +63,8 @@ Equivalente al monitor en `:8765`:
 - KPIs (equity, Sharpe, Calmar, max DD)
 - Curva de equity (Chart.js)
 - Posiciones, últimas operaciones, riesgo, alertas
+- **Matriz de riesgo** y **tesis por posición** (**ADR-068**)
+- **Toggle Live | Simulación** — fetch lazy de `/dashboard_payload.sim.json` (**ADR-067**)
 - Fondo neural (`NeuralBackground`)
 
 ## Tests (desde la raíz del repo)
@@ -100,6 +102,6 @@ Variables: ver `web/.env.example`. Auth cátedra en **F1-06**.
 
 ## Ver también
 
-- `docs/dashboard.md` — F1-01 a F1-06, pipeline CI, monitor local
-- `decisiones-tecnicas.md` — **ADR-065**
+- `docs/dashboard.md` — F1-01 a F1-06, pipeline CI, monitor local, pestaña sim, matriz de riesgo
+- `decisiones-tecnicas.md` — **ADR-065** (Vercel), **ADR-066** (freshness/flag), **ADR-067** (pestaña sim), **ADR-068** (matriz riesgo + tesis)
 - `tests/test_dashboard_export.py` — contrato Python del export
