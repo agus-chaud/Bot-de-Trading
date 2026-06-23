@@ -4,8 +4,8 @@
     "currency": "ARS",
     "starting_cash": 1000000.0,
     "inception_date": "2026-06-09",
-    "last_trading_day": "2026-06-18",
-    "equity_total": 998828.3202956467,
+    "last_trading_day": "2026-06-22",
+    "equity_total": 1001456.045115593,
     "num_open_positions": 3
   },
   "data_freshness": {
@@ -88,27 +88,45 @@
       "cash": 688563.2704757004,
       "mv_us": 0.0,
       "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-19",
+      "equity_total": 999509.7452956467,
+      "equity_short": -490.25470435334137,
+      "equity_long": 1000000.0,
+      "cash": 677039.6954757004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
+    },
+    {
+      "date": "2026-06-22",
+      "equity_total": 1001456.045115593,
+      "equity_short": 1456.0451155929477,
+      "equity_long": 1000000.0,
+      "cash": 677039.6954757004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
     }
   ],
   "positions": [
+    {
+      "symbol": "GLD",
+      "qty": 13.0,
+      "avg_cost": 11647.692307692309,
+      "market": "AR",
+      "bucket": "short",
+      "market_value": 152230.0,
+      "unrealized_pnl": 809.9999999999891,
+      "stale": false
+    },
     {
       "symbol": "WMT",
       "qty": 15.0,
       "avg_cost": 9795.0,
       "market": "AR",
       "bucket": "short",
-      "market_value": 146925.0,
-      "unrealized_pnl": 0.0,
-      "stale": false
-    },
-    {
-      "symbol": "GLD",
-      "qty": 12.0,
-      "avg_cost": 11660.0,
-      "market": "AR",
-      "bucket": "short",
-      "market_value": 139920.0,
-      "unrealized_pnl": 0.0,
+      "market_value": 148725.0,
+      "unrealized_pnl": 1800.0,
       "stale": false
     },
     {
@@ -117,12 +135,25 @@
       "avg_cost": 81.33999633789062,
       "market": "US",
       "bucket": "short",
-      "market_value": 23420.04981994629,
-      "unrealized_pnl": -575.2490997314453,
+      "market_value": 23461.349639892578,
+      "unrealized_pnl": -533.9492797851562,
       "stale": false
     }
   ],
   "recent_fills": [
+    {
+      "trading_day": "2026-06-19",
+      "ts_fill": "2026-06-23T13:19:22.320625+00:00",
+      "symbol": "GLD",
+      "side": "BUY",
+      "qty": 1.0,
+      "price": 11500.0,
+      "bucket": "short",
+      "engine": "short_term_v1",
+      "reason": null,
+      "fee": 23.575,
+      "cost_total": 23.575
+    },
     {
       "trading_day": "2026-06-18",
       "ts_fill": "2026-06-19T13:40:45.026942+00:00",
@@ -175,17 +206,17 @@
       "max_daily_loss_short_pct": -0.02
     },
     "latest_snapshot": {
-      "trading_day": "2026-06-18",
+      "trading_day": "2026-06-22",
       "short_monthly_drawdown": 0.0,
       "short_daily_return": 0.0,
-      "num_fills_today": 2,
+      "num_fills_today": 0,
       "kill_switch_active": false
     },
     "factors": [
       {
-        "level": "ok",
-        "code": "nominal",
-        "message": "Sin bloqueos de riesgo detectados en el último snapshot"
+        "level": "info",
+        "code": "no_fills_today",
+        "message": "Sin fills el 2026-06-22 (guardrails, sin señal, o semi_auto pendiente)"
       }
     ]
   },
@@ -238,43 +269,46 @@
   ],
   "position_theses": [
     {
+      "symbol": "GLD",
+      "bucket": "short",
+      "market": "AR",
+      "side": "short",
+      "qty": 13.0,
+      "market_value": 152230.0,
+      "unrealized_pnl": 809.9999999999891,
+      "unrealized_pnl_pct": 0.005349359397701685,
+      "stance": "Mantener",
+      "technical": {
+        "trend": "lateral",
+        "momentum_pct": 0.010353753235547991,
+        "vs_sma_pct": 0.004042136207741187,
+        "last_close": 11710.0
+      },
+      "bull": [
+        "PnL no realizado +0.5%"
+      ],
+      "bear": []
+    },
+    {
       "symbol": "WMT",
       "bucket": "short",
       "market": "AR",
       "side": "short",
       "qty": 15.0,
-      "market_value": 146925.0,
-      "unrealized_pnl": 0.0,
-      "unrealized_pnl_pct": 0.0,
+      "market_value": 148725.0,
+      "unrealized_pnl": 1800.0,
+      "unrealized_pnl_pct": 0.01225114854517611,
       "stance": "Mantener",
       "technical": {
         "trend": "bajista",
-        "momentum_pct": -0.10711030082041928,
-        "vs_sma_pct": -0.024766645924082176,
-        "last_close": 9795.0
+        "momentum_pct": -0.08279370952821463,
+        "vs_sma_pct": -0.0018121413470251202,
+        "last_close": 9915.0
       },
       "bull": [
-        "Precio en tendencia bajista (favorece el short)"
+        "Precio en tendencia bajista (favorece el short)",
+        "PnL no realizado +1.2%"
       ],
-      "bear": []
-    },
-    {
-      "symbol": "GLD",
-      "bucket": "short",
-      "market": "AR",
-      "side": "short",
-      "qty": 12.0,
-      "market_value": 139920.0,
-      "unrealized_pnl": 0.0,
-      "unrealized_pnl_pct": 0.0,
-      "stance": "Atención",
-      "technical": {
-        "trend": "lateral",
-        "momentum_pct": 0.006039689387402847,
-        "vs_sma_pct": -0.002224884477152189,
-        "last_close": 11660.0
-      },
-      "bull": [],
       "bear": []
     },
     {
@@ -283,49 +317,55 @@
       "market": "US",
       "side": "short",
       "qty": 295.0,
-      "market_value": 23420.04981994629,
-      "unrealized_pnl": -575.2490997314453,
-      "unrealized_pnl_pct": -0.023973408360406085,
+      "market_value": 23461.349639892578,
+      "unrealized_pnl": -533.9492797851562,
+      "unrealized_pnl_pct": -0.022252245390753708,
       "stance": "Atención",
       "technical": {
         "trend": "bajista",
-        "momentum_pct": -0.021929269674147656,
-        "vs_sma_pct": -0.011246327760640495,
-        "last_close": 79.38999938964844
+        "momentum_pct": -0.023932308508806455,
+        "vs_sma_pct": -0.008490132745908707,
+        "last_close": 79.52999877929688
       },
       "bull": [
         "Precio en tendencia bajista (favorece el short)"
       ],
       "bear": [
-        "PnL no realizado -2.4%"
+        "PnL no realizado -2.2%"
       ]
     }
   ],
   "kpis": {
     "status": "ok",
-    "n_days": 8,
-    "sharpe_annualized": -5.477573020028304,
+    "n_days": 10,
+    "sharpe_annualized": 3.090389553569248,
     "sharpe_na_reason": null,
-    "sortino_annualized": -8.563924777519976,
+    "sortino_annualized": 8.396664261424805,
     "max_drawdown": -0.001825834785900371,
-    "net_return_annualized": -0.04103706802960971,
-    "calmar_total": -22.475783869663307,
+    "net_return_annualized": 0.04182581577067168,
+    "calmar_total": 22.907776811824835,
     "calmar_12m_long": null,
     "calmar_12m_na_reason": "insufficient_history",
     "hit_rate": null,
     "profit_factor": null,
     "ts_start": "2026-06-09",
-    "ts_end": "2026-06-18"
+    "ts_end": "2026-06-22"
   },
   "alerts": [
     {
       "severity": "warning",
       "code": "missing_run_days",
       "title": "Días de mercado sin corrida",
-      "detail": "Último snapshot 2026-06-18; sin procesar: 2026-06-19, 2026-06-22, 2026-06-23"
+      "detail": "Último snapshot 2026-06-22; sin procesar: 2026-06-23"
+    },
+    {
+      "severity": "info",
+      "code": "idle_with_positions",
+      "title": "Día sin operaciones con posiciones abiertas",
+      "detail": "2026-06-22: 0 fills pero 3 posiciones abiertas."
     }
   ],
-  "generated_at": "2026-06-23T20:46:33.229801+00:00",
+  "generated_at": "2026-06-23T20:47:47.691256+00:00",
   "export_version": "1",
   "export_source": {
     "db_path": "C:\\Users\\Dell\\Agus\\Bot de Trading\\data\\market.db",
