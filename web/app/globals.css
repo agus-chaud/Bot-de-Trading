@@ -572,6 +572,153 @@ body {
   opacity: 0.4;
 }
 
+/* --- Tesis por posición (mejora #2) --- */
+.thesis-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.thesis-card {
+  border: 1px solid var(--cool-grey);
+  border-radius: var(--radius);
+  padding: 0.75rem 0.85rem;
+  background: rgba(42, 42, 42, 0.35);
+}
+
+.thesis-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.thesis-symbol {
+  font-family: var(--font-tech);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.thesis-side {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--cool-grey);
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.thesis-side.short {
+  color: #e6a700;
+  border-color: #e6a700;
+}
+
+.thesis-side.long {
+  color: var(--circuit-green);
+  border-color: var(--accent-green);
+}
+
+.thesis-stance {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+}
+
+.thesis-stance.mantener {
+  color: var(--circuit-green);
+  border: 1px solid var(--accent-green);
+}
+
+.thesis-stance.atención,
+.thesis-stance.atencion {
+  color: #e6a700;
+  border: 1px solid #e6a700;
+}
+
+.thesis-stance.revisar {
+  color: #ff4d4d;
+  border: 1px solid #ff4d4d;
+}
+
+.thesis-tech {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+}
+
+.thesis-factors {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.thesis-factor {
+  font-size: 0.8rem;
+}
+
+.thesis-factor.bull {
+  color: var(--circuit-green);
+}
+
+.thesis-factor.bear {
+  color: #ff7676;
+}
+
+.thesis-note {
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--cool-grey);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* --- Matriz de riesgo (mejora #4) --- */
+.risk-matrix-table th,
+.risk-matrix-table td {
+  vertical-align: top;
+  font-size: 0.78rem;
+}
+
+.risk-impact,
+.risk-mitigation {
+  color: var(--text-secondary, #9aa0a6);
+  max-width: 22ch;
+}
+
+.risk-status {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.prob-pill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+
+.prob-pill.prob-alta {
+  color: #ff4d4d;
+  border: 1px solid #ff4d4d;
+}
+
+.prob-pill.prob-media {
+  color: #e6a700;
+  border: 1px solid #e6a700;
+}
+
+.prob-pill.prob-baja {
+  color: var(--circuit-green);
+  border: 1px solid var(--accent-green);
+}
+
 @media (max-width: 1024px) {
   .kpi-grid {
     grid-template-columns: repeat(2, 1fr);

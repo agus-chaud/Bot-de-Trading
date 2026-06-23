@@ -177,6 +177,10 @@ def build_sim_payload(
             "ts_start": period_start,
             "ts_end": period_end,
         },
+        # La sim no expone posiciones abiertas ni señales por símbolo: matriz de
+        # riesgo y tesis quedan vacías (la UI las oculta cuando no hay datos).
+        "risk_matrix": [],
+        "position_theses": [],
         "alerts": [
             {
                 "severity": "info",
