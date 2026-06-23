@@ -136,7 +136,7 @@ La transición a real está planteada como gate, no como salto de fe:
   - Con `--enable-long-engine`, tras el **corto** se construye una copia de `daily_bars` y se **sobrescriben** los precios de las líneas del **`long_term_engine`** con OHLCV **XBUE** cuando el policy usa calendario **AR**, de modo que CEDEAR/pesos (p. ej. `SPY`) no usen cierres **XNYS** por el merge global — ver **ADR-048**.
   - **Soporte para ambos sleeves**: con ese flag se ejecuta short → long sobre el mismo ledger/broker; fills combinados y snapshot final con MTM usando la copia de barras cuando el largo está activo. Sin flag (default), solo corto.
   - `data/storage.py` — `get_last_snapshot_day(mode)` para detectar último día procesado.
-  - `.github/workflows/paper_live_daily.yml` — cron Lun–Vie 10:00 UTC; **la receta vive en `main`**, checkout y push en `paper-live-data`. Tras cambios de CI: merge PR a `main` + `git checkout paper-live-data && git merge main`. Export JSON, artifact, copia a `web/public/`, deploy hook Vercel (**F1-02–F1-05**). Secretos: `IOL_USER`, `IOL_PASS`, `VERCEL_DEPLOY_HOOK`.
+  - `.github/workflows/paper_live_daily.yml` — cron Lun–Vie **10:23 UTC** (minuto off-peak: el `schedule` de GitHub demora en hora redonda, **ADR-066**); **la receta vive en `main`**, checkout y push en `paper-live-data`. Tras cambios de CI: merge PR a `main` + `git checkout paper-live-data && git merge main`. Export JSON, artifact, copia a `web/public/`, deploy hook Vercel (**F1-02–F1-05**). Secretos: `IOL_USER`, `IOL_PASS`, `VERCEL_DEPLOY_HOOK`.
   - **Secretos GitHub (obligatorio para CI)**: `IOL_USER` y `IOL_PASS` en *Settings → Secrets and variables → Actions*. Variables locales de Windows **no** alimentan el runner. Diagnóstico: `python scripts/diagnose_iol_auth.py`.
   - **Política F3**: catch-up automático de hasta **3** días de mercado por corrida (unión US + AR según calendario; ver arriba); gap mayor → `exit(2)` y recuperación manual en tandas (`workflow_dispatch` con `date` o local + push). Días sin barras (feriados) se **saltan con warning** sin abortar todo el rango (**ADR-050**).
   - **Branch `paper-live-data`**: datos operativos diarios (DB LFS + `data/dashboard_payload.json` + `web/public/dashboard_payload.json`). `main` = código y workflows. Sincronizar tras merge a main: `git checkout paper-live-data && git merge main`.
@@ -149,7 +149,10 @@ La transición a real está planteada como gate, no como salto de fe:
   - `.github/workflows/paper_live_daily.yml` — **F1-02**: tras cada corrida, exporta el JSON y lo publica como artifact `dashboard-payload` en Actions.
   - Módulo `dashboard/` (`DashboardService` en `service.py` es la única fuente de agregación).
   - **`web/`** — **F1-04**: app Next.js read-only que consume `dashboard_payload.json` (misma UX que el monitor local). Ver `web/README.md`.
-  - Tests: `tests/test_dashboard_export.py`, `tests/test_web_dashboard.py`.
+  - **Pestaña Simulación** (**ADR-067**): `scripts/export_sim_dashboard_payload.py` traduce la mejor sim (aportes 500k/mes, Calmar 2.31, sobre `market_backfill.db`) al contrato del dashboard → `dashboard_payload.sim.json`; toggle Live\|Simulación en la UI.
+  - **Matriz de riesgo + tesis por posición** (**ADR-068**): `dashboard/risk_matrix.py` y `dashboard/trade_thesis.py` agregan explicabilidad al payload (keys opcionales).
+  - **Flag `--no-db-freshness`** (**ADR-066**): el payload publicado no arrastra la alerta `stale_local_db` (señal de dev local).
+  - Tests: `tests/test_dashboard_export.py`, `tests/test_sim_dashboard_export.py`, `tests/test_dashboard_risk_thesis.py`, `tests/test_web_dashboard.py`.
 
 - **Simulación what-if de cartera** (research / análisis, no paper-live productivo):
   - `scripts/run_whatif_sim.py` — corre estrategia **30/70** (short + long) día a día sobre **copia aislada** de `market.db`; reporta equity, fills y posiciones. No aplica gate F3 (backtests multi-mes intencionales). Default fin **2026-06-02** (último día con OHLCV XBUE completo al jun 2026).

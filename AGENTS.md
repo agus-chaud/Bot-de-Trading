@@ -107,7 +107,7 @@ El proyecto usa dos ramas con responsabilidades distintas:
 - **Git LFS**: `data/*.db` en `paper-live-data` se trackea con LFS (`.gitattributes`); en `main` la DB está gitignoreada. Conflictos de merge en `market.db`: resolver puntero con `git checkout --ours|--theirs`, nunca editar `<<<<<<<` en el puntero.
 - **Notificación de fallos**: el workflow crea un issue GitHub automáticamente si algún step falla (detección temprana, evita violar F3).
 - **Artifact dashboard (F1-02)**: tras paper-live exitoso, sube `dashboard-payload` (JSON) en Actions — ver `docs/dashboard.md`. **F1-03** (**ADR-065**): mismo JSON se commitea en `paper-live-data` + copia a `web/public/`. **F1-04**: app Next.js en `web/`. **F1-05**: production Vercel (`bot-de-trading`, rama `paper-live-data`) + deploy hook post-push.
-- Decisiones: **ADR-040** (modelo branches + workflow), **ADR-050** (incidente may–jun 2026, runbook), **ADR-055** (auditoría persistencia + F3), **ADR-065** (dashboard Vercel JSON).
+- Decisiones: **ADR-040** (modelo branches + workflow), **ADR-050** (incidente may–jun 2026, runbook), **ADR-055** (auditoría persistencia + F3), **ADR-065** (dashboard Vercel JSON), **ADR-066** (freshness local / `--no-db-freshness` + cron off-peak 10:23 UTC), **ADR-067** (pestaña Simulación), **ADR-068** (matriz de riesgo + tesis por posición).
 
 ## Integración largo en paper-live (ADR-044)
 

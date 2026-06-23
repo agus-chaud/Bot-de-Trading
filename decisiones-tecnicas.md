@@ -1605,6 +1605,47 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-066 — Freshness de DB local es señal de dev, no del artefacto publicado (`--no-db-freshness`)
+
+- **Fecha**: 2026-06-22
+- **Estado**: aceptada
+- **Contexto**: El dashboard publicado en Vercel mostraba SIEMPRE la alerta crítica `stale_local_db` ("DB local desactualizada · Commits atrás: 0"). Causa: `paper_live_daily.yml` exporta el payload (paso *Export*) **antes** de commitear `data/market.db` (paso *Commit*). En ese instante la working-tree DB ya fue actualizada por la corrida pero `HEAD`/`origin` apuntan al puntero LFS viejo → `dashboard/db_freshness.py` devuelve `stale_remote` con `commits_behind: 0`, `worktree_dirty: true`. Ese chequeo compara el checkout LOCAL contra `origin/paper-live-data` — es una ayuda para el operador que corre el monitor local, sin sentido en el artefacto que sirve Vercel a todos.
+- **Decisión**: flag `--no-db-freshness` en `scripts/export_dashboard_payload.py` que, para el payload publicado, neutraliza el bloque `data_freshness` (status `ok`) y descarta la alerta `stale_local_db`. El workflow lo usa al exportar. El monitor local conserva el chequeo (flag off por defecto). La UI (`DashboardView.tsx`) muestra el banner solo si `status !== "ok"`, así forzar `ok` lo suprime sin tocar el front.
+- **Por qué**: separa responsabilidades — el "sincronizá tu DB" es del dev local; el artefacto público no debe arrastrar un estado de checkout ajeno. Mínimo y reversible.
+- **Consecuencias**: el dashboard de Vercel deja de mostrar el falso positivo permanente. El monitor local sigue avisando si tu copia está atrasada. Relacionado: cron movido a minuto off-peak (`23 10 * * 1-5`) porque el evento `schedule` de GitHub es best-effort y los slots en hora redonda sufren más demora.
+- **Archivos**: `scripts/export_dashboard_payload.py`, `.github/workflows/paper_live_daily.yml`, `dashboard/db_freshness.py`, `tests/test_dashboard_export.py`
+- **Ver también**: **ADR-065** (Vercel JSON), **ADR-040** (ramas)
+
+---
+
+## ADR-067 — Pestaña "Simulación": segundo payload, no segundo contrato (Opción B)
+
+- **Fecha**: 2026-06-22
+- **Estado**: aceptada
+- **Contexto**: Los KPIs del paper-live son ruido — solo 8 días desde inception (2026-06-09), Sharpe/Calmar anualizados sobre tan poca historia son estadísticamente vacíos. La sim de investigación (`run_wf_research_sim.py`, aportes mensuales 500k + TWR, **ADR-058**) corre el bot sobre +1 año de OHLCV y da KPIs con significado (Calmar 2.31). Se quería mostrar ESA corrida en el dashboard junto al live.
+- **Decisión**: **Opción B** — `scripts/export_sim_dashboard_payload.py` corre la sim y traduce su serie TWR al **mismo contrato** del dashboard, escrito como `dashboard_payload.sim.json` (segundo archivo). La UI suma un toggle **Live | Simulación** que reusa `DashboardView` y hace fetch lazy del segundo JSON. Sin tocar el payload/lógica del live (bajo acople).
+- **Por qué**: separar el artefacto evita inflar el contrato del live con campos de sim; el toggle reusa todo el componente. Alternativa A (bloque `best_simulation` dentro del payload live) acoplaba contrato + front; descartada.
+- **Consecuencias**: la pestaña Simulación muestra métricas TWR/MWR/Calmar (correctas para una estrategia con aportes), con etiquetas distintas al live. Limitaciones: la curva muestra solo equity total (la serie `DailyPoint` no trae desglose short/long); el payload es una foto fija (regenerar manual o sumar paso al workflow). **Gotcha crítico**: el adaptador DEBE correr sobre `data/market_backfill.db` (historia completa), NO `data/market.db` (paper-live) — esta última tiene data US stale a 2026-04-27 que envenena el carry-forward y explota el equity (4.300M, Calmar 2131). Hay test de regresión que exige `DEFAULT_DB.name == "market_backfill.db"`.
+- **Archivos**: `scripts/export_sim_dashboard_payload.py`, `scripts/run_wf_research_sim.py`, `web/components/DashboardView.tsx`, `web/lib/dashboard-client.ts`, `tests/test_sim_dashboard_export.py`
+- **Ver también**: **ADR-058** (sim TWR), **ADR-065** (Vercel JSON)
+
+---
+
+## ADR-068 — Capa de explicabilidad: matriz de riesgo + tesis por posición
+
+- **Fecha**: 2026-06-22
+- **Estado**: aceptada
+- **Contexto**: El dashboard exponía riesgo BINARIO (`trading_allowed` sí/no) y mostraba "por qué frenó" pero nunca "por qué tengo ESTA posición". Inspirado en el patrón research multidimensional de un AI analyst team (técnico/fundamentals/sentiment/risk/tesis): la ejecución del bot carecía de la capa de explicabilidad.
+- **Decisión**: dos módulos puros nuevos, agregados al payload como **keys opcionales** (no rompen el contrato; la sim las emite vacías):
+  - `dashboard/risk_matrix.py` → `risk_matrix`: 5 riesgos con `probabilidad / impacto / mitigación / severidad / estado`, calculados de señales reales (data stale, drawdown vs kill switch, concentración, fallas de ingesta, cotización stale).
+  - `dashboard/trade_thesis.py` → `position_theses`: por posición, postura técnica (tendencia/momentum) + factores a favor/en contra **interpretados según el lado** (un short gana si baja el precio) + stance Mantener/Atención/Revisar.
+- **Por qué**: convierte riesgos latentes en visibles (el mismo mismark por data stale del ADR-067 aparece en rojo ANTES de morder) y da contexto de cada trade. Keys opcionales para no invalidar el payload de la sim.
+- **Consecuencias**: paneles nuevos en la UI. **Límite honesto**: la tesis es DERIVADA de mercado + estado de la posición, NO el razonamiento del motor al entrar (el campo `fills.reason` sigue vacío). La versión "completa" requiere instrumentar los motores para persistir su señal — pendiente. Staleness por símbolo: `lag = last_day - max(ohlcv ts)`; sano da 0, roto da semanas.
+- **Archivos**: `dashboard/risk_matrix.py`, `dashboard/trade_thesis.py`, `dashboard/service.py`, `web/components/DashboardView.tsx`, `web/lib/types.ts`, `web/app/globals.css`, `tests/test_dashboard_risk_thesis.py`
+- **Ver también**: **ADR-065** (Vercel JSON), **ADR-067** (pestaña sim)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
