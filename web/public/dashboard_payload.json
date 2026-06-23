@@ -189,6 +189,118 @@
       }
     ]
   },
+  "risk_matrix": [
+    {
+      "code": "concentration",
+      "title": "Concentración de cartera",
+      "probability": "media",
+      "impact": "Un solo nombre adverso mueve el equity de forma desproporcionada.",
+      "mitigation": "Diversificar entre más nombres; límite de peso por posición.",
+      "severity": "info",
+      "status": "3 posiciones · top 47%"
+    },
+    {
+      "code": "stale_market_data",
+      "title": "Data de mercado desactualizada",
+      "probability": "baja",
+      "impact": "Posiciones valuadas con precios viejos (carry-forward) → equity y KPIs envenenados; explosión de valuación en simulaciones.",
+      "mitigation": "Freshness gate + ingesta diaria; alertar si el último cierre por venue atrasa ≥2 días (hoy: 0).",
+      "severity": "ok",
+      "status": "controlado"
+    },
+    {
+      "code": "drawdown_kill_switch",
+      "title": "Drawdown cerca del kill switch",
+      "probability": "baja",
+      "impact": "Congelamiento del bucket corto; pérdida de capacidad de hedge.",
+      "mitigation": "Kill switch automático en -8% DD mensual corto.",
+      "severity": "ok",
+      "status": "controlado"
+    },
+    {
+      "code": "ingestion_failures",
+      "title": "Fallas de ingesta de precios",
+      "probability": "baja",
+      "impact": "Símbolos sin barra del día → señales y valuación incompletas.",
+      "mitigation": "Alias de tickers + reintentos; alerta de fetch_errors vigentes.",
+      "severity": "ok",
+      "status": "sin fallas"
+    },
+    {
+      "code": "stale_position_quote",
+      "title": "Posiciones con cotización stale",
+      "probability": "baja",
+      "impact": "PnL no realizado calculado sobre precio viejo; riesgo mal medido.",
+      "mitigation": "Forzar marca a último cierre válido; señalar barra imputada.",
+      "severity": "ok",
+      "status": "sin posiciones stale"
+    }
+  ],
+  "position_theses": [
+    {
+      "symbol": "WMT",
+      "bucket": "short",
+      "market": "AR",
+      "side": "short",
+      "qty": 15.0,
+      "market_value": 146925.0,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "stance": "Mantener",
+      "technical": {
+        "trend": "bajista",
+        "momentum_pct": -0.10711030082041928,
+        "vs_sma_pct": -0.024766645924082176,
+        "last_close": 9795.0
+      },
+      "bull": [
+        "Precio en tendencia bajista (favorece el short)"
+      ],
+      "bear": []
+    },
+    {
+      "symbol": "GLD",
+      "bucket": "short",
+      "market": "AR",
+      "side": "short",
+      "qty": 12.0,
+      "market_value": 139920.0,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "stance": "Atención",
+      "technical": {
+        "trend": "lateral",
+        "momentum_pct": 0.006039689387402847,
+        "vs_sma_pct": -0.002224884477152189,
+        "last_close": 11660.0
+      },
+      "bull": [],
+      "bear": []
+    },
+    {
+      "symbol": "KO",
+      "bucket": "short",
+      "market": "US",
+      "side": "short",
+      "qty": 295.0,
+      "market_value": 23420.04981994629,
+      "unrealized_pnl": -575.2490997314453,
+      "unrealized_pnl_pct": -0.023973408360406085,
+      "stance": "Atención",
+      "technical": {
+        "trend": "bajista",
+        "momentum_pct": -0.021929269674147656,
+        "vs_sma_pct": -0.011246327760640495,
+        "last_close": 79.38999938964844
+      },
+      "bull": [
+        "Precio en tendencia bajista (favorece el short)"
+      ],
+      "bear": [
+        "PnL no realizado -2.4%"
+      ]
+    }
+  ],
   "kpis": {
     "status": "ok",
     "n_days": 8,
@@ -210,10 +322,10 @@
       "severity": "warning",
       "code": "missing_run_days",
       "title": "Días de mercado sin corrida",
-      "detail": "Último snapshot 2026-06-18; sin procesar: 2026-06-19"
+      "detail": "Último snapshot 2026-06-18; sin procesar: 2026-06-19, 2026-06-22, 2026-06-23"
     }
   ],
-  "generated_at": "2026-06-19T18:16:08.932984+00:00",
+  "generated_at": "2026-06-23T20:46:33.229801+00:00",
   "export_version": "1",
   "export_source": {
     "db_path": "C:\\Users\\Dell\\Agus\\Bot de Trading\\data\\market.db",

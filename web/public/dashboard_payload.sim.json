@@ -3394,6 +3394,8 @@
     "ts_start": "2025-01-02",
     "ts_end": "2026-06-12"
   },
+  "risk_matrix": [],
+  "position_theses": [],
   "alerts": [
     {
       "severity": "info",
@@ -3402,7 +3404,7 @@
       "detail": "Aporte mensual 500,000 ARS · total aportado 9,000,000 · TWR acumulado +50.26% · Calmar 2.31"
     }
   ],
-  "generated_at": "2026-06-19T21:35:38.924832+00:00",
+  "generated_at": "2026-06-23T20:46:45.108691+00:00",
   "export_version": "1",
   "export_source": {
     "kind": "research_sim",
