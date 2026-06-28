@@ -1,9 +1,15 @@
 # Plan: sleeve corto como cobertura real (anti-factor) — investigación
 
-**Estado**: plan, no implementado. Trabajo de investigación (no toca producción ni el gate
-congelado). Sucesor natural de **ADR-059/060** (diversificación del largo). Objetivo: que el
-30% "corto" deje de ser peso muerto (hoy hace momentum-long en otro mercado) y pase a **cubrir**
-— subir o aguantar cuando el largo pierde.
+**Estado**: IMPLEMENTADO y promovido a producción. Este documento describe el plan original;
+el resultado vive en los ADRs. El motor `core_sim/short_hedge_engine.py` + runner compartido
+existen (suite verde), la canasta GLD/WMT pasó el criterio pre-registrado (**ADR-062**) y se
+promovió a producción por decisión explícita (**ADR-064**, `short_hedge.enabled: true`). La
+ampliación de canasta GLD/WMT/MCD/PFE + largo PG/JNJ (experimento D) **NO se promovió** y su
+resultado inicial fue corregido (**ADR-069**): ampliar el hedge con MCD/PFE no supera a producción
+C; ampliar el largo con PG/JNJ rompe el motor largo (bug de calendario) → bloqueado hasta fix.
+Sucesor natural de **ADR-059/060** (diversificación del largo). Objetivo: que el 30% "corto"
+deje de ser peso muerto (antes hacía momentum-long en otro mercado) y pase a **cubrir** — subir
+o aguantar cuando el largo pierde.
 
 Contexto: el largo diversificado (ADR-060) bajó el peor drawdown de -25,7% a -11,5%, pero
 sigue 5/7 ventanas. Las que fallan (4/5, dic-2025→abr-2026) son **selloffs globales**: cayó

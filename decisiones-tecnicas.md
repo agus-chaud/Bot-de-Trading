@@ -1646,6 +1646,83 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-069 — Canasta ampliada D: el primer resultado fue INVÁLIDO (PG/JNJ rompen el sleeve largo); ampliar solo el hedge (MCD/PFE) es válido pero NO supera a producción (C)
+
+- **Fecha**: 2026-06-25
+- **Estado**: corregida — el resultado inicial ("sobre-cubierta, baja el drawdown a un tercio") fue un **artefacto de un sleeve largo roto**, NO una propiedad de la estrategia. Ver corrección. El gate congelado (**ADR-041**) y producción (`policy.v1.yaml`) intactos.
+- **⚠️ CORRECCIÓN (robustez, espíritu ADR-057)**: el check de robustez post-QQQ reveló que **D con su largo de 8 nombres es idéntico a D sin QQQ y a D sin PG/JNJ-pero-no**: el sleeve largo de D **no deployaba** (TWR 14,8% = solo hedge+cash). Causa raíz REAL: **PG/JNJ estaban en `core_lines` pero NO en la whitelist** — el motor largo aborta el ciclo completo si un símbolo del universo no está whitelisteado (`long_term_engine.py:308 symbol_not_whitelisted`), y queda muerto todo el período. (La hipótesis inicial de "calendario tipo NYSE" fue descartada: la densidad es ~252/año igual que el resto.) El "-4,8% de drawdown / V4 pasa" era el largo apagado, no protección real. **La conclusión "sobre-cubierta" queda RETIRADA.** **FIX aplicado**: `config/symbols/whitelist_cedear_D.yaml` (cedears + PG/JNJ), referenciado por `policy.research_basket_D.v1.yaml`; D vuelve a TWR 56,0%, Calmar 2,18 (largo vivo).
+- **Contexto**: cuarto frente de diversificación (sigue a **ADR-059/060/062/064**). Se buscó bajar el drawdown del crash global (ventanas V4/V5) **agregando papeles que se puedan traer de IOL**. Verificación de disponibilidad CEDEAR (`.BA` vía yfinance, fuente del backfill): el factor TASAS/BONOS **NO existe en BYMA** (TLT, AGG, BND, LQD, IEF, SHY, TIP, HYG, EMB → todos 404); aparecieron como proxies **SH** (inverso S&P, 365 días) y **XLU** (utilities, <300 días). Dentro de lo disponible y con historia suficiente: PG, JNJ, MCD, PFE.
+- **Fase 1 (inclusión por correlación EN CRISIS, `measure_correlation.py --hedge`, 2026-06-25)**: corr media en crisis vs GGAL/PAMP → **JNJ -0,40 · MCD -0,34 · PG -0,30 · PFE -0,21**, los cuatro ≤ 0. (PG/JNJ requirieron backfill XBUE en `market_backfill.db`: antes no tenían filas en pesos que cubrieran las crisis y daban `nan`.)
+- **Diseño D (pre-registrado ANTES de medir, `docs/basket_D_criterio_preregistrado.md`)**:
+  - Largo: suma PG (staples) + JNJ (healthcare) al lado global, manteniendo 50/50 AR/global (AR 3×0,1667; global 5×0,10). Baja concentración por nombre.
+  - Hedge: canasta GLD/WMT/MCD/PFE (oro 50% ancla; leg defensivo 50% repartido en 3 nombres). `whitelist_hedge_D.yaml` aislado (no toca el de producción).
+- **Resultado del walk-forward CORREGIDO** (QQQ backfilleado en XBUE; largo VIVO; B vs C vs D6 = solo-hedge-ampliado, 2025-01→2026-06-12, 120/60/30, 500k/mes):
+
+  | Cartera (largo intacto) | TWR acum | MaxDD agreg | **Calmar** | Sharpe | Ventanas |
+  |-------------------------|----------|-------------|------------|--------|----------|
+  | B — diversificada (corto=momentum) | +38,6% | -17,1% | 1,458 | 1,06 | 5/7 |
+  | C — + hedge GLD/WMT (**producción**) | +61,4% | -16,6% | **2,316** | 1,44 | 5/7 |
+  | D6 — + hedge GLD/WMT/MCD/PFE | +57,2% | -16,6% | 2,175 | — | 5/7 |
+  | ~~D8 — largo +PG/JNJ~~ | ~~+14,8%~~ | ~~-4,8%~~ | ~~2,048~~ | — | INVÁLIDO (largo roto) |
+
+- **Veredicto (con datos válidos)**:
+  - **Ampliar el hedge (MCD/PFE)** — D6 vs B: Calmar 2,175 ≥ 1,05·Calmar(B) 1,531 **PASA**, guardrail OK. PERO **NO supera a producción C** (2,316 > 2,175): agregar MCD/PFE a GLD/WMT **diluye levemente**. El max drawdown del crash global **NO mejora** (-16,6%, igual que B/C). Los defensivos no cubren V4/V5.
+  - **Ampliar el largo (PG/JNJ)** — antes NO EVALUABLE (largo roto por falta de whitelist); **FIXEADO** (whitelist_cedear_D.yaml). D válida da TWR 56,0% / Calmar 2,18 / maxDD -16,2% — tampoco supera a C y el drawdown del crash global no mejora. La evaluación pre-registrada formal (D vs B, y un D' con menos tilt) queda pendiente de decisión del operador.
+- **La doble disciplina funcionó (2 artefactos cazados)**: (1) QQQ sin datos XBUE distorsionaba B/C; (2) PG/JNJ rompían el largo de D. Sin los checks de robustez se habrían shipeado DOS conclusiones falsas ("D sobre-cubierta" y los números viejos de B/C). Es la lección **ADR-057** en vivo: el número lindo (-4,8% drawdown) mentía.
+- **Robustez (observabilidad, ADR-057)**: el motor largo abortó el ciclo **en silencio** ante un símbolo no whitelisteado, produciendo un resultado plausible (Calmar 2,05) que mentía. El fix de datos (whitelistear) está hecho; la mejora pendiente es que el sim **exponga los skips del largo** (`symbol_not_whitelisted`, `missing_or_invalid_price_abort_cycle`) en vez de tragárselos, para que una mala config grite en vez de fingir un número lindo.
+- **Caveat de robustez (pendiente, espíritu ADR-057)**: validar que la cobertura XBUE de PG/JNJ no introduzca ciclos `missing_or_invalid_price_abort_cycle` en el motor largo que contaminen la magnitud del retorno de D antes de iterar.
+- **Alternativas consideradas**:
+  - **Promover D por bajar el drawdown / pasar V4**: descartada — viola el guardrail; sería el autoengaño que el proyecto evita.
+  - **Declarar la ampliación un fracaso**: descartada — los cuatro pasan Fase 1 y la protección es real; lo que falla es el **exceso de tilt defensivo**, no los instrumentos. El camino es un D' con menos peso defensivo (pre-registrado aparte, sin tunear-hasta-pasar).
+- **Archivos**: `config/policy.research_basket_D.v1.yaml`, `config/symbols/whitelist_hedge_D.yaml`, `docs/basket_D_criterio_preregistrado.md`, `data/_sim/wf_{B,C,D}.json`
+- **Ver también**: **ADR-062** (hedge GLD/WMT, mismo patrón de número confundido), **ADR-064** (promoción del hedge), **ADR-060** (diversificación), **ADR-059** (factor), **ADR-041** (gate congelado), **ADR-057** (test verde)
+
+---
+
+## ADR-070 — D' (largo con PG/JNJ a peso bajo, hedge de producción): PASA el criterio pero EMPATA a producción (margen de ruido) → no se promueve
+
+- **Fecha**: 2026-06-25
+- **Estado**: aceptada (como resultado) — D' **pasa el criterio pre-registrado** pero el win sobre producción es **ruido** (0,002 de Calmar). Conclusión: la diversificación defensiva del largo **no aporta edge real**. NO promover. Gate congelado (**ADR-041**) y producción intactos.
+- **Contexto**: tras corregir el bug de whitelist que invalidó D (**ADR-069**), se pre-registró D' con **menos tilt defensivo** (`docs/basket_Dprime_criterio_preregistrado.md`): largo con PG/JNJ CHICOS (0,05 c/u), SPY/QQQ devueltos a 0,15 (recuperar rally), **hedge = producción GLD/WMT** (sin ampliar, porque D6 mostró que MCD/PFE diluyen).
+- **Resultado** (mismo run, QQQ limpio, 2025-01→2026-06-12, 120/60/30, 500k/mes):
+
+  | Cartera | TWR | MaxDD | **Calmar** | Ventanas |
+  |---------|-----|-------|------------|----------|
+  | B — diversificada | +38,6% | -17,1% | 1,458 | 5/7 |
+  | C — producción GLD/WMT | +61,4% | -16,6% | **2,316** | 5/7 |
+  | D' — tilt bajo | +60,9% | -16,5% | 2,318 | 5/7 |
+
+- **Veredicto contra el criterio congelado**:
+  - Primaria: Calmar(D') 2,318 ≥ 1,05·Calmar(B) 1,531 → **PASA**. Guardrail TWR OK.
+  - Barra de promoción (`Calmar(D') > Calmar(C)`): 2,318 > 2,316 → se cumple **por 0,002 (≈+0,09% relativo)**.
+- **Lectura honesta (no se promueve)**: el margen sobre producción es **ruido**, no edge. El criterio puso un +5% vs B justamente "para no festejar ruido", pero la barra vs C se pre-registró **sin margen** — debilidad de diseño de mi parte. Promover sobre 0,002 sería el autoengaño que el proyecto evita. D' **empata** a producción: la pizca de PG/JNJ no hace daño (los nombres están validados, corr en crisis ≤ 0) pero **no mejora**.
+- **Conclusión de toda la línea (ADR-059→070)**: con los instrumentos disponibles (sin factor bonos en BYMA), el **drawdown del crash global (V4/V5 ≈ -16,5%) NO se reduce** agregando equity ni defensivos, ni al largo ni al hedge. El drawdown es estable en B/C/D/D'. La única palanca real para ese régimen es la **regla de des-riesgo a cash** (o reducir exposición), no más papeles.
+- **Alternativas consideradas**:
+  - **Promover D' por cumplir la barra vs C**: descartada — 0,002 es ruido; promover sería p-hacking de facto.
+  - **Declarar PG/JNJ inútiles**: descartada — están validados como diversificadores no-dañinos; el punto es que el problema (crash global) no se ataca con equity.
+- **Archivos**: `config/policy.research_basket_Dprime.v1.yaml`, `config/symbols/whitelist_cedear_D.yaml`, `docs/basket_Dprime_criterio_preregistrado.md`, `data/_sim/wf_Dprime.json`
+- **Ver también**: **ADR-069** (D corregida), **ADR-064** (hedge en producción), **ADR-062** (criterio análogo), **ADR-041** (gate), **ADR-057** (números que mienten)
+
+---
+
+## ADR-071 — El sleeve largo puede mantener cash (perilla `equity_exposure` + flag `allow_cash`), detrás de feature flag
+
+- **Fecha**: 2026-06-25
+- **Estado**: aceptada — **cambio fundacional** hecho con SDD (proposal → spec → design → tasks → apply, 3 fases). Detrás de feature flag **apagado por defecto**: producción y el gate congelado (**ADR-041**) **intactos**.
+- **Contexto**: el motor largo estaba **estructuralmente 100% invertido** — `long_term_engine.py` validaba que los pesos sumaran exactamente 1,0 (`must sum to 1.0`). No podía ir a cash, así que no podía des-riesgarse en un crash ni hostear un trailing stop (al vender, el rebalanceador estaba obligado a recomprar → churn). Era el cuello de botella de la **Palanca A** (des-riesgo del crash global, V4/V5).
+- **Decisión**: agregar al `long_term_engine` una perilla `equity_exposure ∈ [0,1]` (default 1,0) y un flag `allow_cash` (default `false`). Con el flag apagado, `equity_exposure` se fuerza a 1,0 → **comportamiento idéntico**. Con el flag prendido, los objetivos del largo se **escalan por `equity_exposure`** y el sobrante queda como **cash del bucket largo** — ya valuado correctamente (`equity_long = (cash − short_cash) + MV`, `ledger.py:145`).
+- **Implementación (por fase)**:
+  - **F1 (config)**: campos en el dataclass + builder (`long_term_engine_config_from_policy_dict`) + validación de rango + schema (opcionales). Test de regresión: flag off = idéntico.
+  - **F2 (mecánica)**: escalado de `targets` por `equity_exposure` en `build_long_term_orders_intent`. El cash del bucket largo YA estaba contabilizado (no hizo falta tocar el ledger — el "nudo" temido no existía).
+  - **F3 (research + sanity)**: cableado automático (el builder ya lo propaga); corrida de sanidad con exposición fija 0,70.
+- **Verificación**: **18 tests verdes** (incl. regresión flag-off byte-idéntica). Sanity exposición 0,70 sobre la diversificada: **drawdown -17,1% → -11,6%**, retorno 38,6% → 26,2% — la mecánica reduce el drawdown reteniendo cash, como se esperaba.
+- **Alcance (lo que este cambio NO hace)**: solo agrega la **capacidad** de tener cash. **NO** decide CUÁNDO des-riesgar (la función/trigger de `e` por régimen es un cambio futuro), y **NO** implementa todavía el trailing stop ATR ni el escalonado por RSI. Esos se construyen ARRIBA de este cimiento.
+- **Desbloquea**: trailing stop ATR en el largo, perilla `e` por régimen (des-riesgo progresivo del crash global), y a futuro el carry en cash (LECAP/FCI) sobre el cash que ahora el largo SÍ puede tener.
+- **Archivos**: `core_sim/long_term_engine.py`, `config/policy.v1.schema.json`, `tests/test_long_term_engine.py`.
+- **Ver también**: **ADR-041** (gate congelado), `ledger.py:145` (equity del bucket largo con cash), análisis de las palancas A/B (des-riesgo + carry).
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

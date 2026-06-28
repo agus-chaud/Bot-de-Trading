@@ -1,0 +1,39 @@
+# Whitelist CEDEAR para el experimento D (research) — copia de whitelist_cedear.yaml + PG/JNJ.
+#
+# Motivo: PG y JNJ están en core_lines de policy.research_basket_D.v1.yaml, pero el motor largo
+# aborta el ciclo completo si un símbolo del universo NO está whitelisteado
+# (`long_term_engine.py:308 symbol_not_whitelisted` → abort). Sin esta whitelist, el largo de D
+# quedaba muerto todo el período (artefacto que invalidó el primer resultado, ADR-069 corregido).
+#
+# Aislado: NO toca config/symbols/whitelist_cedear.yaml (producción). Mismo patrón que
+# whitelist_hedge_D.yaml. PG/JNJ son CEDEAR válidos en BYMA (verificado .BA, 502 días limpios).
+stocks:
+  - SPY
+  - QQQ
+  - AAPL
+  - MSFT
+  - GOOGL
+  - AMZN
+  - META
+  - TSLA
+  - KO
+  - JPM
+  - DIS
+  - NVDA
+  - AMD
+  - XOM
+  - PFE
+  - BA
+  - MCD
+  - WMT
+  - VIST
+  - VALE
+  - BABA
+  - NKE
+  - V
+  - UNH
+  - CAT
+  - PEP
+  - NFLX
+  - PG
+  - JNJ
