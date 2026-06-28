@@ -1766,6 +1766,23 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-074 — Tooling de calidad en CI: ruff (gate) + mypy (aviso) + permisos mínimos del workflow
+
+- **Fecha**: 2026-06-28
+- **Estado**: aceptada
+- **Contexto**: El CI corría sólo `pytest` + cobertura sobre `core_sim`; no existía linter ni type-checker en ningún lado, y el workflow paper-live tenía `actions:write` sin uso. Surge de la auditoría técnica de la sesión.
+- **Decisión**:
+  - **ruff** (pin `0.15.16`) como gate **bloqueante** en `ci.yml`. Config en `pyproject.toml` (nuevo): defaults E4/E7/E9 + F; excluye `notebooks/`; ignora `E402` (patrón deliberado `sys.path.insert` en scripts/runners). Limpiados los 75 hallazgos (imports/variables muertas, f-strings vacías, semicolons, nombres ambiguos).
+  - **mypy** (pin `2.1.0`) en modo **aviso / no bloqueante** (`continue-on-error: true`) sobre `core_sim` y `data`. Config lenient (`ignore_missing_imports`). Adopción gradual: los ~55 hallazgos actuales son `float()/int()` sobre dicts de config tipados como `object` (benignos, runtime correcto). Pasar a bloqueante cuando se limpien (object→Any en los `*_config_from_policy_dict`).
+  - **Permisos mínimos** en `paper_live_daily.yml`: quitado `actions:write` (ningún step lo usa; upload-artifact@v4 no lo requiere). Quedan `contents:write` (git push a `paper-live-data`) e `issues:write` (notify on failure).
+  - Removidos artefactos one-off del tracking (`salida.json`, `salida.md`, `wf.json`, `temp_cells.txt`) + nombres al `.gitignore`.
+- **Por qué**: el chequeo de tipos y estilo es la red de seguridad más barata en un sistema financiero en Python; menor privilegio en el token de CI reduce la superficie si se filtra.
+- **Consecuencias**: CI más estricto (lint frena el build; tipos avisan sin frenar). Cobertura de `run_paper_live` 83→89% (test del motor corto momentum). Pendiente: mypy a bloqueante; gate de cobertura scoped a `run_paper_live` + `data/`.
+- **Archivos**: `pyproject.toml` (nuevo), `.github/workflows/ci.yml`, `.github/workflows/paper_live_daily.yml`, `.gitignore`, `tests/test_run_paper_live.py`.
+- **Ver también**: **ADR-016** (pre-gate / cobertura), **ADR-065** (modelo de branches + workflow).
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
