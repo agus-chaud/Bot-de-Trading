@@ -17,10 +17,13 @@ concurrency:
   group: paper-live-daily
   cancel-in-progress: false
 
+# Permisos mínimos para este job (principio de menor privilegio):
+#   contents: write → git push del DB + payload a la rama paper-live-data
+#   issues:   write → crear un issue ante fallo (step "Notify on failure")
+# No se usa actions:write (upload-artifact@v4 no lo requiere; no hay cancel/rerun vía API).
 permissions:
   contents: write
   issues: write
-  actions: write
 
 jobs:
   run:
