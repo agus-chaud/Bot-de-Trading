@@ -21,7 +21,6 @@ from data.schema import OHLCVRow
 from data.storage import MarketDB, PortfolioMetaConflictError
 from core_sim.ledger import PortfolioLedger
 from scripts.run_paper_live import (
-    _build_long_pipeline_context,
     _hydrate_last_marks_from_db,
     _mtm_bars_for_ledger,
     _overlay_ar_long_sleeve_bars_from_db,
@@ -390,9 +389,6 @@ class TestCatchUpTwoDays:
 
         gap_days = [date(2026, 4, 14), date(2026, 4, 15)]
         run_catch_up(db, gap_days, policy_doc, initial_cash=1000.0)
-
-        fills = db.get_paper_fills("paper_live")
-        trading_days_in_fills = sorted(set(f["trading_day"] for f in fills))
 
         snapshots = db._conn.execute(
             "SELECT trading_day, equity_total FROM paper_snapshots WHERE mode = 'paper_live' ORDER BY trading_day"
@@ -912,3 +908,54 @@ class TestArHolidayValuationCarryForward:
         snap = ledger.mark_to_market(trading_day=self.DAY_PREV, daily_bars=bars)
         assert snap["positions"]["GGAL"]["stale"] is False
         assert snap["positions"]["GGAL"]["market_value"] == pytest.approx(650_000.0)
+
+
+# ===========================================================================
+# 3.6 — Sleeve corto MOMENTUM (camino no-hedge dentro de run_catch_up)
+# ===========================================================================
+
+
+class TestShortMomentumSleeveRuns:
+    """Cubre el branch del motor corto MOMENTUM en run_catch_up.
+
+    La policy de producción corre en modo cobertura (short_hedge.enabled=True, ADR-064),
+    así que el camino momentum (run_paper_live.py:391-414) nunca se ejercía en tests.
+    Apagamos el hedge para forzarlo y verificar que el sleeve corre un día completo
+    dentro del orquestador live sin romper.
+    """
+
+    def test_momentum_short_sleeve_produces_snapshot(self, tmp_path: Path, policy_doc):
+        db_path = tmp_path / "test.db"
+        db = MarketDB(str(db_path))
+
+        # Forzar modo momentum (producción usa cobertura).
+        policy_doc["short_hedge"]["enabled"] = False
+
+        target = date(2026, 4, 15)  # martes
+        symbols = ["SPY", "QQQ"]
+        days = _weekdays_from(date(2026, 2, 1), 80)
+        _seed_ohlcv(db, symbols, days)
+
+        run_catch_up(db, [target], policy_doc, initial_cash=10_000.0)
+
+        # El sleeve momentum corrió el día completo y dejó exactamente un snapshot.
+        assert db.get_last_snapshot_day("paper_live") == target
+        cnt = db._conn.execute(
+            "SELECT COUNT(*) AS c FROM paper_snapshots WHERE mode='paper_live'"
+        ).fetchone()["c"]
+        assert cnt == 1
+
+
+class TestNoBarsSkipsDay:
+    """Cubre el branch 'sin barras → saltear día' (run_paper_live.py:376-381)."""
+
+    def test_day_without_bars_creates_no_snapshot(self, tmp_path: Path, policy_doc):
+        db_path = tmp_path / "test.db"
+        db = MarketDB(str(db_path))
+
+        # No se siembra OHLCV: el día no tiene barras (feriado/dato faltante).
+        target = date(2026, 4, 15)
+        run_catch_up(db, [target], policy_doc, initial_cash=1000.0)
+
+        # Día salteado: no se persiste snapshot.
+        assert db.get_last_snapshot_day("paper_live") is None

@@ -201,16 +201,6 @@ def build_long_engine_wf_report_model(
         else None,
     }
 
-    skipped_dicts = [
-        {
-            "window_index": s.window_index,
-            "period_start": s.period_start.isoformat(),
-            "period_end": s.period_end.isoformat(),
-            "reason": s.reason,
-        }
-        for s in skipped
-    ]
-
     return LongEngineWfReportModel(
         policy_version=policy_version,
         generated_at=gen,

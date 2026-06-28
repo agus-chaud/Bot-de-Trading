@@ -6,7 +6,7 @@ All tests mock yfinance — no real network calls.
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -289,7 +289,6 @@ class TestPartialData:
         bad_df.index.name = "Date"
 
         call_count = 0
-        original_history = MagicMock(return_value=bad_df)
 
         def counting_history(**kwargs):
             nonlocal call_count

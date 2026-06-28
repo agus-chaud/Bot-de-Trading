@@ -83,6 +83,8 @@ Alineado a la skill **smart-testing**: probamos **comportamiento observable**, n
 pip install -r requirements.txt
 python -m pytest tests/ -v
 python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing
+ruff check .                  # lint (bloqueante en CI; config en pyproject.toml) — ADR-074
+mypy core_sim data            # tipos (modo aviso/no bloqueante en CI) — ADR-074
 python scripts/run_dashboard.py --fetch-remote --sync-db
 python scripts/export_dashboard_payload.py --pretty
 cd web && npm install && npm run dev

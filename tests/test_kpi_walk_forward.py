@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
-import pytest
 import yaml
 
 from reporting.kpi_walk_forward import (

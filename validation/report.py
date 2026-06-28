@@ -1,6 +1,6 @@
 # Dataclasses para el reporte del validation-wf
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 
 

@@ -16,5 +16,14 @@ jobs:
           python-version: "3.13"
       - name: Install dependencies (locked)
         run: pip install -r requirements.lock
+      - name: Lint (ruff)
+        run: |
+          pip install ruff==0.15.16
+          ruff check .
+      - name: Type check (mypy, informativo / no bloqueante)
+        continue-on-error: true
+        run: |
+          pip install mypy==2.1.0
+          mypy core_sim data
       - name: Run tests with coverage (core_sim)
         run: python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing --cov-fail-under=80

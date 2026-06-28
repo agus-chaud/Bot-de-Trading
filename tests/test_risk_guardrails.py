@@ -216,7 +216,7 @@ _SL_CONFIG = {
 def test_check_stop_loss_atr_trigger():
     # entry=100, ATR=4.0, stop=100-2*4=92.  close=90 → trigger
     highs, lows, closes = _synthetic_bars(15, base_close=100.0)
-    history = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+    history = [{"high": h, "low": lo, "close": c} for h, lo, c in zip(highs, lows, closes)]
     positions = {"AAPL": {"entry_price": 100.0, "qty": 10.0, "market": "US"}}
     daily_bars = {"AAPL": {"close": 90.0}}
     result = check_stop_loss(positions, daily_bars, {"AAPL": history}, _SL_CONFIG)
@@ -226,7 +226,7 @@ def test_check_stop_loss_atr_trigger():
 def test_check_stop_loss_atr_no_trigger():
     # entry=100, ATR=4.0, stop=92.  close=95 → no trigger
     highs, lows, closes = _synthetic_bars(15, base_close=100.0)
-    history = [{"high": h, "low": l, "close": c} for h, l, c in zip(highs, lows, closes)]
+    history = [{"high": h, "low": lo, "close": c} for h, lo, c in zip(highs, lows, closes)]
     positions = {"AAPL": {"entry_price": 100.0, "qty": 10.0, "market": "US"}}
     daily_bars = {"AAPL": {"close": 95.0}}
     result = check_stop_loss(positions, daily_bars, {"AAPL": history}, _SL_CONFIG)

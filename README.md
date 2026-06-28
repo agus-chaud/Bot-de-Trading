@@ -85,7 +85,7 @@ La transición a real está planteada como gate, no como salto de fe:
   - `create_short_term_daily_backtester(...)` arma un `DailyEventBacktester` cableado al broker y al ledger
   - `DailyEventBacktester.run_day(..., pipeline_context={"history_by_symbol": ...})` admite también `session_minutes_from_open` cuando se quiera simular no-trade intradía
   - tests de integración en `tests/test_short_term_day_runner.py` (E2E, kill switch, no-trade, calidad de datos, pérdida diaria)
-- **Pruebas y CI** (criterio *smart-testing*): suite en `tests/` con foco en comportamiento; `pytest-cov` en `requirements.txt`; GitHub Actions ejecuta `pytest` con cobertura mínima sobre `core_sim`.
+- **Pruebas y CI** (criterio *smart-testing*): suite en `tests/` con foco en comportamiento; `pytest-cov` en `requirements.txt`; GitHub Actions ejecuta **ruff** (lint, bloqueante), **mypy** (tipos, modo aviso / no bloqueante) y `pytest` con cobertura mínima sobre `core_sim` (**ADR-074**).
 - **Pre-gate walk-forward (Fase 3)**: `core_sim/short_term_pre_gate.py` + `short_term_pre_gate` en `config/policy.v1.yaml`; script `scripts/run_short_term_pre_gate.py` (demo sintética); tests en `tests/test_short_term_pre_gate.py`.
 - **Walk-forward del motor largo (T4-T6)**:
   - `validation/wf_windows.py` — generador de ventanas rolling por meses (`window_months`, `step_months`)

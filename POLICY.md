@@ -234,6 +234,10 @@ Cada intent incluye al menos: `symbol`, `market`, `bucket: long`, `side`, `qty`,
 | `drift_convention` | **per_line** | Drift por símbolo vs objetivo. |
 | `rebalance_rule` | **first_ar_business_day_of_calendar_week** | Día de revisión semanal (calendario AR / BYMA). |
 | `max_long_rebalance_turnover_pct` | **null** | Sin tope de sum(|Δw|) en engine v1 si es `null`. |
+| `allow_cash` | **false** | (ADR-071) Habilita que el sleeve largo mantenga cash (no estar 100% invertido). Default `false` → idéntico a hoy. |
+| `equity_exposure` | **1,0** | (ADR-071) Fracción del bucket largo invertida en equity; el resto queda en cash. Solo aplica con `allow_cash: true`. Default 1,0 = 100% invertido. |
+
+**Nota (ADR-071):** estas dos perillas son el **cimiento** para des-riesgar el largo (trailing stop ATR, perilla por régimen). Con `allow_cash: false` (default de producción) el comportamiento es idéntico al anterior. **CUÁNDO** des-riesgar (el trigger de `equity_exposure`) es un cambio posterior, aún no implementado.
 
 **Regla de gobernanza:** mismos valores y semántica en `POLICY.md` y `config/policy.v1.yaml` en un único commit.
 

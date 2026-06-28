@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
-import pytest
 
 from data.normalizer import normalize
 from data.schema import OHLCVRow

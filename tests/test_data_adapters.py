@@ -9,7 +9,7 @@ import pytest
 
 from core_sim.calendar_store import TradingCalendarStore
 from core_sim.corporate_actions import CorporateActionsStore
-from data.schema import CorporateActionRow, OHLCVRow
+from data.schema import CorporateActionRow
 from data.storage import MarketDB
 
 

@@ -4,7 +4,6 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 import yaml
 
 from core_sim import (
@@ -543,7 +542,7 @@ def test_check_risk_with_optional_db_maintains_decision_order_without_db():
 
     policy = _load_policy()
     ledger = PortfolioLedger(starting_cash=100_000.0)
-    handlers = create_short_term_daily_backtester(
+    create_short_term_daily_backtester(
         policy_doc=policy,
         repo_root=REPO_ROOT,
         ledger=ledger,
@@ -610,7 +609,6 @@ def test_check_risk_with_db_vs_without_db_decision_equivalence():
     """
     from core_sim.risk_guardrails import check_short_risk
 
-    policy = _load_policy()
     risk_config = {
         "kill_dd": -0.08,
         "max_daily_short": -0.02,

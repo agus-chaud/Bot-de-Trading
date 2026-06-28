@@ -1,0 +1,21 @@
+[tool.ruff]
+# Config mínima inicial (QW2). Arranca con los defaults de ruff (E4/E7/E9 + F:
+# errores reales y pyflakes) para no inundar de ruido de estilo. Ampliar más
+# adelante: isort (I), pyupgrade (UP), flake8-bugbear (B).
+target-version = "py313"
+line-length = 100
+extend-exclude = ["notebooks"]  # cuadernos exploratorios, no código de producción
+
+[tool.ruff.lint]
+ignore = [
+    "E402",  # sys.path.insert antes de imports es un patrón deliberado en scripts/runners
+]
+
+[tool.mypy]
+# Adopción gradual. Hoy mypy corre en CI en modo AVISO (no bloqueante; ver
+# continue-on-error en ci.yml) sobre core_sim y data. La mayoría de los hallazgos
+# actuales son float()/int() sobre dicts de config tipados como object (benignos).
+# Cuando se limpien, quitar continue-on-error para que mypy FRENE el build.
+python_version = "3.13"
+ignore_missing_imports = true  # libs sin stubs (yfinance, etc.)
+

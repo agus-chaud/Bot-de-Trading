@@ -10,7 +10,6 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 import yaml
 
 from core_sim.short_term_pre_gate import PreGateReport, PreGateWindowResult
