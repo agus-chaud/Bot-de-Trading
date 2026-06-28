@@ -34,6 +34,11 @@ class LongTermEngineConfig:
     rebalance_rule: str  # v1: calendar rule (monthly/weekly)
     max_long_rebalance_turnover_pct: float | None
     satellite_markets: frozenset[str]  # v1: ["US"] for US-listed sleeve or ["AR"] for BYMA pesos
+    # Fase 1 (SDD long-cash-exposure): perilla de exposición a equity. Con allow_cash=False
+    # (default) se fuerza a 1.0 → comportamiento idéntico (100% invertido, pesos suman 1.0).
+    # Con allow_cash=True el largo puede apuntar a equity_exposure<1.0 y dejar el resto en cash.
+    equity_exposure: float = 1.0
+    allow_cash: bool = False
 
 
 def long_sleeve_trade_market(config: LongTermEngineConfig) -> str:
@@ -161,6 +166,11 @@ def validate_long_term_engine_config(config: LongTermEngineConfig) -> None:
 
     if config.drift_rebalance_threshold_pp <= 0:
         raise ValueError("drift_rebalance_threshold_pp must be positive")
+
+    # Fase 1 (SDD long-cash-exposure): la perilla de exposición vive en [0, 1]. Los pesos por
+    # nombre siguen sumando 1.0 (chequeo de arriba); equity_exposure los escala (Fase 2).
+    if not (0.0 <= float(config.equity_exposure) <= 1.0):
+        raise ValueError("equity_exposure must be in [0, 1]")
 
     valid_rules = {
         "first_us_trading_day_of_calendar_month",
@@ -302,6 +312,13 @@ def build_long_term_orders_intent(
         return [], skips, metrics
 
     targets = target_weights(config)
+    # Fase 2 (SDD long-cash-exposure): escalar los objetivos por la perilla de exposición.
+    # allow_cash=False ⇒ equity_exposure=1.0 ⇒ sin efecto (idéntico a producción). Con <1.0,
+    # los objetivos suman menos de 1.0 y el rebalanceador vende hasta dejar el resto como cash
+    # del bucket largo (ya valuado en long_bucket_mtm = long_cash + MV, ledger.py:145).
+    exposure = float(config.equity_exposure)
+    if exposure != 1.0:
+        targets = {s: w * exposure for s, w in targets.items()}
     universe = sorted(targets.keys())
 
     for sym in universe:
@@ -467,6 +484,10 @@ def long_term_engine_config_from_policy_dict(payload: Mapping[str, object]) -> L
     markets = payload.get("satellite_markets", ["US"])
     if not isinstance(markets, list):
         raise TypeError("satellite_markets must be a list")
+    # Fase 1 (SDD long-cash-exposure): el flag gobierna la perilla. Con allow_cash=False se
+    # ignora equity_exposure y se fuerza 1.0 → idéntico a producción.
+    allow_cash = bool(payload.get("allow_cash", False))
+    equity_exposure = float(payload.get("equity_exposure", 1.0)) if allow_cash else 1.0
     return LongTermEngineConfig(
         core_lines=_lines(core_raw),
         satellite_lines=_lines(sat_raw),
@@ -484,4 +505,6 @@ def long_term_engine_config_from_policy_dict(payload: Mapping[str, object]) -> L
             else float(payload["max_long_rebalance_turnover_pct"])
         ),
         satellite_markets=frozenset(str(m).upper() for m in markets),
+        equity_exposure=equity_exposure,
+        allow_cash=allow_cash,
     )

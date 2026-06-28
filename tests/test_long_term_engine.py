@@ -52,6 +52,151 @@ def _lt_from_repo() -> LongTermEngineConfig:
     return long_term_engine_config_from_policy_dict(_policy_cfg()["long_term_engine"])
 
 
+def _lt_policy_block() -> dict:
+    return dict(_policy_cfg()["long_term_engine"])
+
+
+# Fase 1 (SDD long-cash-exposure) — la perilla de exposición y el flag de cash.
+
+def test_default_long_config_is_fully_invested():
+    cfg = _lt_from_repo()
+    assert cfg.allow_cash is False
+    assert cfg.equity_exposure == 1.0
+
+
+def test_allow_cash_false_forces_full_exposure():
+    block = _lt_policy_block()
+    block["equity_exposure"] = 0.5  # presente pero sin flag → debe ignorarse
+    cfg = long_term_engine_config_from_policy_dict(block)
+    assert cfg.allow_cash is False
+    assert cfg.equity_exposure == 1.0  # idéntico a producción
+
+
+def test_allow_cash_true_honors_exposure():
+    block = _lt_policy_block()
+    block["allow_cash"] = True
+    block["equity_exposure"] = 0.6
+    cfg = long_term_engine_config_from_policy_dict(block)
+    assert cfg.allow_cash is True
+    assert abs(cfg.equity_exposure - 0.6) < 1e-9
+    validate_long_term_engine_config(cfg)  # 0.6 es válido; los pesos siguen sumando 1.0
+
+
+def test_validate_rejects_out_of_range_exposure():
+    block = _lt_policy_block()
+    block["allow_cash"] = True
+    block["equity_exposure"] = 1.5
+    cfg = long_term_engine_config_from_policy_dict(block)
+    raised = False
+    try:
+        validate_long_term_engine_config(cfg)
+    except ValueError:
+        raised = True
+    assert raised, "equity_exposure fuera de [0,1] debe ser rechazado"
+
+
+# Fase 2 (SDD long-cash-exposure) — la mecánica de la perilla sobre los intents.
+
+def test_exposure_one_is_noop_when_on_target():
+    block = _lt_policy_block()
+    block["allow_cash"] = True
+    block["equity_exposure"] = 1.0
+    cfg = long_term_engine_config_from_policy_dict(block)
+    ar = frozenset({date(2026, 4, 1)})
+    day = date(2026, 4, 1)
+    mtm = 100_000.0
+    prices = _prices_for(cfg)
+    wl = frozenset(target_weights(cfg))
+    qty = _on_target_qty(cfg, mtm)  # 100% invertido en objetivo
+    intents, skips, _m = build_long_term_orders_intent(
+        cfg, trading_day=day, calendar_sessions=ar, long_bucket_mtm=mtm,
+        long_cash=0.0, positions_qty=qty, prices=prices, whitelist_long=wl,
+    )
+    assert intents == []  # exposure 1.0 = sin efecto, idéntico a producción
+    assert any(s.get("reason") == "within_drift_band" for s in skips)
+
+
+def test_exposure_half_de_risks_to_cash():
+    block = _lt_policy_block()
+    block["allow_cash"] = True
+    block["equity_exposure"] = 0.5
+    cfg = long_term_engine_config_from_policy_dict(block)
+    ar = frozenset({date(2026, 4, 1)})
+    day = date(2026, 4, 1)
+    mtm = 100_000.0
+    prices = _prices_for(cfg)
+    wl = frozenset(target_weights(cfg))
+    qty = _on_target_qty(cfg, mtm)  # arranca 100% invertido
+    intents, _skips, _m = build_long_term_orders_intent(
+        cfg, trading_day=day, calendar_sessions=ar, long_bucket_mtm=mtm,
+        long_cash=0.0, positions_qty=qty, prices=prices, whitelist_long=wl,
+    )
+    assert intents, "exposure 0.5 debe des-riesgar (vender) desde 100% invertido"
+    assert all(i["side"] == "SELL" for i in intents)  # solo vende, no compra cash
+    total_sell = sum(float(i["intent_notional"]) for i in intents)
+    # vende ~50% del bucket (deja 50% en cash); el floor de qty entera resta un poco
+    assert 0.45 * mtm <= total_sell <= 0.50 * mtm
+
+
+def test_exposure_rise_rebuys_from_underinvested():
+    block = _lt_policy_block()
+    block["allow_cash"] = True
+    block["equity_exposure"] = 1.0
+    cfg = long_term_engine_config_from_policy_dict(block)
+    ar = frozenset({date(2026, 4, 1)})
+    day = date(2026, 4, 1)
+    mtm = 100_000.0
+    prices = _prices_for(cfg)
+    wl = frozenset(target_weights(cfg))
+    qty = {s: 0.5 * q for s, q in _on_target_qty(cfg, mtm).items()}  # 50% invertido
+    intents, _skips, _m = build_long_term_orders_intent(
+        cfg, trading_day=day, calendar_sessions=ar, long_bucket_mtm=mtm,
+        long_cash=50_000.0, positions_qty=qty, prices=prices, whitelist_long=wl,
+    )
+    assert intents, "subir exposición debe recomprar (re-risk)"
+    assert all(i["side"] == "BUY" for i in intents)
+
+
+def test_exposure_half_holds_cash_without_churn():
+    # Comportamiento clave: ya des-riesgado al 50%, NO debe recomprar → sin churn.
+    block = _lt_policy_block()
+    block["allow_cash"] = True
+    block["equity_exposure"] = 0.5
+    cfg = long_term_engine_config_from_policy_dict(block)
+    ar = frozenset({date(2026, 4, 1)})
+    day = date(2026, 4, 1)
+    mtm = 100_000.0
+    prices = _prices_for(cfg)
+    wl = frozenset(target_weights(cfg))
+    qty = {s: 0.5 * q for s, q in _on_target_qty(cfg, mtm).items()}  # 50% invertido = objetivo escalado
+    intents, skips, _m = build_long_term_orders_intent(
+        cfg, trading_day=day, calendar_sessions=ar, long_bucket_mtm=mtm,
+        long_cash=50_000.0, positions_qty=qty, prices=prices, whitelist_long=wl,
+    )
+    assert intents == []  # mantiene el cash quieto, no recompra → sin churn
+    assert any(s.get("reason") == "within_drift_band" for s in skips)
+
+
+def test_exposure_zero_goes_fully_to_cash():
+    block = _lt_policy_block()
+    block["allow_cash"] = True
+    block["equity_exposure"] = 0.0
+    cfg = long_term_engine_config_from_policy_dict(block)
+    ar = frozenset({date(2026, 4, 1)})
+    day = date(2026, 4, 1)
+    mtm = 100_000.0
+    prices = _prices_for(cfg)
+    wl = frozenset(target_weights(cfg))
+    qty = _on_target_qty(cfg, mtm)  # 100% invertido
+    intents, _skips, _m = build_long_term_orders_intent(
+        cfg, trading_day=day, calendar_sessions=ar, long_bucket_mtm=mtm,
+        long_cash=0.0, positions_qty=qty, prices=prices, whitelist_long=wl,
+    )
+    assert intents and all(i["side"] == "SELL" for i in intents)
+    total_sell = sum(float(i["intent_notional"]) for i in intents)
+    assert total_sell >= 0.95 * mtm  # vende casi todo → 100% cash
+
+
 def test_repo_policy_long_term_block_is_consistent():
     cfg = _lt_from_repo()
     validate_long_term_engine_config(cfg)
