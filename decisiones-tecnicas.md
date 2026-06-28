@@ -1723,6 +1723,49 @@ Este documento registra las decisiones técnicas relevantes del proyecto, su con
 
 ---
 
+## ADR-072 — Des-riesgo del largo por régimen VIX (banda 70→95): baja el drawdown a la mitad pero NO PASA el criterio por-ventana → no se promueve
+
+- **Fecha**: 2026-06-25
+- **Estado**: descartada (para promoción) — NO PASA el criterio pre-registrado. La **capacidad** queda construida y testeada (SDD long-regime-derisk, sobre el cimiento **ADR-071**), con flag apagado. Gate (**ADR-041**) y producción intactos.
+- **Contexto**: con el largo ya capaz de tener cash (ADR-071), faltaba el **trigger** (cuándo des-riesgar). Primer intento: gate de 4 condiciones en pesos (GGAL+SPY caídos + amplitud + velocidad) → abría solo **3/260 días**, porque SPY medido en pesos lo amortigua la devaluación (tapa el crash global). **Pivot a VIX** (`^VIX` de CBOE, percentil rolling 252 sin look-ahead): abre **64/261 días** (≥p70). Pre-registrado (`docs/regime_vix_criterio_preregistrado.md`): banda 70→95, piso 0,40; criterio = ganar a C en **≥4/7 ventanas por Sharpe**.
+- **Resultado** (C vs VIX, 2025-01→2026-06-12, 120/60/30):
+
+  | Cartera | TWR | MaxDD | Calmar | Gana ventanas (Sharpe) |
+  |---------|-----|-------|--------|------------------------|
+  | C (producción) | +61,4% | -16,6% | 2,316 | — |
+  | VIX 70→95 | +52,1% | **-10,0%** | **3,312** | **2/7** |
+
+- **Veredicto**: VIX gana **2/7 ventanas → NO PASA** (necesitaba 4/7). El agregado es tentador (Calmar 2,3→3,3, drawdown -16,6%→-10%) pero la mejora está **concentrada en pocas ventanas malas, no es consistente**: el VIX des-riesga en TODA ventana con nervios, incluso rallies (V1/V2/V3/V6), resignando Sharpe en las calmas; solo gana en el crash (V4). El criterio por-ventana lo cazó — su función exacta.
+- **Lección metodológica (honesta)**: el criterio **Sharpe-por-ventana disfavorece estructuralmente a un de-risk**, que por diseño sacrifica las calmas para proteger en el crash (como un seguro: no rinde todos los meses, te salva cuando hay incendio). Para evaluar un de-risk, el lente correcto es **Calmar agregado con margen real**. Esto NO cambia este veredicto (congelado), pero motiva una iteración pre-registrada de cero (**ADR-073**: banda conservadora 80→97 + criterio Calmar).
+- **Alternativas consideradas**: promover por el Calmar agregado lindo → descartada (sería mover el poste tras ver el resultado, el p-hacking que el proyecto evita).
+- **Archivos**: `core_sim/long_regime_derisk.py`, `scripts/run_wf_research_sim.py`, `tests/test_long_regime_derisk.py`, `config/policy.research_vix_derisk.v1.yaml`, `docs/regime_vix_criterio_preregistrado.md`, `data/_sim/wf_eval_{C,VIX}.json`
+- **Ver también**: **ADR-071** (cimiento cash), **ADR-073** (iteración conservadora), **ADR-041** (gate), **ADR-069/070** (D/D'), **ADR-057** (números que mienten)
+
+---
+
+## ADR-073 — Des-riesgo del largo por VIX CONSERVADOR (banda 80→97) + criterio Calmar: PASA el criterio pre-registrado → candidata a promover
+
+- **Fecha**: 2026-06-25
+- **Estado**: aceptada (como resultado de research) — **PASA** el criterio pre-registrado. **Candidata a promover**: la promoción a producción es una decisión aparte (requiere cableado + robustez out-of-sample). Gate (**ADR-041**) y producción intactos por ahora.
+- **Contexto**: iteración pre-registrada **de cero** tras ADR-072 (VIX 70→95 NO PASÓ porque el criterio Sharpe-por-ventana es inadecuado para un de-risk). Dos cambios: **banda conservadora 80→97** (des-riesga menos seguido) y **criterio Calmar agregado con margen real** (el lente correcto para un seguro). Congelado en `docs/regime_vix_conservative_criterio_preregistrado.md`.
+- **Resultado** (C vs VIX-conservador, 2025-01→2026-06-12, 120/60/30):
+
+  | Cartera | TWR | MaxDD | **Calmar** |
+  |---------|-----|-------|------------|
+  | C (producción) | +61,4% | -16,6% | 2,316 |
+  | VIX 80→97 | +54,3% | **-10,5%** | **3,276** |
+
+- **Veredicto contra el criterio congelado**:
+  - Primaria: Calmar(VIX) 3,276 ≥ 1,05·Calmar(C) 2,432 → **PASA** (+41% sobre C, muy por encima del bar +5%).
+  - Guardrail: TWR(VIX) 54,3% ≥ 0,85·TWR(C) 52,2% → **OK** (no ganó matando el retorno).
+- **Por qué pasa donde el 70→95 no**: frenar desde el percentil 80 (no 70) conserva más retorno en los rallies (TWR 54 vs el 52 de la agresiva), pero la **protección del crash sobrevive** (drawdown igual a ~-10%). El Calmar agregado premia el trade: ~7 pp menos de retorno por ~6 pp menos de drawdown = fuerte mejora ajustada por riesgo.
+- **Honestidad (lo que NO prueba)**: es **un período, un régimen de crash** (2025-2026). El guardrail de retorno pasa por poco. Antes de plata real conviene **robustez out-of-sample** (más períodos / otra ventana). Pasó honesto, pero no es prueba de robustez eterna.
+- **Promoción (lo que falta si se decide)**: (a) cablear el fetch de `^VIX` en producción (el cron diario), (b) aplicar el régimen en `run_paper_live.py` (hoy solo está en el sim de research), (c) feature flag, (d) el gate **ADR-041** sigue gobernando el capital real. NO se promueve automáticamente.
+- **Archivos**: `config/policy.research_vix_derisk_conservative.v1.yaml`, `docs/regime_vix_conservative_criterio_preregistrado.md`, `core_sim/long_regime_derisk.py`, `data/_sim/wf_eval_VIXc.json`
+- **Ver también**: **ADR-072** (iteración agresiva descartada + la lección), **ADR-071** (cimiento cash), **ADR-064** (precedente de promoción con caveats), **ADR-041** (gate)
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

@@ -40,8 +40,18 @@ if str(REPO_ROOT) not in sys.path:
 
 from core_sim.long_term_monthly_runner import create_long_term_monthly_backtester  # noqa: E402
 from core_sim.paper_broker_sim import PaperBrokerSim  # noqa: E402
-from core_sim.short_hedge_engine import short_hedge_config_from_policy_dict  # noqa: E402
+from core_sim.long_regime_derisk import (  # noqa: E402
+    regime_derisk_config_from_policy_dict,
+    regime_exposure,
+    rolling_percentile,
+    vix_regime_exposure,
+)
+from core_sim.short_hedge_engine import (  # noqa: E402
+    short_hedge_config_from_policy_dict,
+    trailing_drawdown,
+)
 from core_sim.short_hedge_runner import (  # noqa: E402
+    _xbue_closes,
     load_hedge_whitelist,
     run_hedge_sleeve_day,
 )
@@ -109,6 +119,55 @@ def _trading_days(db: MarketDB, start: date, end: date) -> list[date]:
     return [date.fromisoformat(r[0]) for r in cur.fetchall()]
 
 
+def _regime_trailing_dd(db, sym, day, lookback):
+    closes = _xbue_closes(db, sym, day, lookback)
+    return trailing_drawdown(closes) if closes else 0.0
+
+
+def _regime_inputs(db, day, cfg, book_symbols):
+    """I/O boundary: arma los insumos del régimen desde la DB para regime_exposure (pura)."""
+    # Traigo los cierres del global UNA vez (lookback amplio) y los reuso para drawdown Y velocidad.
+    # (lookback es en días-calendario → da ~138 barras de trading, suficiente para el retorno a 15.)
+    gl_closes = _xbue_closes(db, cfg.global_proxy, day, cfg.lookback)
+    gl = trailing_drawdown(gl_closes) if gl_closes else 0.0
+    ar = _regime_trailing_dd(db, cfg.ar_proxy, day, cfg.lookback)
+    n_down = sum(
+        1 for s in book_symbols
+        if _regime_trailing_dd(db, s, day, cfg.lookback) <= cfg.breadth_dd
+    )
+    w = cfg.velocity_window
+    if len(gl_closes) > w and gl_closes[-1 - w] > 0:
+        recent = gl_closes[-1] / gl_closes[-1 - w] - 1.0
+    else:
+        recent = 0.0
+    return ar, gl, n_down, recent
+
+
+def _policy_with_long_exposure(policy_doc, e):
+    """Copia del policy con el sleeve largo en equity_exposure=e (allow_cash on)."""
+    pd = dict(policy_doc)
+    lt = dict(pd.get("long_term_engine", {}))
+    lt["allow_cash"] = True
+    lt["equity_exposure"] = float(e)
+    pd["long_term_engine"] = lt
+    return pd
+
+
+def _vix_exposure(db, day, cfg):
+    """Exposición por percentil rolling del VIX (sin look-ahead)."""
+    from datetime import timedelta
+    start = day - timedelta(days=cfg.vix_window * 2)
+    rows = db.get_ohlcv(cfg.vix_symbol, start, day, cfg.vix_venue)
+    closes = [float(r.close) for r in rows]
+    if len(closes) < 30:  # historia insuficiente → sin de-risk
+        return 1.0
+    window = closes[-cfg.vix_window:]
+    pct = rolling_percentile(window, closes[-1])
+    return vix_regime_exposure(
+        pct, start_pct=cfg.vix_start_pct, full_pct=cfg.vix_full_pct, e_min=cfg.exposure_floor
+    )
+
+
 def run_research_sim(
     db: MarketDB,
     days: list[date],
@@ -149,6 +208,11 @@ def run_research_sim(
     hedge_cfg = short_hedge_config_from_policy_dict(sh_raw) if hedge_enabled else None
     hedge_whitelist = load_hedge_whitelist(REPO_ROOT, policy_doc) if hedge_enabled else frozenset()
     weights_short = float(policy_doc["weights"]["short"])
+
+    # Fase 2 (SDD long-regime-derisk): trigger de des-riesgo del largo por régimen.
+    regime_cfg = regime_derisk_config_from_policy_dict(lt.get("regime_derisk"))
+    book_symbols = sorted(long_symbols)
+    prev_e = 1.0
 
     cumulative_contrib = 0.0
     seen_months: set[tuple[int, int]] = set()
@@ -213,10 +277,23 @@ def run_research_sim(
         if enable_long:
             bars_long = dict(daily_bars)
             _overlay_ar_long_sleeve_bars_from_db(db, day, policy_doc, bars_long)
+            long_policy = policy_doc
+            if regime_cfg.enabled:
+                if regime_cfg.signal == "vix":
+                    e_signal = _vix_exposure(db, day, regime_cfg)
+                else:
+                    ar_dd, gl_dd, n_down, recent = _regime_inputs(db, day, regime_cfg, book_symbols)
+                    e_signal = regime_exposure(
+                        dd_ar=ar_dd, dd_global=gl_dd, n_book_down=n_down,
+                        recent_global_return=recent, cfg=regime_cfg,
+                    )
+                e_today = min(e_signal, prev_e + regime_cfg.max_up_step)  # histéresis: sube lento
+                prev_e = e_today
+                long_policy = _policy_with_long_exposure(policy_doc, e_today)
             snap_for_long = _resilient_snapshot(db, day, ledger)
             long_ctx = _build_long_pipeline_context(ledger, snap_for_long, calendar_store)
             long_backtester = create_long_term_monthly_backtester(
-                policy_doc=policy_doc, repo_root=REPO_ROOT, ledger=ledger,
+                policy_doc=long_policy, repo_root=REPO_ROOT, ledger=ledger,
                 broker=broker, calendar_store=calendar_store, db=db,
             )
             long_events = long_backtester.run_day(
