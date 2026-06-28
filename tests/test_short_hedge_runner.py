@@ -11,7 +11,6 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
-import pytest
 
 from core_sim.cost_model import CostModel, MarketCostConfig, SlippageMode
 from core_sim.ledger import PortfolioLedger

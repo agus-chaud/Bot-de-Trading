@@ -6,7 +6,6 @@ NO se rompe con los aportes — exactamente la preocupación que motivó el mód
 
 from __future__ import annotations
 
-import math
 from datetime import date, timedelta
 
 import pytest

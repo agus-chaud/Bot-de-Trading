@@ -21,7 +21,6 @@ from data.schema import OHLCVRow
 from data.storage import MarketDB, PortfolioMetaConflictError
 from core_sim.ledger import PortfolioLedger
 from scripts.run_paper_live import (
-    _build_long_pipeline_context,
     _hydrate_last_marks_from_db,
     _mtm_bars_for_ledger,
     _overlay_ar_long_sleeve_bars_from_db,
@@ -390,9 +389,6 @@ class TestCatchUpTwoDays:
 
         gap_days = [date(2026, 4, 14), date(2026, 4, 15)]
         run_catch_up(db, gap_days, policy_doc, initial_cash=1000.0)
-
-        fills = db.get_paper_fills("paper_live")
-        trading_days_in_fills = sorted(set(f["trading_day"] for f in fills))
 
         snapshots = db._conn.execute(
             "SELECT trading_day, equity_total FROM paper_snapshots WHERE mode = 'paper_live' ORDER BY trading_day"

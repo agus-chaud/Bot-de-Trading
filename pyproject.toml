@@ -1,0 +1,12 @@
+[tool.ruff]
+# Config mínima inicial (QW2). Arranca con los defaults de ruff (E4/E7/E9 + F:
+# errores reales y pyflakes) para no inundar de ruido de estilo. Ampliar más
+# adelante: isort (I), pyupgrade (UP), flake8-bugbear (B).
+target-version = "py313"
+line-length = 100
+extend-exclude = ["notebooks"]  # cuadernos exploratorios, no código de producción
+
+[tool.ruff.lint]
+ignore = [
+    "E402",  # sys.path.insert antes de imports es un patrón deliberado en scripts/runners
+]

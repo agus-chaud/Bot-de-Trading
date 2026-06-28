@@ -38,7 +38,6 @@ from core_sim.short_hedge_runner import (  # noqa: E402
     run_hedge_sleeve_day,
 )
 from core_sim.short_term_day_runner import create_short_term_daily_backtester  # noqa: E402
-from core_sim.short_term_pre_gate import build_history_before_day  # noqa: E402
 from data.storage import MarketDB, PortfolioMetaConflictError  # noqa: E402
 
 logger = logging.getLogger(__name__)

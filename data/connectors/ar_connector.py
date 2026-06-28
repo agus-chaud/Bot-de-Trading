@@ -16,7 +16,6 @@ import yfinance as yf
 from data.fetch_trace import (
     FETCH_STATUS_OK,
     FETCH_STATUS_SKIP,
-    SKIP_BUDGET_EXHAUSTED,
     SKIP_CONNECTOR_RETURNED_NONE,
     SKIP_CREDENTIALS_MISSING,
     SKIP_DATA_ERROR,

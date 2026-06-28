@@ -21,7 +21,7 @@ import pytest
 
 from data.connectors.ar_connector import ArFetchResult
 from data.fetch_trace import FETCH_STATUS_OK, FETCH_STATUS_SKIP, SymbolFetchTrace, VENUE_AR
-from data.fetcher import FetchReport, fetch_and_store
+from data.fetcher import fetch_and_store
 from data.normalizer import normalize
 from data.schema import OHLCVRow
 from data.storage import MarketDB

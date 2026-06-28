@@ -20,7 +20,6 @@ from core_sim.short_term_day_runner import build_market_snapshot_rows
 from core_sim.short_term_engine import ShortEngineConfig, compute_signal_candidates
 from reporting.signal_ic import (
     DayScores,
-    bars_by_date_from_db,
     build_history_before_day,
     build_skip_reason_distribution,
     compute_rank_ic,

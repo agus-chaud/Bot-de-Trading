@@ -155,7 +155,6 @@ def _policy_with_long_exposure(policy_doc, e):
 
 def _vix_exposure(db, day, cfg):
     """Exposición por percentil rolling del VIX (sin look-ahead)."""
-    from datetime import timedelta
     start = day - timedelta(days=cfg.vix_window * 2)
     rows = db.get_ohlcv(cfg.vix_symbol, start, day, cfg.vix_venue)
     closes = [float(r.close) for r in rows]
