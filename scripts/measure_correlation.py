@@ -76,7 +76,7 @@ def _run_hedge_analysis(
     all_days = sorted(set().union(*(set(r) for r in rets.values())) if rets else set())
     crisis_days = [d for d in all_days if _in_crisis(d)]
 
-    print(f"\nFase 1 - Correlacion condicional a crisis (XBUE/ARS)")
+    print("\nFase 1 - Correlacion condicional a crisis (XBUE/ARS)")
     print(f"  Periodo total : {start} -> {end}  ({len(all_days)} dias)")
     print(f"  Dias en crisis: {len(crisis_days)}  ventanas={[w[0] for w in _CRISIS_WINDOWS]}\n")
 
@@ -94,7 +94,7 @@ def _run_hedge_analysis(
             mark = "OK (<=0)" if ok else ("alto (>0)" if c_cri == c_cri else "sin datos")
             print(f"{h:>7} {f:>10} {c_all:>11.2f} {c_cri:>12.2f} {n_cri:>9}  {mark}")
 
-    print(f"\nVeredicto por candidato (criterio: corr media en crisis vs factor <= 0):")
+    print("\nVeredicto por candidato (criterio: corr media en crisis vs factor <= 0):")
     for h in hedge_symbols:
         vals = [v for v in verdicts.get(h, []) if v == v]
         avg = sum(vals) / len(vals) if vals else float("nan")
@@ -194,7 +194,7 @@ def main() -> int:
     intra_gl = [(a, b) for a in glob for b in glob if a < b]
     cross = [(a, b) for a in ar for b in glob]
 
-    print(f"\nResumen (más bajo = más diversificado):")
+    print("\nResumen (más bajo = más diversificado):")
     print(f"  Correlación promedio intra-AR     : {_avg(intra_ar):.2f}   {ar}")
     print(f"  Correlación promedio intra-global : {_avg(intra_gl):.2f}   {glob}")
     print(f"  Correlación promedio AR <-> global: {_avg(cross):.2f}   <- el numero clave")

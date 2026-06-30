@@ -1,0 +1,199 @@
+# Contrato de configuración — VARIANTE DE INVESTIGACIÓN "D'" (NO producción).
+#
+# Menos tilt defensivo que D (ADR-069). Prueba la hipótesis residual: una diversificación CHICA
+# del largo con PG/JNJ (0,05 c/u), recuperando exposición a rally (SPY/QQQ a 0,15), con el hedge
+# de PRODUCCIÓN (GLD/WMT, sin ampliar). Criterio congelado en docs/basket_Dprime_criterio_preregistrado.md.
+# Se carga con yaml.safe_load. Gate (ADR-041) y producción (policy.v1.yaml) intactos.
+
+schema_version: 1
+profile: moderate
+
+weights:
+  short: 0.30
+  long: 0.70
+
+geo:
+  AR: 0.20
+  US: 0.80
+
+short_kill_switch_monthly_dd: -0.08
+
+cadence:
+  short: daily
+  long: weekly
+
+execution_mode: semi_auto
+
+symbols:
+  whitelist_us_file: config/symbols/whitelist_us.yaml
+  whitelist_ar_file: config/symbols/whitelist_ar.yaml
+  whitelist_cedear_file: config/symbols/whitelist_cedear_D.yaml   # incluye PG/JNJ
+  whitelist_hedge_file: config/symbols/whitelist_hedge.yaml       # hedge de producción: GLD/WMT
+  inline_us: []
+  inline_ar: []
+  universe_selection:
+    enabled: false
+    rebalance_frequency: weekly
+    targets:
+      merval_top_n: 10
+      cedears_top_n: 20
+    volume_window_trading_days: 20
+    tiebreakers:
+      - avg_notional_desc
+      - symbol_asc
+    api_budget:
+      monthly_limit: 25000
+      soft_limit_pct: 0.8
+      max_calls_per_job: 2000
+
+risk:
+  max_notional_per_ticker_pct: 0.08
+  max_sector_pct: 0.25
+  max_daily_loss_short_pct: -0.02
+  max_daily_loss_long_pct: -0.015
+  max_daily_loss_total_pct: -0.03
+  max_monthly_loss_short_pct: -0.08
+  max_monthly_loss_long_pct: -0.06
+  max_monthly_loss_total_pct: -0.10
+  no_trade_first_minutes: 15
+  no_trade_last_minutes: 15
+  news_window_enabled: false
+  halt_on_data_quality: true
+  adv_min_shares_day: 500000
+  short_kill_switch_until: manual_reset
+  stop_loss:
+    atr_multiplier: 2.0
+    atr_lookback: 14
+    fallback_pct_us: -0.05
+    fallback_pct_ar: -0.08
+
+# Largo: 50/50 AR/global; PG/JNJ entran CHICOS (0,05), SPY/QQQ recuperan rally (0,15).
+long_term_engine:
+  drift_rebalance_threshold_pp: 2.0
+  drift_convention: per_line
+  rebalance_rule: first_ar_business_day_of_calendar_week
+  max_long_rebalance_turnover_pct: null
+  satellite_markets:
+    - AR
+  core_lines:
+    - symbol: GGAL
+      target_weight: 0.1667
+    - symbol: PAMP
+      target_weight: 0.1667
+    - symbol: TXAR
+      target_weight: 0.1666
+    - symbol: SPY
+      target_weight: 0.15
+    - symbol: QQQ
+      target_weight: 0.15
+    - symbol: KO
+      target_weight: 0.10
+    - symbol: PG
+      target_weight: 0.05
+    - symbol: JNJ
+      target_weight: 0.05
+  satellite_lines: []
+  satellite_limits:
+    max_satellite_weight_total: 0.20
+    max_weight_per_satellite_line: 0.15
+    max_satellite_names: 3
+
+# Hedge de PRODUCCIÓN (sin ampliar): GLD/WMT 50/50 + des-riesgo a cash.
+short_hedge:
+  enabled: true
+  mode: hedge_static
+  hedge_weight_total: 0.20
+  tactical_weight_total: 0.10
+  drift_rebalance_threshold_pp: 2.0
+  hedge_lines:
+    - symbol: GLD
+      target_weight: 0.50
+    - symbol: WMT
+      target_weight: 0.50
+  derisk_to_cash:
+    enabled: true
+    trigger: ar_factor_and_global_both_in_drawdown
+    ar_factor_drawdown_floor: -0.10
+    global_drawdown_floor: -0.10
+
+short_term_engine:
+  momentum_lookback_days: 20
+  liquidity_percentile_min: 0.60
+  volatility_20d_max: 0.04
+  top_k_per_market: 5
+  risk_budget_trade_pct: 0.005
+  rsi_lookback: 14
+  rsi_overbought_entry: 80.0
+  rsi_exit_threshold: 45.0
+  allow_leverage: false
+
+short_term_pre_gate:
+  enabled: true
+  walk_forward:
+    oos_trading_days: 12
+    step_trading_days: 10
+    min_oos_windows: 2
+  thresholds:
+    monthly_short_drawdown_floor: -0.25
+    max_fee_pct_of_initial_per_window: 0.05
+    max_turnover_annualized: 500.0
+
+markets:
+  US:
+    commission_bps_per_side: 1.0
+    slippage_bps: 2.0
+  AR:
+    commission_bps_per_side: 15.0
+    slippage_bps: 5.0
+
+logging:
+  level: INFO
+  structured: true
+
+data_providers:
+  us_ohlcv: placeholder_provider_us
+  ar_ohlcv: placeholder_provider_ar
+
+calendar:
+  source_of_truth: config/calendars/trading_days.v1.yaml
+  us_market_code: XNYS
+  ar_market_code: BYMA
+
+corporate_actions:
+  us_file: config/corporate_actions/us_actions.v1.yaml
+  supported_types:
+    - split
+    - dividend
+
+data_quality_confidence:
+  high:
+    min_n_observations: 60
+    max_imputed_pct: 2.0
+  medium:
+    min_n_observations: 20
+    max_imputed_pct: 5.0
+
+validation_wf:
+  lookback_trading_days: 90
+
+kpi_oos_gate:
+  enabled: true
+  walk_forward:
+    burn_in_trading_days: 252
+    oos_trading_days: 60
+    step_trading_days: 30
+    min_oos_windows: 1
+  aggregate:
+    rule: all
+  thresholds:
+    min_sharpe_annualized_total: 0.30
+    min_sortino_annualized_total: 0.40
+    max_drawdown_total_floor: -0.18
+    max_drawdown_short_floor: -0.10
+    max_drawdown_long_floor: -0.25
+    min_calmar_12m_long: null
+    max_mdd_12m_rolling_long_floor: null
+    max_turnover_long_monthly_last: 0.08
+    min_alpha_simple_return_total: -0.02
+
+ramp_stage: paper

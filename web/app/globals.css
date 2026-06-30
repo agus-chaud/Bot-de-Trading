@@ -643,6 +643,33 @@ body {
   border: 1px solid #ff4d4d;
 }
 
+/* Estado simple (semáforo + frase) — vista por defecto del usuario no técnico. */
+.thesis-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #c8ccd0);
+  text-align: right;
+}
+
+/* "Ver más": detalle técnico colapsado (progressive disclosure). */
+.thesis-more > summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--circuit-green, #76b900);
+  list-style: none;
+  user-select: none;
+}
+
+.thesis-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.thesis-more[open] > summary {
+  margin-bottom: 0.4rem;
+}
+
 .thesis-tech {
   font-size: 0.75rem;
   color: var(--text-muted);
@@ -676,6 +703,47 @@ body {
   font-size: 0.7rem;
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* Panel "¿Está todo en orden?" — riesgos como preguntas humanas + semáforo. */
+.health-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.health-item {
+  border: 1px solid var(--cool-grey);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+}
+
+.health-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.health-q {
+  flex: 1;
+  font-size: 0.9rem;
+}
+
+.health-a {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary, #c8ccd0);
+  white-space: nowrap;
+}
+
+.health-detail {
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  display: grid;
+  gap: 0.2rem;
 }
 
 /* --- Matriz de riesgo (mejora #4) --- */

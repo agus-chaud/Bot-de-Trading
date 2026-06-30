@@ -29,8 +29,6 @@ def generate_wf_windows(
     min_day = min(trading_days)
     max_day = max(trading_days)
 
-    trading_set = set(trading_days)
-
     def _add_months(y: int, m: int, months: int) -> tuple[int, int]:
         total = (m - 1) + months
         return y + total // 12, total % 12 + 1

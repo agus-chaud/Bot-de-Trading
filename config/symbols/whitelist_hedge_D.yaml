@@ -1,0 +1,21 @@
+# Canasta de cobertura AMPLIADA (experimento D) — plan_hedge_short Fase 0/1 (ADR-061/062/064).
+#
+# Variante de INVESTIGACIÓN: amplía la canasta de producción (GLD+WMT, ADR-064) sumando
+# dos defensivos que ya pasaron el criterio de Fase 1 (corr en crisis <= 0 vs GGAL/PAMP,
+# medida 2026-06-25 con scripts/measure_correlation.py --hedge):
+#   GLD (oro)               -0,28   (factor NO-equity, ancla)
+#   WMT (consumo defensivo) -0,38
+#   MCD (consumo defensivo) -0,34   <- NUEVO
+#   PFE (healthcare)        -0,21   <- NUEVO
+#
+# Diseño a-priori (pre-registrado, NO ajustado a resultados): GLD mantiene el 50% de ancla
+# (único factor no-equity); el 50% defensivo se reparte entre WMT/MCD/PFE en vez de
+# concentrarse en WMT. Pesos objetivo en config/policy.research_basket_D.v1.yaml.
+#
+# NO se toca config/symbols/whitelist_hedge.yaml (producción, ADR-064). Aislamiento.
+# Venue: XBUE (CEDEAR en pesos).
+hedge:
+  - GLD
+  - WMT
+  - MCD
+  - PFE

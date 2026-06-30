@@ -7,7 +7,6 @@ It measures imputed bars and calendar gaps across all whitelisted symbols.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import date
 from pathlib import Path
 

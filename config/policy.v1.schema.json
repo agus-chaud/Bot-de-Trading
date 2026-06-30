@@ -237,6 +237,16 @@
           "maximum": 1,
           "description": "Tope opcional a sum(|Δw|) al escalar el rebalanceo dentro del sleeve largo."
         },
+        "allow_cash": {
+          "type": "boolean",
+          "description": "Fase 1 (SDD long-cash-exposure): habilita que el sleeve largo mantenga cash (equity_exposure<1.0). Default false → 100% invertido, idéntico a producción."
+        },
+        "equity_exposure": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fracción del bucket largo invertida en equity (resto en cash). Solo aplica con allow_cash=true."
+        },
         "satellite_markets": {
           "type": "array",
           "minItems": 1,

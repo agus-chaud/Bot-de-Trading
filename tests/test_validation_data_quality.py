@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import MagicMock
 
-import pytest
 
 from data.schema import OHLCVRow
 from validation.stages.data_quality import run_data_quality_stage

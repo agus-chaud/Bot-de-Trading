@@ -15,6 +15,31 @@ const ALERT_COLORS: Record<string, string> = {
   ok: "#76b900",
 };
 
+// Postura técnica (stance) → semáforo + frase simple para el usuario no técnico.
+// El detalle (tendencia, momentum, factores) queda detrás de "Ver más".
+const STANCE_UI: Record<string, { level: string; text: string }> = {
+  Mantener: { level: "ok", text: "Viene bien — la mantenemos." },
+  Atención: { level: "warning", text: "Señales mezcladas — la vigilamos." },
+  Revisar: { level: "critical", text: "Viene en contra — la revisamos de cerca." },
+};
+
+// Riesgos como preguntas humanas (panel "¿Está todo en orden?"). El detalle técnico
+// (probabilidad / impacto / mitigación) queda detrás de "Ver más".
+const RISK_QUESTIONS: Record<string, string> = {
+  stale_market_data: "¿Los datos de mercado están al día?",
+  drawdown_kill_switch: "¿Las pérdidas están lejos del freno de emergencia?",
+  concentration: "¿La plata está bien repartida entre acciones?",
+  ingestion_failures: "¿Entran bien los precios todos los días?",
+  stale_position_quote: "¿Las posiciones tienen precio fresco?",
+};
+
+const RISK_ANSWER: Record<string, string> = {
+  ok: "Sí, todo en orden",
+  info: "Sí, todo en orden",
+  warning: "Más o menos, ojo",
+  critical: "No, atención",
+};
+
 function AlertIcon({ severity }: { severity: string }) {
   const stroke = ALERT_COLORS[severity] ?? ALERT_COLORS.info;
   return (
@@ -265,30 +290,35 @@ export function DashboardView({ initialData }: DashboardViewProps) {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Símbolo</th>
-                      <th>Bucket</th>
-                      <th className="num">Qty</th>
-                      <th className="num">Valor</th>
-                      <th className="num">PnL</th>
+                      <th>Acción</th>
+                      <th className="num">Cuántas</th>
+                      <th className="num">Compraste a</th>
+                      <th className="num">Vale hoy</th>
+                      <th className="num">Ganancia / Pérdida</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.positions.map((p) => (
-                      <tr key={`${p.symbol}-${p.bucket}`}>
-                        <td>
-                          {p.symbol}
-                          {p.stale ? " *" : ""}
-                        </td>
-                        <td>{p.bucket}</td>
-                        <td className="num">{fmtNum(p.qty, 4)}</td>
-                        <td className="num">{fmtMoney(p.market_value, ccy)}</td>
-                        <td
-                          className={`num ${p.unrealized_pnl >= 0 ? "side-buy" : "side-sell"}`}
-                        >
-                          {fmtMoney(p.unrealized_pnl, ccy)}
-                        </td>
-                      </tr>
-                    ))}
+                    {data.positions.map((p) => {
+                      // Precio actual por acción = valor total ÷ cantidad (guarda contra qty 0).
+                      const pricePerShareToday =
+                        p.qty ? p.market_value / p.qty : null;
+                      return (
+                        <tr key={`${p.symbol}-${p.bucket}`}>
+                          <td>
+                            {p.symbol}
+                            {p.stale ? " *" : ""}
+                          </td>
+                          <td className="num">{fmtNum(p.qty, 4)}</td>
+                          <td className="num">{fmtMoney(p.avg_cost, ccy)}</td>
+                          <td className="num">{fmtMoney(pricePerShareToday, ccy)}</td>
+                          <td
+                            className={`num ${p.unrealized_pnl >= 0 ? "side-buy" : "side-sell"}`}
+                          >
+                            {fmtMoney(p.unrealized_pnl, ccy)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -365,38 +395,44 @@ export function DashboardView({ initialData }: DashboardViewProps) {
                 <span className="panel-meta">{theses.length}</span>
               </div>
               <div className="thesis-list">
-                {theses.map((t) => (
-                  <article key={`${t.symbol}-${t.bucket}`} className="thesis-card">
-                    <div className="thesis-head">
-                      <span className="thesis-symbol">
-                        {t.symbol}
-                        <span className={`thesis-side ${t.side}`}>{t.side}</span>
-                      </span>
-                      <span className={`thesis-stance ${t.stance.toLowerCase()}`}>{t.stance}</span>
-                    </div>
-                    <div className="thesis-tech">
-                      Tendencia {t.technical.trend}
-                      {t.technical.momentum_pct != null
-                        ? ` · momentum ${fmtPct(t.technical.momentum_pct)}`
-                        : ""}
-                      {t.unrealized_pnl_pct != null
-                        ? ` · PnL ${fmtPct(t.unrealized_pnl_pct)}`
-                        : ""}
-                    </div>
-                    <ul className="thesis-factors">
-                      {t.bull.map((b, i) => (
-                        <li key={`bull-${i}`} className="thesis-factor bull">
-                          ▲ {b}
-                        </li>
-                      ))}
-                      {t.bear.map((b, i) => (
-                        <li key={`bear-${i}`} className="thesis-factor bear">
-                          ▼ {b}
-                        </li>
-                      ))}
-                    </ul>
-                  </article>
-                ))}
+                {theses.map((t) => {
+                  const ui = STANCE_UI[t.stance] ?? { level: "info", text: t.stance };
+                  return (
+                    <article key={`${t.symbol}-${t.bucket}`} className="thesis-card">
+                      <div className="thesis-head">
+                        <span className="thesis-symbol">{t.symbol}</span>
+                        <span className="thesis-status">
+                          <span className={`risk-dot ${ui.level}`} />
+                          {ui.text}
+                        </span>
+                      </div>
+                      <details className="thesis-more">
+                        <summary>Ver más</summary>
+                        <div className="thesis-tech">
+                          Tendencia {t.technical.trend}
+                          {t.technical.momentum_pct != null
+                            ? ` · momentum ${fmtPct(t.technical.momentum_pct)}`
+                            : ""}
+                          {t.unrealized_pnl_pct != null
+                            ? ` · variación ${fmtPct(t.unrealized_pnl_pct)}`
+                            : ""}
+                        </div>
+                        <ul className="thesis-factors">
+                          {t.bull.map((b, i) => (
+                            <li key={`bull-${i}`} className="thesis-factor bull">
+                              ▲ {b}
+                            </li>
+                          ))}
+                          {t.bear.map((b, i) => (
+                            <li key={`bear-${i}`} className="thesis-factor bear">
+                              ▼ {b}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    </article>
+                  );
+                })}
               </div>
               <div className="thesis-note">
                 Tesis derivada de mercado + estado de la posición (no del razonamiento del motor).
@@ -407,36 +443,36 @@ export function DashboardView({ initialData }: DashboardViewProps) {
           {riskMatrix.length > 0 && (
             <section className="card panel risk-matrix-panel">
               <div className="panel-header">
-                <h2>Matriz de riesgo</h2>
+                <h2>¿Está todo en orden?</h2>
               </div>
-              <div className="table-wrap">
-                <table className="data-table risk-matrix-table">
-                  <thead>
-                    <tr>
-                      <th>Riesgo</th>
-                      <th>Prob.</th>
-                      <th>Impacto</th>
-                      <th>Mitigación</th>
-                      <th>Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {riskMatrix.map((r) => (
-                      <tr key={r.code}>
-                        <td>
-                          <span className={`risk-dot ${r.severity}`} /> {r.title}
-                        </td>
-                        <td>
-                          <span className={`prob-pill prob-${r.probability}`}>{r.probability}</span>
-                        </td>
-                        <td className="risk-impact">{r.impact}</td>
-                        <td className="risk-mitigation">{r.mitigation}</td>
-                        <td className="risk-status">{r.status}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ul className="health-list">
+                {riskMatrix.map((r) => (
+                  <li key={r.code} className="health-item">
+                    <div className="health-row">
+                      <span className={`risk-dot ${r.severity}`} />
+                      <span className="health-q">{RISK_QUESTIONS[r.code] ?? r.title}</span>
+                      <span className="health-a">{RISK_ANSWER[r.severity] ?? r.status}</span>
+                    </div>
+                    <details className="thesis-more">
+                      <summary>Ver más</summary>
+                      <div className="health-detail">
+                        <div>
+                          <strong>Qué es:</strong> {r.title}
+                        </div>
+                        <div>
+                          <strong>Estado hoy:</strong> {r.status}
+                        </div>
+                        <div>
+                          <strong>Si pasara:</strong> {r.impact}
+                        </div>
+                        <div>
+                          <strong>Cómo lo cuidamos:</strong> {r.mitigation}
+                        </div>
+                      </div>
+                    </details>
+                  </li>
+                ))}
+              </ul>
             </section>
           )}
         </main>

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import statistics
-from datetime import date, timedelta
+from datetime import date
 from typing import NamedTuple
 
 from data.schema import OHLCVRow
@@ -175,7 +175,6 @@ def _forward_fill(rows: list[OHLCVRow], calendar: set[date]) -> list[OHLCVRow]:
             continue
 
         # Found a gap — find how many consecutive missing calendar days follow.
-        gap_start = i
         gap_dates: list[date] = []
         while i < len(relevant_cal) and relevant_cal[i] not in row_by_date:
             gap_dates.append(relevant_cal[i])

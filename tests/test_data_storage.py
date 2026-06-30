@@ -10,7 +10,7 @@ import sqlite3
 
 from core_sim.ledger import PortfolioLedger
 from data.schema import CorporateActionRow, OHLCVRow, PortfolioMeta
-from data.storage import KillSwitchState, MarketDB, PortfolioMetaConflictError
+from data.storage import MarketDB, PortfolioMetaConflictError
 
 
 @pytest.fixture
@@ -580,7 +580,6 @@ class TestReplayLedgerFromFills:
 class TestLongTermRunnerDbParam:
     def test_create_backtester_without_db_param_still_works(self, tmp_path):
         from pathlib import Path
-        from unittest.mock import MagicMock
         import yaml
         from core_sim.long_term_monthly_runner import create_long_term_monthly_backtester
         from core_sim.ledger import PortfolioLedger

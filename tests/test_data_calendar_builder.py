@@ -57,7 +57,6 @@ class TestBuildCalendar:
 
     def test_should_be_idempotent_on_repeated_calls(self, db):
         us_days = [date(2024, 1, 15)]
-        ar_days = [date(2024, 1, 15)]
 
         with patch("data.calendar_builder.mcal") as mock_mcal:
             mock_mcal.get_calendar.return_value = _make_mock_calendar(us_days)
