@@ -705,6 +705,47 @@ body {
   font-style: italic;
 }
 
+/* Panel "¿Está todo en orden?" — riesgos como preguntas humanas + semáforo. */
+.health-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.health-item {
+  border: 1px solid var(--cool-grey);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+}
+
+.health-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.health-q {
+  flex: 1;
+  font-size: 0.9rem;
+}
+
+.health-a {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary, #c8ccd0);
+  white-space: nowrap;
+}
+
+.health-detail {
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  display: grid;
+  gap: 0.2rem;
+}
+
 /* --- Matriz de riesgo (mejora #4) --- */
 .risk-matrix-table th,
 .risk-matrix-table td {

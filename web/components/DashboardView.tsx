@@ -23,6 +23,23 @@ const STANCE_UI: Record<string, { level: string; text: string }> = {
   Revisar: { level: "critical", text: "Viene en contra — la revisamos de cerca." },
 };
 
+// Riesgos como preguntas humanas (panel "¿Está todo en orden?"). El detalle técnico
+// (probabilidad / impacto / mitigación) queda detrás de "Ver más".
+const RISK_QUESTIONS: Record<string, string> = {
+  stale_market_data: "¿Los datos de mercado están al día?",
+  drawdown_kill_switch: "¿Las pérdidas están lejos del freno de emergencia?",
+  concentration: "¿La plata está bien repartida entre acciones?",
+  ingestion_failures: "¿Entran bien los precios todos los días?",
+  stale_position_quote: "¿Las posiciones tienen precio fresco?",
+};
+
+const RISK_ANSWER: Record<string, string> = {
+  ok: "Sí, todo en orden",
+  info: "Sí, todo en orden",
+  warning: "Más o menos, ojo",
+  critical: "No, atención",
+};
+
 function AlertIcon({ severity }: { severity: string }) {
   const stroke = ALERT_COLORS[severity] ?? ALERT_COLORS.info;
   return (
@@ -426,36 +443,36 @@ export function DashboardView({ initialData }: DashboardViewProps) {
           {riskMatrix.length > 0 && (
             <section className="card panel risk-matrix-panel">
               <div className="panel-header">
-                <h2>Matriz de riesgo</h2>
+                <h2>¿Está todo en orden?</h2>
               </div>
-              <div className="table-wrap">
-                <table className="data-table risk-matrix-table">
-                  <thead>
-                    <tr>
-                      <th>Riesgo</th>
-                      <th>Prob.</th>
-                      <th>Impacto</th>
-                      <th>Mitigación</th>
-                      <th>Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {riskMatrix.map((r) => (
-                      <tr key={r.code}>
-                        <td>
-                          <span className={`risk-dot ${r.severity}`} /> {r.title}
-                        </td>
-                        <td>
-                          <span className={`prob-pill prob-${r.probability}`}>{r.probability}</span>
-                        </td>
-                        <td className="risk-impact">{r.impact}</td>
-                        <td className="risk-mitigation">{r.mitigation}</td>
-                        <td className="risk-status">{r.status}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ul className="health-list">
+                {riskMatrix.map((r) => (
+                  <li key={r.code} className="health-item">
+                    <div className="health-row">
+                      <span className={`risk-dot ${r.severity}`} />
+                      <span className="health-q">{RISK_QUESTIONS[r.code] ?? r.title}</span>
+                      <span className="health-a">{RISK_ANSWER[r.severity] ?? r.status}</span>
+                    </div>
+                    <details className="thesis-more">
+                      <summary>Ver más</summary>
+                      <div className="health-detail">
+                        <div>
+                          <strong>Qué es:</strong> {r.title}
+                        </div>
+                        <div>
+                          <strong>Estado hoy:</strong> {r.status}
+                        </div>
+                        <div>
+                          <strong>Si pasara:</strong> {r.impact}
+                        </div>
+                        <div>
+                          <strong>Cómo lo cuidamos:</strong> {r.mitigation}
+                        </div>
+                      </div>
+                    </details>
+                  </li>
+                ))}
+              </ul>
             </section>
           )}
         </main>
