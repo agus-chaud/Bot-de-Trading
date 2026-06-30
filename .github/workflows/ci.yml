@@ -25,5 +25,8 @@ jobs:
         run: |
           pip install mypy==2.1.0
           mypy core_sim data
-      - name: Run tests with coverage (core_sim)
-        run: python -m pytest tests/ -v --cov=core_sim --cov-report=term-missing --cov-fail-under=80
+      - name: Run tests with coverage (módulos críticos)
+        # Gate scoped a lo crítico: motores (core_sim) + pipeline de datos (data) +
+        # orquestador live (run_paper_live). NO incluye scripts utilitarios (one-off,
+        # muchos al 0%) para no envenenar el promedio. Combinado actual ~90% → piso 85.
+        run: python -m pytest tests/ -v --cov=core_sim --cov=data --cov=scripts.run_paper_live --cov-report=term-missing --cov-fail-under=85
