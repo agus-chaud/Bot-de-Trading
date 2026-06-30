@@ -265,30 +265,35 @@ export function DashboardView({ initialData }: DashboardViewProps) {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Símbolo</th>
-                      <th>Bucket</th>
-                      <th className="num">Qty</th>
-                      <th className="num">Valor</th>
-                      <th className="num">PnL</th>
+                      <th>Acción</th>
+                      <th className="num">Cuántas</th>
+                      <th className="num">Compraste a</th>
+                      <th className="num">Vale hoy</th>
+                      <th className="num">Ganancia / Pérdida</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.positions.map((p) => (
-                      <tr key={`${p.symbol}-${p.bucket}`}>
-                        <td>
-                          {p.symbol}
-                          {p.stale ? " *" : ""}
-                        </td>
-                        <td>{p.bucket}</td>
-                        <td className="num">{fmtNum(p.qty, 4)}</td>
-                        <td className="num">{fmtMoney(p.market_value, ccy)}</td>
-                        <td
-                          className={`num ${p.unrealized_pnl >= 0 ? "side-buy" : "side-sell"}`}
-                        >
-                          {fmtMoney(p.unrealized_pnl, ccy)}
-                        </td>
-                      </tr>
-                    ))}
+                    {data.positions.map((p) => {
+                      // Precio actual por acción = valor total ÷ cantidad (guarda contra qty 0).
+                      const pricePerShareToday =
+                        p.qty ? p.market_value / p.qty : null;
+                      return (
+                        <tr key={`${p.symbol}-${p.bucket}`}>
+                          <td>
+                            {p.symbol}
+                            {p.stale ? " *" : ""}
+                          </td>
+                          <td className="num">{fmtNum(p.qty, 4)}</td>
+                          <td className="num">{fmtMoney(p.avg_cost, ccy)}</td>
+                          <td className="num">{fmtMoney(pricePerShareToday, ccy)}</td>
+                          <td
+                            className={`num ${p.unrealized_pnl >= 0 ? "side-buy" : "side-sell"}`}
+                          >
+                            {fmtMoney(p.unrealized_pnl, ccy)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
