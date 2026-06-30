@@ -15,6 +15,14 @@ const ALERT_COLORS: Record<string, string> = {
   ok: "#76b900",
 };
 
+// Postura técnica (stance) → semáforo + frase simple para el usuario no técnico.
+// El detalle (tendencia, momentum, factores) queda detrás de "Ver más".
+const STANCE_UI: Record<string, { level: string; text: string }> = {
+  Mantener: { level: "ok", text: "Viene bien — la mantenemos." },
+  Atención: { level: "warning", text: "Señales mezcladas — la vigilamos." },
+  Revisar: { level: "critical", text: "Viene en contra — la revisamos de cerca." },
+};
+
 function AlertIcon({ severity }: { severity: string }) {
   const stroke = ALERT_COLORS[severity] ?? ALERT_COLORS.info;
   return (
@@ -370,38 +378,44 @@ export function DashboardView({ initialData }: DashboardViewProps) {
                 <span className="panel-meta">{theses.length}</span>
               </div>
               <div className="thesis-list">
-                {theses.map((t) => (
-                  <article key={`${t.symbol}-${t.bucket}`} className="thesis-card">
-                    <div className="thesis-head">
-                      <span className="thesis-symbol">
-                        {t.symbol}
-                        <span className={`thesis-side ${t.side}`}>{t.side}</span>
-                      </span>
-                      <span className={`thesis-stance ${t.stance.toLowerCase()}`}>{t.stance}</span>
-                    </div>
-                    <div className="thesis-tech">
-                      Tendencia {t.technical.trend}
-                      {t.technical.momentum_pct != null
-                        ? ` · momentum ${fmtPct(t.technical.momentum_pct)}`
-                        : ""}
-                      {t.unrealized_pnl_pct != null
-                        ? ` · PnL ${fmtPct(t.unrealized_pnl_pct)}`
-                        : ""}
-                    </div>
-                    <ul className="thesis-factors">
-                      {t.bull.map((b, i) => (
-                        <li key={`bull-${i}`} className="thesis-factor bull">
-                          ▲ {b}
-                        </li>
-                      ))}
-                      {t.bear.map((b, i) => (
-                        <li key={`bear-${i}`} className="thesis-factor bear">
-                          ▼ {b}
-                        </li>
-                      ))}
-                    </ul>
-                  </article>
-                ))}
+                {theses.map((t) => {
+                  const ui = STANCE_UI[t.stance] ?? { level: "info", text: t.stance };
+                  return (
+                    <article key={`${t.symbol}-${t.bucket}`} className="thesis-card">
+                      <div className="thesis-head">
+                        <span className="thesis-symbol">{t.symbol}</span>
+                        <span className="thesis-status">
+                          <span className={`risk-dot ${ui.level}`} />
+                          {ui.text}
+                        </span>
+                      </div>
+                      <details className="thesis-more">
+                        <summary>Ver más</summary>
+                        <div className="thesis-tech">
+                          Tendencia {t.technical.trend}
+                          {t.technical.momentum_pct != null
+                            ? ` · momentum ${fmtPct(t.technical.momentum_pct)}`
+                            : ""}
+                          {t.unrealized_pnl_pct != null
+                            ? ` · variación ${fmtPct(t.unrealized_pnl_pct)}`
+                            : ""}
+                        </div>
+                        <ul className="thesis-factors">
+                          {t.bull.map((b, i) => (
+                            <li key={`bull-${i}`} className="thesis-factor bull">
+                              ▲ {b}
+                            </li>
+                          ))}
+                          {t.bear.map((b, i) => (
+                            <li key={`bear-${i}`} className="thesis-factor bear">
+                              ▼ {b}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    </article>
+                  );
+                })}
               </div>
               <div className="thesis-note">
                 Tesis derivada de mercado + estado de la posición (no del razonamiento del motor).
