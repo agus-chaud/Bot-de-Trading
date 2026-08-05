@@ -4,8 +4,8 @@
     "currency": "ARS",
     "starting_cash": 1000000.0,
     "inception_date": "2026-06-09",
-    "last_trading_day": "2026-08-03",
-    "equity_total": 1002108.3956557541,
+    "last_trading_day": "2026-08-04",
+    "equity_total": 1003699.8947554856,
     "num_open_positions": 3
   },
   "data_freshness": {
@@ -376,6 +376,15 @@
       "cash": 677039.6954757004,
       "mv_us": 0.0,
       "mv_ar": 0.0
+    },
+    {
+      "date": "2026-08-04",
+      "equity_total": 1003699.8947554856,
+      "equity_short": 3699.894755485526,
+      "equity_long": 1000000.0,
+      "cash": 677039.6954757004,
+      "mv_us": 0.0,
+      "mv_ar": 0.0
     }
   ],
   "positions": [
@@ -385,8 +394,8 @@
       "avg_cost": 11647.692307692309,
       "market": "AR",
       "bucket": "short",
-      "market_value": 153270.0,
-      "unrealized_pnl": 1849.999999999989,
+      "market_value": 154050.0,
+      "unrealized_pnl": 2629.999999999989,
       "stale": false
     },
     {
@@ -395,8 +404,8 @@
       "avg_cost": 9795.0,
       "market": "AR",
       "bucket": "short",
-      "market_value": 146175.0,
-      "unrealized_pnl": -750.0,
+      "market_value": 147075.0,
+      "unrealized_pnl": 150.0,
       "stale": false
     },
     {
@@ -405,8 +414,8 @@
       "avg_cost": 81.33999633789062,
       "market": "US",
       "bucket": "short",
-      "market_value": 25623.70018005371,
-      "unrealized_pnl": 1628.4012603759766,
+      "market_value": 25535.199279785156,
+      "unrealized_pnl": 1539.9003601074219,
       "stale": false
     }
   ],
@@ -476,7 +485,7 @@
       "max_daily_loss_short_pct": -0.02
     },
     "latest_snapshot": {
-      "trading_day": "2026-08-03",
+      "trading_day": "2026-08-04",
       "short_monthly_drawdown": 0.0,
       "short_daily_return": 0.0,
       "num_fills_today": 0,
@@ -486,7 +495,7 @@
       {
         "level": "info",
         "code": "no_fills_today",
-        "message": "Sin fills el 2026-08-03 (guardrails, sin señal, o semi_auto pendiente)"
+        "message": "Sin fills el 2026-08-04 (guardrails, sin señal, o semi_auto pendiente)"
       }
     ]
   },
@@ -544,18 +553,18 @@
       "market": "AR",
       "side": "short",
       "qty": 13.0,
-      "market_value": 153270.0,
-      "unrealized_pnl": 1849.999999999989,
-      "unrealized_pnl_pct": 0.012217672698454557,
+      "market_value": 154050.0,
+      "unrealized_pnl": 2629.999999999989,
+      "unrealized_pnl_pct": 0.01736890767401921,
       "stance": "Mantener",
       "technical": {
         "trend": "lateral",
-        "momentum_pct": -0.01831806827643634,
-        "vs_sma_pct": 0.0019971954276973847,
-        "last_close": 11790.0
+        "momentum_pct": -0.004201680672268893,
+        "vs_sma_pct": 0.007781604796530228,
+        "last_close": 11850.0
       },
       "bull": [
-        "PnL no realizado +1.2%"
+        "PnL no realizado +1.7%"
       ],
       "bear": []
     },
@@ -565,20 +574,20 @@
       "market": "AR",
       "side": "short",
       "qty": 15.0,
-      "market_value": 146175.0,
-      "unrealized_pnl": -750.0,
-      "unrealized_pnl_pct": -0.005104645227156712,
-      "stance": "Revisar",
+      "market_value": 147075.0,
+      "unrealized_pnl": 150.0,
+      "unrealized_pnl_pct": 0.0010209290454313426,
+      "stance": "Mantener",
       "technical": {
         "trend": "lateral",
-        "momentum_pct": -0.003069053708439906,
-        "vs_sma_pct": -0.008268668108383115,
-        "last_close": 9745.0
+        "momentum_pct": -0.011094301563287945,
+        "vs_sma_pct": -0.002314873699473474,
+        "last_close": 9805.0
       },
-      "bull": [],
-      "bear": [
-        "PnL no realizado -0.5%"
-      ]
+      "bull": [
+        "PnL no realizado +0.1%"
+      ],
+      "bear": []
     },
     {
       "symbol": "KO",
@@ -586,18 +595,18 @@
       "market": "US",
       "side": "short",
       "qty": 295.0,
-      "market_value": 25623.70018005371,
-      "unrealized_pnl": 1628.4012603759766,
-      "unrealized_pnl_pct": 0.06786334547558312,
+      "market_value": 25535.199279785156,
+      "unrealized_pnl": 1539.9003601074219,
+      "unrealized_pnl_pct": 0.06417508551412968,
       "stance": "Atención",
       "technical": {
         "trend": "alcista",
-        "momentum_pct": 0.03343245040530651,
-        "vs_sma_pct": 0.031652726631406614,
-        "last_close": 86.86000061035156
+        "momentum_pct": 0.03788963998680872,
+        "vs_sma_pct": 0.026559360362297113,
+        "last_close": 86.55999755859375
       },
       "bull": [
-        "PnL no realizado +6.8%"
+        "PnL no realizado +6.4%"
       ],
       "bear": [
         "Precio en tendencia alcista (en contra del short)"
@@ -606,35 +615,35 @@
   ],
   "kpis": {
     "status": "ok",
-    "n_days": 40,
-    "sharpe_annualized": 0.274018586867878,
+    "n_days": 41,
+    "sharpe_annualized": 0.4528456853660198,
     "sharpe_na_reason": null,
-    "sortino_annualized": 0.3974090523202851,
+    "sortino_annualized": 0.6498855635635532,
     "max_drawdown": -0.013679040119996433,
-    "net_return_annualized": 0.0137571753540362,
-    "calmar_total": 1.0057120407100455,
+    "net_return_annualized": 0.02359325094996101,
+    "calmar_total": 1.7247738688529528,
     "calmar_12m_long": null,
     "calmar_12m_na_reason": "insufficient_history",
     "hit_rate": null,
     "profit_factor": null,
     "ts_start": "2026-06-09",
-    "ts_end": "2026-08-03"
+    "ts_end": "2026-08-04"
   },
   "alerts": [
     {
       "severity": "warning",
       "code": "missing_run_days",
       "title": "Días de mercado sin corrida",
-      "detail": "Último snapshot 2026-08-03; sin procesar: 2026-08-04"
+      "detail": "Último snapshot 2026-08-04; sin procesar: 2026-08-05"
     },
     {
       "severity": "info",
       "code": "idle_with_positions",
       "title": "Día sin operaciones con posiciones abiertas",
-      "detail": "2026-08-03: 0 fills pero 3 posiciones abiertas."
+      "detail": "2026-08-04: 0 fills pero 3 posiciones abiertas."
     }
   ],
-  "generated_at": "2026-08-04T12:22:34.023031+00:00",
+  "generated_at": "2026-08-05T12:20:30.977345+00:00",
   "export_version": "1",
   "export_source": {
     "db_path": "data/market.db",
