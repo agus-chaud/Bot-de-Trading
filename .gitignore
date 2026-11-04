@@ -90,3 +90,6 @@ defensa_bot_trading.pptx
 skills-lock.json
 scripts/build_defensa_pptx.py
 .vercel
+.gstack/
+.atl/
+web/*.tsbuildinfo
